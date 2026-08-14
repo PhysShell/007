@@ -28,7 +28,9 @@ import argparse
 import collections
 import hashlib
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -53,6 +55,237 @@ ORIGINAL_BLOB = "450380ff0d1f8ec08f783968f08bc6b3942f44a5"
 PIN_HISTORY: list[dict[str, str]] = []
 
 PIN_FIELDS = ("old_blob", "new_blob", "superseding_authority")
+
+# The locator's three fields. `blob` is the ONLY identity: a blob does not
+# contain its own path, so proving `path_hint -> blob` would need a commit and a
+# tree as well. `path_hint` is therefore named for what it is — a hint to a
+# human — rather than dressed as a coordinate this layer can check. `anchor`
+# selects a place inside the immutable bytes.
+AUTHORITY_REF_FIELDS = ("blob", "path_hint", "anchor")
+
+_OID = re.compile(r"[0-9a-f]{40}")
+
+
+# The guard that makes "local only" true rather than assumed. In a partial clone
+# (`remote.<name>.promisor=true`, e.g. `--filter=blob:none`) `git cat-file` will
+# LAZILY FETCH a promised object it does not have. GIT_TERMINAL_PROMPT only
+# suppresses credential prompting; it does not stop that fetch.
+#
+# Demonstrated, not assumed — against a local file:// promisor remote, asking for
+# a blob genuinely absent from the object database:
+#
+#     without the guard   local-before=0   cat-file -t -> "blob"   (fetched)
+#     with the guard      local-before=0   fatal: could not fetch …
+#
+# This matters precisely for `old_blob`, the half of a re-pin record that proves
+# provenance: after a supersede it is exactly the object that has left the tree.
+#
+# `GIT_NO_REPLACE_OBJECTS=1` is the third guard, and it defends a different
+# thing: not *where* git looks, but *what it hands back for a given name*. A
+# `refs/replace/<oid>` ref makes `cat-file` return substitute bytes for the
+# requested oid, silently and for both the type and the content query.
+# Demonstrated:
+#
+#     git replace -f <authentic> <forged>
+#     cat-file blob <authentic>                    -> "FORGED AUTHORITY …"
+#     GIT_NO_REPLACE_OBJECTS=1 cat-file blob <..>  -> "AUTHENTIC AUTHORITY …"
+#
+# That is `blob` ceasing to be the identity of anything, which is the single
+# assumption §2.5.1 rests on. Replace refs do not arrive over a default clone
+# or fetch — verified — so the reach is a local checkout, i.e. exactly the
+# reach of an ambient environment variable, and exactly the threat this layer
+# is about.
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
+           "GIT_NO_REPLACE_OBJECTS": "1"}
+
+# The child environment is CONSTRUCTED, not inherited. Copying `os.environ`
+# wholesale made 135 ambient variables part of this extractor's input surface
+# without declaring any of them, and two separate hazards rode on that — both
+# demonstrated before this allowlist was written, neither assumed:
+#
+#   1. Credential widening. `ARLIAI_API_KEY`, exported in the shell that runs
+#      the extractor, reached both `git cat-file` processes. AGENTS.md
+#      invariant 1 rules that any new process able to read that key is a P0.
+#      Object lookup needs no credential at all.
+#   2. Object-store redirection. With `GIT_ALTERNATE_OBJECT_DIRECTORIES` set
+#      ambiently, `git -C <repo> cat-file` answers with objects that are NOT in
+#      <repo>: a blob written only into an unrelated repository resolved, and
+#      its bytes came back. `GIT_DIR` and `GIT_OBJECT_DIRECTORY` are the same
+#      hazard spelled differently. That makes *which bytes answer a provenance
+#      question* a choice of whoever invokes the extractor — the one property
+#      this layer exists to hold.
+#
+# Hazard 2 is why this is an allowlist and not a denylist of credential names:
+# a denylist strips the names someone remembered, and the redirection family is
+# open-ended in exactly that way. `HOME` is passed so git can read the global
+# config where CI records `safe.directory`; it cannot add an object directory.
+# Nothing else is inherited.
+GIT_ENV_ALLOW = ("HOME",)
+
+# `PATH` is NOT among them, and that is a third hazard rather than tidiness.
+# While it was inherited, this module ran the unqualified command `git`, so the
+# executable that reported the bytes was chosen by whoever set `PATH`.
+# Demonstrated: a counterfeit `git` first on `PATH`, printing the genuine
+# published blob, made `_local_object(PINNED_BLOB, repo=Path("/nonexistent"))`
+# return 159462 bytes that satisfy the object-id check — for a repository that
+# does not exist. Recomputing the id proves the bytes match the name; it cannot
+# prove they came from an object database, because the process reporting them
+# was the caller's.
+#
+# The gate's preflight is what gives this teeth: it spawns this extractor with
+# `sys.executable`, an absolute path, so in that call the interpreter is trusted
+# while `git` was not. Git is therefore looked up in a pinned list of absolute
+# locations, and the child's `PATH` is set to the directory that answered —
+# never inherited, and never silently falling back to `PATH` when none matches,
+# since a silent fallback would restore exactly the hole it is closing.
+GIT_CANDIDATES = ("/usr/bin/git", "/bin/git",
+                  "/usr/local/bin/git", "/opt/homebrew/bin/git")
+
+
+def _git_binary() -> str:
+    """Resolve git from GIT_CANDIDATES. Never from `PATH`, never via `which`."""
+    for path in GIT_CANDIDATES:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    raise ExtractDefect(
+        "NO TRUSTED GIT — none of " + ", ".join(GIT_CANDIDATES) + " is "
+        "executable. This is not a reason to fall back to `PATH`: an object "
+        "lookup answered by a caller-selected executable is not evidence. If "
+        "git lives elsewhere here, that is a declared configuration change to "
+        "GIT_CANDIDATES, not something this resolver may guess.")
+
+
+def _git_env() -> dict[str, str]:
+    """Build git's environment from GIT_ENV_ALLOW plus GIT_ENV. Never inherit."""
+    env = {name: os.environ[name] for name in GIT_ENV_ALLOW if name in os.environ}
+    env["PATH"] = str(Path(_git_binary()).parent)
+    env.update(GIT_ENV)
+    return env
+
+
+def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
+    """Look the object up in the LOCAL object database, without fetching.
+
+    A deterministic extractor that occasionally goes to the internet for proof
+    of its own authority would be an elegant way to lose the whole property —
+    and until EB-R1's review this docstring claimed that outcome was impossible
+    while the code permitted it in any partial clone. The claim is now enforced
+    by GIT_ENV rather than asserted.
+
+    "Local" is a claim about an object database, so it is also false if the
+    caller gets to choose which database that is; `_git_env` is what keeps the
+    answer a property of `repo`.
+
+    And the returned bytes are CHECKED AGAINST THE NAME THEY WERE ASKED FOR.
+    Each guard in GIT_ENV closes one way git can answer with something other
+    than the cited object, and each was found one at a time, by a reviewer,
+    after the previous one shipped. Recomputing the object id closes the
+    *family*: whatever mechanism substitutes bytes — a replacement ref, an
+    alternate object store, a future feature nobody here has read about — the
+    substitute does not hash to the name. This is the E-R10 criterion applied
+    to the extractor itself: the check is as discriminating as the distinction
+    it enforces, instead of enumerating the ways the distinction can be lost.
+    """
+    env, git = _git_env(), _git_binary()
+    kind = subprocess.run([git, "-C", str(repo), "cat-file", "-t", oid],
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", env=env)
+    if kind.returncode != 0:
+        return None
+    kind = kind.stdout.strip()
+    body = subprocess.run([git, "-C", str(repo), "cat-file", kind, oid],
+                          capture_output=True, env=env)
+    # Not a locator defect and not "unresolvable": git answered, and answered
+    # with bytes that are not the object asked for. No verdict computed on top
+    # of this checkout would mean anything, so it aborts rather than returning
+    # a value some caller might treat as merely absent.
+    got = hashlib.sha1(b"%s %d\0" % (kind.encode(), len(body.stdout))
+                       + body.stdout).hexdigest()
+    _require(got == oid,
+             f"OBJECT IDENTITY VIOLATED — asked git for {oid} and got bytes "
+             f"hashing to {got} ({kind}, {len(body.stdout)} bytes). This "
+             f"checkout substitutes object contents; nothing derived from it "
+             f"is evidence of anything. Do NOT re-pin, and do NOT edit the "
+             f"locator: the locator is the one part known to be intact.")
+    return kind, body.stdout
+
+
+def authority_ref_defect(ref: object) -> str | None:
+    """Can the cited bytes, and a place within them, be identified? Nothing else.
+
+    This is REFERENTIAL validation. It answers exactly one question:
+
+        can I identify exactly the cited bytes, and one location inside them?
+
+    It NEVER answers:
+
+        do those bytes authorize the re-pin?
+
+    So it deliberately does not check that the anchor says "supersede", that
+    `blob` equals the entry's `new_blob`, that `path_hint` names the blob in any
+    tree, that `old_blob` was legitimately superseded, or that `new_blob` is
+    legitimate authority. Adding any one of those would put a small self-
+    appointed lawyer inside this extractor, which is the layer violation §2.5
+    exists to prevent — and the reason a *resolvable but normatively meaningless*
+    anchor is required to PASS.
+
+    Two failure states are distinguished, because conflating them would have
+    this resolver lie about provenance in the course of improving it:
+
+        MALFORMED LOCATOR          shape, oid syntax, object type, encoding
+        UNRESOLVABLE IN THIS       the oid is well-formed and git cannot supply
+        CHECKOUT                   the object locally
+
+    The second does NOT mean the object is absent from the repository. Under the
+    shallow clone CI uses by default, a perfectly real historical blob is simply
+    not here, and proving absence would require the network.
+    """
+    if not isinstance(ref, dict):
+        return (f"MALFORMED LOCATOR — superseding_authority is "
+                f"{type(ref).__name__}, expected an object")
+    missing = [f for f in AUTHORITY_REF_FIELDS if f not in ref]
+    extra = sorted(k for k in ref if k not in AUTHORITY_REF_FIELDS)
+    if missing or extra:
+        return (f"MALFORMED LOCATOR — fields missing={missing} unexpected={extra}; "
+                f"expected exactly {list(AUTHORITY_REF_FIELDS)}")
+    bad_type = [f for f in AUTHORITY_REF_FIELDS
+                if not isinstance(ref[f], str) or not ref[f]]
+    if bad_type:
+        return f"MALFORMED LOCATOR — {bad_type} must be non-empty strings"
+    if not _OID.fullmatch(ref["blob"]):
+        return (f"MALFORMED LOCATOR — blob {ref['blob']!r} is not a 40-character "
+                "hex object id")
+
+    found = _local_object(ref["blob"])
+    if found is None:
+        return (f"UNRESOLVABLE IN THIS CHECKOUT — object {ref['blob']} is not in "
+                "the local object database. This does NOT assert the object is "
+                "absent from the repository; establishing that would need the "
+                "network, which this extractor never uses.")
+    kind, raw = found
+    if kind != "blob":
+        return f"MALFORMED LOCATOR — {ref['blob']} is a {kind}, not a blob"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return f"MALFORMED LOCATOR — blob {ref['blob']} is not valid UTF-8"
+
+    # OVERLAPPING start positions, not `str.count`. "exactly once" is a claim
+    # about WHERE the anchor occurs, and `count` reports non-overlapping matches
+    # only: in "aaa" it reports one occurrence of "aa" while two distinct start
+    # positions exist. The frozen Phase G blob contains a real instance — a run
+    # of 51 spaces, in which a 50-space anchor counts once and starts twice — so
+    # an ambiguous locator would have resolved as unique.
+    hits, at = 0, text.find(ref["anchor"])
+    while at != -1:
+        hits += 1
+        at = text.find(ref["anchor"], at + 1)
+    if hits == 0:
+        return f"ANCHOR NOT FOUND — the cited text does not occur in {ref['blob']}"
+    if hits > 1:
+        return (f"ANCHOR AMBIGUOUS — the cited text occurs {hits} times in "
+                f"{ref['blob']}; a locator must select one place")
+    return None
 
 
 def pin_chain_defect(pinned: str, history: list[dict]) -> str | None:
@@ -82,6 +315,9 @@ def pin_chain_defect(pinned: str, history: list[dict]) -> str | None:
         missing = [f for f in PIN_FIELDS if not e.get(f)]
         if missing:
             return f"pin history entry {i} does not record {missing}"
+        ref_defect = authority_ref_defect(e["superseding_authority"])
+        if ref_defect is not None:
+            return f"pin history entry {i} authority reference: {ref_defect}"
         prev = history[i - 1]["new_blob"] if i else ORIGINAL_BLOB
         if e["old_blob"] != prev:
             return (f"pin history entry {i} replaces {e['old_blob']}, but the "

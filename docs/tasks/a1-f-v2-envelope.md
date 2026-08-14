@@ -1,7 +1,7 @@
 # A1-F v2 — Envelope v2
 
-**Status: VERIFIER LAYER CLOSED at `47b8371` (merged in #134). One post-closure
-correction applied: PC-1.**
+**Status: VERIFIER LAYER CLOSED at `47b8371` (merged in #134). Post-closure
+correction PC-1 applied. Evidence-binding series open: EB-R1.**
 
 The E-R sequence is the *verifier* revision sequence and it ends at E-R21.
 Post-closure corrections are numbered separately and carry **implementation
@@ -332,6 +332,151 @@ so neither is used:
   never observes how that tree was assembled. Point 7 remains the requirement on
   whoever performs the ceremony; the machine holds only the weaker half.
 
+#### 2.5.1 What `superseding_authority` must be, and what resolving it proves
+
+Point 4 required the entry to *record* an authority reference. A free-text string
+records that an authority was **named**, not that it **exists** — so the locator
+is now structured, and mechanically resolvable without deciding anything:
+
+```yaml
+superseding_authority:
+  blob:      <immutable git blob oid>     # the ONLY identity
+  path_hint: docs/tasks/a1-f-v2-phase-g.md
+  anchor:    <exact text, occurring once inside those bytes>
+```
+
+`path_hint` is named for what it is. A blob does not carry its own path; proving
+`path → blob` would need a commit and a tree as well. Calling the field `path`
+would dress a decoration as a checkable coordinate, which is the species of
+overclaim this document exists to catch. Identity is the blob; `anchor` selects
+one place inside it.
+
+**The mechanical contract, in full — five steps and then it stops:**
+
+```text
+1. locator shape is well-formed
+2. blob oid resolves LOCALLY
+3. the resolved object is a blob
+4. its bytes decode as UTF-8
+5. the anchor occurs EXACTLY ONCE, counted by START POSITION
+=> REFERENTIAL PASS
+```
+
+Step 5 counts *overlapping* start positions, not `str.count`. "Exactly once" is
+a claim about **where** the anchor occurs, and non-overlapping counting answers
+a different question: in `aaa`, `count("aa")` is 1 while two distinct start
+positions exist. The frozen Phase G blob contains a real instance — a run of 51
+spaces, in which a 50-space anchor counts once and starts twice — so this was
+not hypothetical, and an ambiguous locator did resolve as unique until EB-R1's
+review caught it.
+
+**What it must never check**, each of which would put a small self-appointed
+lawyer inside the extractor: that the anchor says "supersede"; that `blob`
+equals the entry's `new_blob`; that `path_hint` names the blob in some tree;
+that `old_blob` was legitimately superseded; that `new_blob` is legitimate
+authority. All of those are Phase G's floor.
+
+**Hence the negative control**, which is deliberately uncomfortable: a locator
+citing a real blob and a unique anchor that authorizes *nothing* — the corpus
+uses a note about a git tag — is required to **PASS**. If that case ever starts
+failing, the resolver has appointed itself Phase G. It is the only test here
+that proves an absence of adjudication rather than a presence of checking.
+
+**Two failure states, kept apart on epistemic grounds:**
+
+```text
+MALFORMED LOCATOR              shape, oid syntax, object type, encoding
+UNRESOLVABLE IN THIS CHECKOUT  well-formed oid, git cannot supply it locally
+```
+
+The second is **not** "absent from the repository". CI checks out with the
+`actions/checkout` default — no workflow here sets `fetch-depth` — so a real
+historical blob is simply not present, and establishing absence would need the
+network. A resolver built to improve provenance must not begin by lying about
+provenance. Both are `ERROR`; only the diagnostic differs.
+
+**No network, ever — enforced, not assumed.** In a partial clone
+(`remote.<name>.promisor=true`, e.g. `--filter=blob:none`) `git cat-file` will
+**lazily fetch** a promised object it does not have, and `GIT_TERMINAL_PROMPT`
+does not stop it — it only suppresses credential prompting. `GIT_NO_LAZY_FETCH=1`
+is set on every lookup. Demonstrated against a local `file://` promisor remote,
+asking for a blob genuinely absent from the object database:
+
+```text
+without the guard   local-before=0   cat-file -t -> "blob"   (fetched over the wire)
+with the guard      local-before=0   fatal: could not fetch 0680074c…
+```
+
+**Resolution is a property of the repository, never of the caller.** "Local"
+is a claim about an object database, and it is false the moment the invoker gets
+to choose which database that is. `git -C <repo> cat-file` honours ambient
+`GIT_DIR`, `GIT_OBJECT_DIRECTORY` and `GIT_ALTERNATE_OBJECT_DIRECTORIES`, and
+with the last of these set, a blob written only into an unrelated repository
+resolves against `<repo>` and returns its bytes. So git's environment is
+**constructed from an allowlist** — `PATH`, `HOME`, and the two guards above —
+rather than inherited. This is not a hardening flourish adjacent to the
+contract; it *is* the contract. An answer that a caller can steer establishes
+nothing about provenance whatever its diagnostic says, and it fails silently, in
+`PASS`, which is the worst place for it. The same construction is what keeps
+`ARLIAI_API_KEY` out of a process that has no business reading it (AGENTS.md
+invariant 1); a denylist would have closed that and left the redirect open.
+
+**And the bytes are checked against the name they were asked for.** Guards close
+one route each — lazy fetch, ambient redirect, `refs/replace/<oid>` — and all
+three were found one at a time, by a reviewer, after the previous fix shipped.
+The resolver therefore recomputes the object id from what git returned and
+**aborts** if it differs from the cited `blob`. That is the E-R10 criterion
+turned on this layer itself: a check as discriminating as the distinction it
+enforces, rather than a list of the ways the distinction has been lost so far.
+The abort is not a locator defect and not "unresolvable" — those are statements
+about the citation, and this is a statement about the checkout. Its diagnostic
+says so: *do not re-pin, and do not edit the locator; the locator is the one
+part known to be intact.* An environment that substitutes object contents can
+produce no evidence, and the correct output is no verdict.
+
+**Which executable answers is part of the question.** While `PATH` was
+inherited and the command was the unqualified `git`, a counterfeit `git` first
+on `PATH` — printing the genuine published blob — satisfied the object-id check
+for a repository that does not exist. Recomputing the id proves the bytes match
+the name; it cannot prove they came from an object database, because the process
+reporting them was the caller's. A wrapper could equally fetch those bytes over
+the network, so this defeats the no-network property too. Git is therefore
+resolved from a pinned list of absolute locations and the child's `PATH` is
+synthesized from whichever answered. There is no fallback to `PATH` when none
+matches: the resolver aborts, because a silent fallback restores exactly the
+hole it closes, and because "git is somewhere else on this machine" is a
+declared configuration change rather than something a provenance resolver may
+guess.
+
+**The stated boundary.** This does not make the extractor self-validating, and
+claiming otherwise would be the same defect this series keeps finding. A program
+cannot verify the machine executing it: its interpreter, its own source bytes,
+and the OS beneath both are premises, not conclusions. The pin matters because
+of a real asymmetry — the gate's preflight spawns the extractor with
+`sys.executable`, an absolute path, so in that call the interpreter is trusted
+while `git` was not, and `git` was the last caller-controlled input left. Where
+the extractor is instead launched as `python3 tools/…` under a hostile `PATH`,
+the interpreter is already the caller's and nothing below it can recover the
+property. That premise is declared here, in the §2.5.1 sense: not closed, not
+disguised as closed.
+
+This is the `old_blob` case exactly: after a supersede, the object proving
+provenance is the one that has left the tree. Without the guard, the resolver
+would have gone to the network to prove the authority of the thing whose
+provenance it exists to establish. A deterministic extractor that occasionally goes to the internet for
+proof of its own authority would be an elegant way to lose the property
+entirely.
+
+**The shallow-checkout consequence is recorded, not pre-solved.** After a real
+supersede, `new_blob` is the working tree's content and resolves; `old_blob` has
+left the tree and is reachable only through history — so it will *not* resolve
+under a default checkout. That is a genuine future requirement, and the fix
+belongs to the runner or checkout policy at the time it is needed, consumed by
+an actual re-pin. Setting `fetch-depth: 0` today, for a consumer that does not
+exist, would turn a future requirement into a present infrastructure habit — the
+same shape of unexamined premise this branch has spent twenty-two rounds
+removing.
+
 Points 1, 2, 3 and 5 are not machine-checked here and are not claimed to be.
 Legitimacy is a contract act; this floor cannot decide it and should not
 pretend to. Nor does any of this defend against an editor who rewrites the
@@ -522,6 +667,244 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### EB-R1 — `superseding_authority` becomes resolvable, and stays non-adjudicating
+
+**A new series.** Not `E-R22` (the verifier revision sequence ended at E-R21 and
+the layer is closed at `47b8371`) and not `PC-2` (post-closure corrections carry
+implementation delta zero; this one changes code). Evidence-binding work gets
+its own numbering because it has its own trust boundary.
+
+**What §8.5 actually asked.** `PIN_HISTORY` required `superseding_authority`, and
+`pin_chain_defect` checked it for non-emptiness. So the ceremony proved an
+authority had been **named**, never that the named thing **exists**. The fix is
+to make the reference resolvable — and to stop precisely there.
+
+`superseding_authority` is now a three-field locator (§2.5.1); `blob` is the
+only identity, `path_hint` is honestly labelled decoration, `anchor` selects one
+place inside the immutable bytes. `authority_ref_defect` performs the five-step
+referential contract and nothing beyond it, and `pin_chain_defect` calls it for
+every non-empty history entry.
+
+**The case that matters is the one that passes.** A locator citing a real blob
+and a unique anchor that authorizes nothing — the corpus uses a note about a git
+tag — must return `REFERENTIAL PASS`. Every other test here proves the checker
+*checks*; only this one proves it does not **adjudicate**. Written as a required
+witness so that a future well-meaning tightening has to delete an explicit test
+rather than quietly add a condition.
+
+**Two failure states, not one.** `MALFORMED LOCATOR` versus `UNRESOLVABLE IN
+THIS CHECKOUT`, and the second says so in those words: the diagnostic asserts
+that git cannot supply the object *here*, not that it is absent from the
+repository. No workflow in this repo sets `fetch-depth`, so the default shallow
+checkout guarantees this state will occur — on `old_blob`, which is exactly the
+half of the record that proves provenance. A resolver built to improve provenance
+must not open by misdescribing it.
+
+**Deliberately not done:** no `fetch-depth: 0`. The requirement is real and
+future; installing infrastructure now for a consumer that does not exist is how
+unexamined premises get in. It is recorded in §2.5.1 as a precondition to be met
+by a runner or checkout policy when a re-pin actually consumes it.
+
+**P1 during review (CodeRabbit) — `str.count` answered the wrong question.**
+Step 5 used `text.count(anchor)`, which reports non-overlapping matches, so an
+anchor occupying two distinct start positions counted as one and resolved as
+unique. Not hypothetical: the frozen Phase G blob has a run of 51 spaces, and a
+50-space anchor counts once while starting twice. Step 5 now counts start
+positions, and the corpus carries that exact witness drawn from the authority's
+own bytes. The reviewer's framing was the useful part — *the locator does not
+identify one location* — which is the step-5 property restated, not a counting
+nicety.
+
+**Second P1 during review, found independently by both reviewers — the
+no-network claim was false.** The docstring said `git cat-file` "does not
+fetch". In a promisor partial clone it does. `GIT_NO_LAZY_FETCH=1` now enforces
+what the comment had merely asserted, which is the same defect shape this branch
+has been cataloguing: *a claim stronger than the implementation guarantees*,
+written by the author of both.
+
+Two things about the investigation are worth keeping. CodeRabbit's report stated
+this checkout **is** a promisor clone; it is not — `remote.origin.promisor` is
+unset here — so the specific environmental fact was wrong while the defect was
+real, and verifying rather than accepting kept the record accurate. And my first
+two attempts to reproduce it **proved nothing**: the control arm lazily fetched
+the blob, leaving it local, so the guarded arm then "passed" against an object
+that was no longer missing. The corpus witness therefore uses two independent
+clones, and asserts the control arm succeeds — a test whose hazard is not
+demonstrated is a test that can pass vacuously.
+
+**P0 during review (Codex) — the child environment was inherited, so the
+extractor's inputs were undeclared.** Both `git cat-file` calls were spawned
+with `{**os.environ, **GIT_ENV}`. Reproduced before acceptance: 135 ambient
+variables reached the child, `ARLIAI_API_KEY` among them. AGENTS.md invariant 1
+rules that any new process able to read that key is a P0, and object lookup
+needs no credential at all — so the severity is the repository's own, not a
+judgement call.
+
+Reproducing it surfaced a **second, unreported hazard on the same line**, and
+this one goes to the property EB-R1 exists to establish. With
+`GIT_ALTERNATE_OBJECT_DIRECTORIES` set ambiently, `git -C <repo> cat-file`
+answers with objects that are **not in `<repo>`**: a blob written only into an
+unrelated repository resolved, and its bytes came back. `GIT_DIR` and
+`GIT_OBJECT_DIRECTORY` are the same hazard spelled differently. That makes
+*which bytes answer a provenance question* a choice belonging to whoever invokes
+the extractor. A resolver whose answer is caller-parameterizable is not
+establishing provenance; it is reporting a preference.
+
+The two hazards demand different fixes and only one of them survives both: a
+denylist of credential names closes the first and leaves the second wide open,
+because the redirection family is open-ended in exactly the way a remembered
+list of names cannot cover. The environment is therefore **constructed** —
+`GIT_ENV_ALLOW = ("PATH", "HOME")` plus the `GIT_ENV` guards, and nothing else.
+`PATH` finds git; `HOME` lets git read the global config where CI records
+`safe.directory`. Neither can add an object directory.
+
+Three witnesses, because closing one hazard by name would leave the other open,
+and because a helper that is written but never wired in passes its own unit test
+perfectly. (3p) the constructed mapping has exactly the allowed key set; (3q)
+the **child process** receives no ambient variable — via a `/bin/sh` shim, not a
+python one, since a python child sets `LC_CTYPE` on *itself* through PEP 538
+legacy-locale coercion and that would read as a leak it is not; (3r) the hazard
+closed at the level of the **answer** — the alien object does not resolve while
+the pinned blob still does.
+
+Two method notes. The first draft of (3r) handed its control arm all of
+`os.environ`, so the control failed on the unrelated bogus `GIT_DIR` in the same
+fixture rather than on the redirect — the mirror image of the vacuous-pass
+mistake recorded two paragraphs above, and just as empty. The control now runs
+the constructed environment plus exactly one inherited variable, so the single
+difference between the arms is the pass-through itself. And the first
+reproduction harness leaked its own dump path to the shim through the very
+channel under test; when the fix landed, the harness broke instead of the
+witness reporting. A test that travels through the defect it is testing cannot
+observe its removal.
+
+**P1 on the fix, found independently by both reviewers — `refs/replace`, and
+the pattern behind three findings.** `refs/replace/<oid>` makes `cat-file`
+return substitute bytes for the requested oid, for the type query as well as the
+content query. Reproduced: `git replace -f <authentic> <forged>`, then
+`_local_object(authentic)` returned `FORGED AUTHORITY …`. So `blob` had stopped
+being the identity of anything — the single assumption §2.5.1 rests on. Reach
+verified rather than assumed: replace refs do not arrive over a default clone or
+fetch, so this needs a local checkout, which is exactly the reach of an ambient
+environment variable and exactly the threat model this layer already accepts.
+
+`GIT_NO_REPLACE_OBJECTS=1` joins the guards. But three findings in three rounds
+is a pattern, not three coincidences: lazy fetch, then object-store redirect,
+then replacement refs — each one a distinct way for git to answer with something
+other than the cited object, each found by a reviewer *after* the previous fix
+shipped, each closed by naming it. Enumerating known tricks is the losing side
+of that trade, and the E-R10 criterion says so in general terms: make the check
+as discriminating as the distinction, or keep patching.
+
+So `_local_object` now recomputes the object id from the bytes it received and
+aborts if it differs from the name it asked for. That closes the **family** —
+replacement ref, alternate store, or a mechanism nobody here has read about, the
+substitute does not hash to the name. It aborts rather than returning a value,
+because a checkout that substitutes object contents is not a bad locator and not
+an absent object; it is an environment in which no verdict means anything, and
+the diagnostic says so: *do not re-pin, and do not edit the locator — the
+locator is the one part known to be intact.*
+
+Two witnesses, and the second is the load-bearing one. (3s) with the guard, the
+authentic bytes come back, while the control arm without it gets the forged ones
+— the fixture demonstrably poses the hazard. (3t) **the guard is removed
+deliberately and the abort is required anyway**, which is what keeps the two
+defenses independent. If 3t ever starts passing only with the guard present, the
+extractor has gone back to enumerating tricks and the family is open again.
+
+**P1 on that fix, again found independently by both reviewers — `PATH` chose
+the executable.** Two rounds in a row where the two reviewers converged on one
+mechanism, which is a stronger signal than either report alone. The identity
+check closed byte substitution and left open *who reports the bytes*:
+`GIT_ENV_ALLOW` still carried `PATH`, and the command was the unqualified
+`git`. Reproduced — a counterfeit `git` first on `PATH`, printing the genuine
+published blob, made `_local_object(PINNED_BLOB, repo=Path("/nonexistent"))`
+return 159462 bytes that satisfy the object-id check, for a repository that does
+not exist. Codex added the sharpening worth keeping: such a wrapper could fetch
+those bytes over the network, so this defeats the no-network property as well.
+
+Git is now resolved from `GIT_CANDIDATES`, a pinned list of absolute locations,
+and the child's `PATH` is synthesized from whichever answered. No fallback to
+`PATH`: the resolver aborts, since a silent fallback restores the hole it closes.
+
+**Witness 3q had to be rebuilt, and why that is the interesting part.** It
+installed its probe by prepending to `PATH` — which is how the reviewer reading
+it saw that `PATH` selected the executable. The witness that demonstrated one
+property was the disclosure of the next defect. It now installs the shim through
+`GIT_CANDIDATES`; a probe that reaches its target through the hole under test
+cannot survive the patch, and should not. Two smaller instances of the same
+lesson: with the child's `PATH` narrowed to the git directory, the 3q shim could
+no longer reach `env` (it uses the `export -p` builtin) and the 3u counterfeit
+could reach neither `touch` nor `cat` (it is python under an absolute
+interpreter). Each of those was a probe quietly depending on the surface it
+audits.
+
+3u's control arm reaches the *same* counterfeit through `GIT_CANDIDATES` and
+requires it to be **accepted**. That separates "this counterfeit cannot fool the
+check" — false, and not the claim — from "`PATH` cannot install it", which is.
+
+**The boundary is declared, not closed.** §2.5.1 now states it: a program cannot
+verify the machine executing it. The pin matters because of a real asymmetry —
+the preflight uses `sys.executable`, so the interpreter is trusted while `git`
+was not — and it buys nothing where the extractor is launched as `python3 tools/…`
+under a hostile `PATH`, since there the interpreter is already the caller's.
+Saying so is the point. Four rounds of this series have been the same defect
+wearing different clothes: *a claim stronger than the implementation
+guarantees.* A fix that quietly inherited that shape would belong on the list.
+
+**P0 on that fix (CodeRabbit) — the corpus was committing the defect it
+exists to detect.** Four rounds of witnesses about credentials and object stores
+added six git call sites to `test_a1_v2_ledger_gate.py`, and four of them
+inherited `os.environ`. Verified rather than assumed: at the branch base the
+file spawned no git at all, so every one of them is mine. AGENTS.md says "any
+new process able to read it", with no exemption for test scaffolding, and a
+harness is not a lower-trust place to leak a key than the tool it tests.
+
+The uncomfortable part is not the leak, it is where it was. The corpus is the
+instrument these findings are measured with, and it was carrying the exact
+property it certifies as absent elsewhere. An instrument is not outside the
+system it measures.
+
+`git_env()` constructs the environment; control arms that need one variable back
+pass it **by name**, so every exception is visible at its call site rather than
+inherited wholesale. All six now use the pinned `GIT` binary as well.
+
+**The witness is a source-level check, not a sample.** Testing one call proves
+nothing about the fifth, and a helper that exists is not a helper that is used —
+that distinction is what the last four rounds were about. So 3v parses this
+file's own AST and requires, of every `subprocess.run` in it that spawns git,
+that the executable is the pinned `GIT` and that `env=` is passed. It also
+counts the matches, because an empty offender list from a walk that matched
+nothing reads exactly like compliance. A call site added next round fails
+without anyone remembering the rule, which is the only version of a rule that
+survives. 3w checks the property rather than the shape: with `ARLIAI_API_KEY`
+exported, the constructed environment does not contain it.
+
+**Residual widened, still not closed.** The residual below now covers *python*
+children in both places: the gate's preflight and this corpus's `run_real`.
+Same reasoning as before — `PYTHONPATH`, `VIRTUAL_ENV`, `TMPDIR` are load-bearing
+for a python child in a way nothing is for `cat-file` — and the same refusal to
+count it closed.
+
+**Residual, recorded and not fixed here.** The gate's preflight spawns the
+extractor with an inherited environment (`tools/a1_v2_ledger_gate.py:530`). It
+predates EB-R1, it is not what was reported, and sanitizing a *python* child has
+a materially different risk profile — `PYTHONPATH`, `VIRTUAL_ENV`, `TMPDIR` are
+load-bearing there in a way nothing is for `cat-file`. Folding it in would mean
+shipping an unwitnessed environment change inside a change about environment
+witnesses. It is open, it is stated, and it is not counted as closed.
+
+**One existing witness was rewritten, not preserved.** *"pin evidence that binds
+nothing is rejected"* constructed entries with the retired free-text field; the
+locator's shape changed, so the case now uses a valid locator and continues to
+test chain linkage rather than locator shape. Claiming the previous corpus was
+untouched would have been false. Corpus 46 → 63.
+
+**Zero-delta witness.** `docs/tasks/a1-f-v2-graph.json` is byte-identical before
+and after — `5c69fde8a97ded1f5d34a65560d4973ebe59f0c6` — as it must be while
+`PIN_HISTORY` is empty. Phase G, `PINNED_BLOB`, `ORIGINAL_BLOB`, the semantic
+registry, steps 1–5 and gate semantics are all unchanged.
 
 ### PC-1 — the residual was false, not the authority incomplete
 

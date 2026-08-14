@@ -22,7 +22,28 @@ REPO = Path(__file__).resolve().parents[2]
 GATE = REPO / "tools/a1_v2_ledger_gate.py"
 sys.path.insert(0, str(REPO / "tools"))
 import a1_v2_ledger_gate as gate  # noqa: E402
+import a1_v2_extract_graph as _xg  # noqa: E402
 GRAPH = json.loads((REPO / "docs/tasks/a1-f-v2-graph.json").read_text())
+
+# Every git child THIS CORPUS spawns, under the same rule as the extractor's own
+# and for the same reason. Six git call sites were added here over four review
+# rounds; four of them inherited `os.environ`, so a corpus written to prove that
+# credentials stay out of git children was handing them to its own. The rule in
+# AGENTS.md is "any new process able to read it", with no exemption for test
+# scaffolding — and a harness is not a lower-trust place to leak a key than the
+# tool it tests. Witness 3v enforces this at every call site, including ones not
+# written yet, because a helper that exists is not a helper that is used.
+GIT = _xg._git_binary()
+
+
+def git_env(**extra: str) -> dict[str, str]:
+    """Constructed, never inherited. `extra` is for control arms that need one
+    specific variable back — pass it by name, so the exception is visible."""
+    env = {"PATH": str(Path(GIT).parent)}
+    if "HOME" in os.environ:
+        env["HOME"] = os.environ["HOME"]
+    env.update(extra)
+    return env
 
 STRUCTURAL = "event_payload_digest"
 REF = "artifact_ref"
@@ -76,7 +97,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 46
+EXPECTED_TOTAL = 63
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -344,6 +365,15 @@ def _meta_decomposed():
 # ---------------------------------------------------------------------------
 
 GRAPH_PATH = REPO / "docs/tasks/a1-f-v2-graph.json"
+
+# A locator that resolves: the frozen Phase G blob, and a string occurring in it
+# exactly once. `path_hint` is decoration by design — a blob does not carry its
+# own path, so this layer cannot check it and does not pretend to.
+VALID_LOCATOR = {
+    "blob": "450380ff0d1f8ec08f783968f08bc6b3942f44a5",
+    "path_hint": "docs/tasks/a1-f-v2-phase-g.md",
+    "anchor": "FROZEN \u2014 the realization contract",
+}
 SCHEMA_PATH = REPO / "docs/tasks/a1-f-v2-schema-facts.json"
 LEDGER_PATH = REPO / "docs/tasks/a1-f-v2-realization-ledger.json"
 GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
@@ -403,15 +433,16 @@ def preflight_cases() -> list[tuple[str, bool]]:
         #     one-token edit, and that edit must not be enough on its own.
         sys.path.insert(0, str(REPO / "tools"))
         import a1_v2_extract_graph as xg  # noqa: E402
+        gate_xg = xg
         out.append(("bare PINNED_BLOB edit is rejected as unevidenced",
                     xg.pin_chain_defect("f" * 40, []) is not None))
 
         # 3b. Evidence filed for a pin that never moved, and a chain that does
         #     not run from the original blob. Both are paperwork without a fact.
         orphan = [{"old_blob": xg.ORIGINAL_BLOB, "new_blob": "a" * 40,
-                   "superseding_authority": "Phase G supersede, hypothetical"}]
+                   "superseding_authority": VALID_LOCATOR}]
         broken = [{"old_blob": "b" * 40, "new_blob": "a" * 40,
-                   "superseding_authority": "Phase G supersede, hypothetical"}]
+                   "superseding_authority": VALID_LOCATOR}]
         incomplete = [{"old_blob": xg.ORIGINAL_BLOB, "new_blob": "a" * 40}]
         out.append(("pin evidence that binds nothing is rejected",
                     xg.pin_chain_defect(xg.ORIGINAL_BLOB, orphan) is not None
@@ -532,6 +563,386 @@ def preflight_cases() -> list[tuple[str, bool]]:
             env=ascii_env)
         out.append(("ERROR survives an ASCII stdout codec",
                     p.returncode == 2 and "RESULT: ERROR" in p.stdout))
+
+        # ---- EB-R1: referential validation of superseding_authority -----------
+        # The locator answers ONE question: can the cited bytes, and one place
+        # inside them, be identified? It must never answer "do these bytes
+        # authorize the re-pin?" — hence case 3n below, which is meant to look
+        # slightly blasphemous.
+        head_commit = subprocess.run([GIT, "-C", str(REPO), "rev-parse", "HEAD"],
+                                     capture_output=True, text=True,
+                                     env=git_env()).stdout.strip()
+
+        # 3h. Malformed locator: wrong type, wrong field set, wrong oid syntax.
+        out.append(("malformed authority locator is rejected",
+                    all(xg.authority_ref_defect(r) is not None and
+                        "MALFORMED LOCATOR" in xg.authority_ref_defect(r)
+                        for r in ("a string",
+                                  {"blob": xg.PINNED_BLOB, "anchor": "x"},
+                                  {**VALID_LOCATOR, "extra": "x"},
+                                  {**VALID_LOCATOR, "blob": "not-a-hex-oid"},
+                                  {**VALID_LOCATOR, "anchor": ""}))))
+
+        # 3i. Syntactically valid oid that git cannot supply HERE. The diagnostic
+        #     must not claim the object is absent from the repository — under the
+        #     shallow clone CI uses by default, a real historical blob is simply
+        #     not present, and proving absence needs the network.
+        absent = xg.authority_ref_defect({**VALID_LOCATOR, "blob": "d" * 40})
+        out.append(("unresolvable oid says CHECKOUT, not absence",
+                    absent is not None
+                    and "UNRESOLVABLE IN THIS CHECKOUT" in absent
+                    and "does NOT assert the object is absent" in absent))
+
+        # 3j. Right oid, wrong object type.
+        wrong_type = xg.authority_ref_defect({**VALID_LOCATOR, "blob": head_commit})
+        out.append(("an oid resolving to a non-blob is rejected",
+                    wrong_type is not None and "not a blob" in wrong_type))
+
+        # 3k. Anchor absent from the cited bytes.
+        gone = xg.authority_ref_defect({**VALID_LOCATOR, "anchor": "no such text here"})
+        out.append(("an anchor absent from the blob is rejected",
+                    gone is not None and "ANCHOR NOT FOUND" in gone))
+
+        # 3l. Anchor present more than once: a locator must select ONE place.
+        many = xg.authority_ref_defect({**VALID_LOCATOR, "anchor": "one level down"})
+        out.append(("an ambiguous anchor is rejected",
+                    many is not None and "ANCHOR AMBIGUOUS" in many))
+
+        # 3l-bis. Overlapping occurrences. `str.count` reports non-overlapping
+        #     matches, so an anchor can occupy two distinct start positions and
+        #     still "count" once. This witness is drawn from the frozen blob
+        #     itself: a run of 51 spaces, in which a 50-space anchor counted
+        #     once and started twice, and therefore resolved as unique.
+        overlap = xg.authority_ref_defect({**VALID_LOCATOR, "anchor": " " * 50})
+        out.append(("an anchor overlapping itself is rejected",
+                    overlap is not None and "ANCHOR AMBIGUOUS" in overlap))
+
+        # 3m. Normal positive: a real, authority-shaped, unique anchor.
+        out.append(("a well-formed authority locator resolves",
+                    xg.authority_ref_defect(VALID_LOCATOR) is None))
+
+        # 3n. NEGATIVE CONTROL, and the most important case here. The anchor
+        #     resolves and is unique, and authorizes precisely nothing — it is a
+        #     note about a git tag. Referential validation MUST pass, because
+        #     legitimacy is not its floor. If this ever starts failing, the
+        #     resolver has quietly appointed itself Phase G.
+        out.append(("a resolvable but normatively inert anchor still PASSES",
+                    xg.authority_ref_defect({**VALID_LOCATOR,
+                        "anchor": "Created by the maintainer as a plain ref; "
+                                  "no release object was"}) is None))
+
+        # 3o. NO LAZY FETCH. In a partial clone `git cat-file` will fetch a
+        #     promised object it does not have; GIT_TERMINAL_PROMPT does not stop
+        #     it. This builds a real promisor clone over file:// and asks for a
+        #     blob genuinely absent from its object database — the `old_blob`
+        #     case, since after a supersede that is exactly the object that has
+        #     left the tree. The control arm proves the hazard is present, so
+        #     the witness cannot pass vacuously.
+        lazy = d / "lazy"
+        origin, clone = lazy / "origin", lazy / "clone"
+        origin.mkdir(parents=True)
+        def g(*args, cwd, **kw):
+            return subprocess.run([GIT, *args], cwd=str(cwd), capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace",
+                                  env=git_env(), **kw)
+        g("init", "-q", ".", cwd=origin)
+        for k, v in (("user.email", "t@t"), ("user.name", "t"),
+                     ("uploadpack.allowFilter", "true"),
+                     ("uploadpack.allowAnySHA1InWant", "true")):
+            g("config", k, v, cwd=origin)
+        (origin / "f.txt").write_text("SUPERSEDED-AUTHORITY-TEXT\n")
+        g("add", "f.txt", cwd=origin); g("commit", "-qm", "old", cwd=origin)
+        old_blob = g("hash-object", "f.txt", cwd=origin).stdout.strip()
+        (origin / "f.txt").write_text("CURRENT-AUTHORITY-TEXT\n")
+        g("add", "f.txt", cwd=origin); g("commit", "-qm", "new", cwd=origin)
+        # TWO clones. The control arm lazily fetches, which would leave the blob
+        # local and make the witness pass for the wrong reason — the same
+        # ordering mistake that made the first hand-run of this experiment
+        # report nothing.
+        for name in ("clone", "control"):
+            g("clone", "-q", "--filter=blob:none", "--no-local",
+              f"file://{origin}", str(lazy / name), cwd=lazy)
+        control = lazy / "control"
+
+        present = g("cat-file", "--batch-all-objects", "--batch-check=%(objectname)",
+                    cwd=clone).stdout
+        absent_locally = bool(old_blob) and old_blob not in present
+        # control, on its OWN clone: without the guard git reaches the promisor
+        # remote and succeeds — proving the hazard is real in this fixture.
+        fetched = subprocess.run([GIT, "-C", str(control), "cat-file", "-t", old_blob],
+                                 capture_output=True, text=True,
+                                 env=git_env(GIT_TERMINAL_PROMPT="0"))
+        # witness, on an untouched clone: the extractor refuses without fetching.
+        refused = gate_xg._local_object(old_blob, repo=clone) is None
+        out.append(("a promised-but-absent object is refused, not fetched",
+                    absent_locally and fetched.returncode == 0 and refused))
+
+        # An object database that is NOT this repository's, holding bytes this
+        # repository has never seen. It is the bait for 3r.
+        alien = d / "alien"
+        alien.mkdir()
+        g("init", "-q", ".", cwd=alien)
+        (alien / "a.txt").write_text("ALIEN AUTHORITY BYTES\n")
+        alien_oid = g("hash-object", "-w", "a.txt", cwd=alien).stdout.strip()
+        alien_objects = alien / ".git/objects"
+
+        # 3p..3r. THE CHILD ENVIRONMENT IS CONSTRUCTED, NOT INHERITED. Copying
+        #     `os.environ` into the two `git cat-file` calls made every ambient
+        #     variable an undeclared input to this extractor. Two hazards rode
+        #     on that, and they need separate witnesses because closing one by
+        #     name would leave the other open.
+        HOSTILE = {"ARLIAI_API_KEY": "sk-secret-witness",
+                   "GIT_DIR": str(alien / ".git"),
+                   "GIT_OBJECT_DIRECTORY": str(alien_objects),
+                   "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(alien_objects)}
+        saved = {k: os.environ.get(k) for k in HOSTILE}
+        os.environ.update(HOSTILE)
+        try:
+            # 3p. The constructed mapping carries the allowlist and the guards,
+            #     and nothing else — asserted as an exact key set, so a later
+            #     `env.update(os.environ)` cannot slip back in unnoticed.
+            #     `PATH` is present but SYNTHESIZED — it is the directory of the
+            #     pinned git binary, never the caller's. Asserting that it
+            #     differs from the ambient one is the point: an inherited PATH
+            #     chose the executable that reported the bytes.
+            built = xg._git_env()
+            allowed = ({k for k in xg.GIT_ENV_ALLOW if k in os.environ}
+                       | set(xg.GIT_ENV) | {"PATH"})
+            out.append(("git's environment is built from an allowlist",
+                        set(built) == allowed
+                        and all(built[k] == v for k, v in xg.GIT_ENV.items())
+                        and built["PATH"] == str(Path(xg._git_binary()).parent)
+                        and built["PATH"] != os.environ.get("PATH")))
+
+            # 3q. What the CHILD PROCESS actually receives. 3p alone would pass
+            #     vacuously if `_git_env` were written and never wired in, which
+            #     is precisely the shape of the defect it replaces. The shim is
+            #     /bin/sh, not python: a python child sets `LC_CTYPE` on itself
+            #     via PEP 538 legacy-locale coercion, which would look like a
+            #     leak and is not one.
+            #
+            #     The shim is installed by overriding GIT_CANDIDATES, not by
+            #     prepending to `PATH`. It used to go on `PATH` — which is how
+            #     the reviewer who read this witness saw that `PATH` selected
+            #     the executable, and made 3u necessary. A probe that reaches
+            #     its target through the hole under test cannot survive the
+            #     patch, and should not: 3u now owns that question.
+            #
+            #     `export -p`, not `env`: the child's PATH is now the git
+            #     directory alone, so the shim cannot reach coreutils. A probe
+            #     that needs the surface it is auditing is not a probe.
+            shim, dump = d / "shim", d / "child-env.txt"
+            shim.mkdir()
+            (shim / "git").write_text("#!/bin/sh\nexport -p > '%s'\nexit 1\n" % dump)
+            (shim / "git").chmod(0o755)
+            candidates_saved = xg.GIT_CANDIDATES
+            xg.GIT_CANDIDATES = (str(shim / "git"),)
+            try:
+                xg._local_object("0" * 40)
+            finally:
+                xg.GIT_CANDIDATES = candidates_saved
+            child = {line[len("export "):].split("=", 1)[0]
+                     for line in dump.read_text().splitlines()
+                     if line.startswith("export ") and "=" in line}
+            out.append(("no ambient variable reaches the git child process",
+                        bool(child) and not (child & set(HOSTILE))))
+
+            # 3u. WHICH EXECUTABLE REPORTS THE BYTES. While `PATH` was
+            #     inherited and the command was the unqualified `git`, a
+            #     counterfeit git first on `PATH` — printing the genuine
+            #     published blob — satisfied the object-id check for
+            #     `repo=/nonexistent`. Recomputing the id proves the bytes match
+            #     the name; it cannot prove they came from an object database,
+            #     when the process reporting them is the caller's.
+            #
+            #     Control arm: the same counterfeit, reached through
+            #     GIT_CANDIDATES instead, DOES run and IS accepted. So the
+            #     witness separates "this counterfeit cannot fool the check"
+            #     (false, and not the claim) from "`PATH` cannot install it"
+            #     (the claim).
+            #     The counterfeit is a python script under an absolute
+            #     interpreter, for the same reason 3q dropped `env`: with the
+            #     child's PATH narrowed to the git directory, a /bin/sh shim
+            #     can reach neither `touch` nor `cat`.
+            fake, ran = d / "fake", d / "fake-ran"
+            fake.mkdir()
+            real = xg._local_object(xg.PINNED_BLOB)
+            (fake / "payload").write_bytes(real[1])
+            (fake / "git").write_text(
+                "#!%s\n"
+                "import sys, pathlib\n"
+                "pathlib.Path(%r).write_text('ran')\n"
+                "if '-t' in sys.argv: sys.stdout.write('blob\\n')\n"
+                "else: sys.stdout.buffer.write(pathlib.Path(%r).read_bytes())\n"
+                % (sys.executable, str(ran), str(fake / "payload")))
+            (fake / "git").chmod(0o755)
+            path_saved = os.environ["PATH"]
+            os.environ["PATH"] = f"{fake}:{path_saved}"
+            try:
+                via_path = xg._local_object(xg.PINNED_BLOB, repo=d / "nonexistent")
+                executed = ran.exists()
+                still_works = xg._local_object(xg.PINNED_BLOB)
+                xg.GIT_CANDIDATES = (str(fake / "git"),)
+                try:
+                    control = xg._local_object(xg.PINNED_BLOB, repo=d / "nonexistent")
+                finally:
+                    xg.GIT_CANDIDATES = candidates_saved
+            finally:
+                os.environ["PATH"] = path_saved
+            out.append(("PATH cannot choose the git that answers for the repo",
+                        via_path is None and not executed
+                        and still_works is not None
+                        and control is not None and ran.exists()))
+
+            # 3r. The hazard closed at the level of the ANSWER, not of a
+            #     variable listing. `GIT_ALTERNATE_OBJECT_DIRECTORIES` makes
+            #     `git -C <repo> cat-file` resolve objects that are not in
+            #     <repo> at all — so whoever invokes the extractor could choose
+            #     which bytes answer a provenance question. The control arm runs
+            #     the same lookup with the ambient variable honoured and MUST
+            #     succeed, or the fixture would be proving nothing; and the
+            #     pinned blob must still resolve, or the fix would have bought
+            #     its determinism by breaking resolution.
+            #
+            #     The control arm is the CONSTRUCTED environment plus exactly
+            #     one inherited variable, so the single difference between the
+            #     two arms is the pass-through itself. Handing it all of
+            #     `os.environ` instead made it fail on the unrelated `GIT_DIR`
+            #     above — a control that fails for the wrong reason witnesses
+            #     nothing, the same way a control that passes for the wrong
+            #     reason does not.
+            leaked = subprocess.run(
+                [GIT, "-C", str(REPO), "cat-file", "-t", alien_oid],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                env={**xg._git_env(),
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(alien_objects)})
+            redirected = xg._local_object(alien_oid)
+            pinned = xg._local_object(xg.PINNED_BLOB)
+            out.append(("an ambient object-store redirect cannot answer for the repo",
+                        leaked.returncode == 0 and redirected is None
+                        and pinned is not None and pinned[0] == "blob"))
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        # 3s..3t. SUBSTITUTED OBJECT CONTENTS. `refs/replace/<oid>` makes
+        #     `cat-file` return different bytes for the requested oid — for the
+        #     type query as well as the content query — so an anchor can
+        #     validate against bytes whose id is not the locator's `blob`, and
+        #     `blob` stops being the identity of anything. Replace refs do not
+        #     arrive over a default clone or fetch (verified), so the reach is
+        #     a local checkout: the same reach as an ambient variable.
+        subst = d / "subst"
+        subst.mkdir()
+        g("init", "-q", ".", cwd=subst)
+        def _hash(text):
+            return subprocess.run([GIT, "hash-object", "-w", "--stdin"],
+                                  cwd=str(subst), input=text, capture_output=True,
+                                  text=True, encoding="utf-8",
+                                  env=git_env()).stdout.strip()
+        authentic = _hash("AUTHENTIC AUTHORITY — anchor lives here\n")
+        forged = _hash("FORGED AUTHORITY — anchor lives here\n")
+        g("replace", "-f", authentic, forged, cwd=subst)
+
+        # 3s. Control arm proves the fixture poses the hazard: with replacement
+        #     honoured, git hands back the forged bytes for the authentic oid.
+        #     Guarded, the authentic bytes come back.
+        swapped = subprocess.run(
+            [GIT, "-C", str(subst), "cat-file", "blob", authentic],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={k: v for k, v in xg._git_env().items()
+                 if k != "GIT_NO_REPLACE_OBJECTS"})
+        guarded = xg._local_object(authentic, repo=subst)
+        out.append(("a replacement ref cannot answer for the object it replaces",
+                    "FORGED" in swapped.stdout
+                    and guarded is not None
+                    and guarded[1].decode().startswith("AUTHENTIC")))
+
+        # 3t. The guard and the identity check are INDEPENDENT, and this is the
+        #     one that matters. Each GIT_ENV guard closes one way git can answer
+        #     with something other than the cited object, and each was found one
+        #     at a time, by a reviewer, after the previous one shipped —
+        #     lazy fetch, then object-store redirect, then replacement refs.
+        #     Recomputing the object id closes the FAMILY: whatever substitutes
+        #     the bytes, the substitute does not hash to the name. So this case
+        #     removes the guard deliberately and requires the abort anyway. If
+        #     it ever starts passing only with the guard present, the extractor
+        #     is back to enumerating known tricks.
+        saved_guard = xg.GIT_ENV.pop("GIT_NO_REPLACE_OBJECTS")
+        try:
+            try:
+                xg._local_object(authentic, repo=subst)
+                caught = ""
+            except xg.ExtractDefect as e:
+                caught = str(e)
+        finally:
+            xg.GIT_ENV["GIT_NO_REPLACE_OBJECTS"] = saved_guard
+        out.append(("substituted object bytes abort even with the guard removed",
+                    "OBJECT IDENTITY VIOLATED" in caught
+                    and "do NOT edit the locator" in caught))
+
+        # 3v. THIS CORPUS'S OWN GIT CHILDREN. Four review rounds of witnesses
+        #     about credentials and object stores added six git call sites here,
+        #     four of them inheriting `os.environ` — the corpus was committing
+        #     the defect it exists to detect.
+        #
+        #     Checking one sample call would prove nothing about the fifth, and
+        #     a `git_env` helper that exists is not a helper that is used. So
+        #     this reads THIS FILE'S OWN SOURCE and requires, of every
+        #     `subprocess.run` in it that spawns git: the executable is the
+        #     pinned `GIT`, never the ambient string "git", and `env=` is
+        #     passed. A call site added later fails this without anyone
+        #     remembering the rule — which is the only version of the rule that
+        #     survives the next round.
+        import ast
+        tree = ast.parse(Path(__file__).read_text())
+        offenders = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "run"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "subprocess"):
+                continue
+            argv = node.args[0] if node.args else None
+            if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
+                continue
+            head = argv.elts[0]
+            spawns_git = ((isinstance(head, ast.Name) and head.id == "GIT")
+                          or (isinstance(head, ast.Constant)
+                              and head.value == "git"))
+            if not spawns_git:
+                continue
+            names = {k.arg for k in node.keywords}
+            if not (isinstance(head, ast.Name) and "env" in names):
+                offenders.append(node.lineno)
+        # The control is the count: if the walk matched nothing, an empty
+        # offender list would read exactly like compliance.
+        found = sum(1 for n in ast.walk(tree)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "run" and n.args
+                    and isinstance(n.args[0], (ast.List, ast.Tuple))
+                    and n.args[0].elts
+                    and isinstance(n.args[0].elts[0], ast.Name)
+                    and n.args[0].elts[0].id == "GIT")
+        out.append(("every git child of this corpus gets a constructed env",
+                    found >= 6 and not offenders))
+
+        # 3w. And the construction excludes the credential while one is
+        #     exported — the property, not just the shape of the call.
+        os.environ["ARLIAI_API_KEY"] = "sk-secret-witness"
+        try:
+            built = git_env()
+            leak_free = "ARLIAI_API_KEY" not in built
+            named = git_env(GIT_TERMINAL_PROMPT="0")
+        finally:
+            os.environ.pop("ARLIAI_API_KEY", None)
+        out.append(("the corpus's git environment is constructed, not inherited",
+                    leak_free and set(built) <= {"PATH", "HOME"}
+                    and named["GIT_TERMINAL_PROMPT"] == "0"))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.
