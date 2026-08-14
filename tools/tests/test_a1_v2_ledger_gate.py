@@ -97,7 +97,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 63
+EXPECTED_TOTAL = 69
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -380,12 +380,28 @@ GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
 PHASE_G = REPO / "docs/tasks/a1-f-v2-phase-g.md"
 
 
-def run_real(graph: Path, schema: Path) -> tuple[int, str]:
+def gate_env(**extra: str) -> dict[str, str]:
+    """Environment for a gate child spawned by this corpus.
+
+    `run_real` reproduces the gate-invocation path rather than owning an
+    independent one, so it is held to the property EC-R1 installs there instead
+    of quietly running under an inherited environment. HOME is present because
+    the gate projects it onward to the graph extractor, which needs it to read
+    `safe.directory`; nothing else is.
+    """
+    env = {k: os.environ[k] for k in ("HOME",) if k in os.environ}
+    env.update(extra)
+    return env
+
+
+def run_real(graph: Path, schema: Path, env: dict[str, str] | None = None,
+             isolated: bool = True) -> tuple[int, str]:
     ledger = REPO / "docs/tasks/a1-f-v2-realization-ledger.json"
-    p = subprocess.run(
-        [sys.executable, str(GATE), "--graph", str(graph), "--schema", str(schema),
-         "--ledger", str(ledger)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    argv = [sys.executable] + (["-I"] if isolated else []) + [
+        str(GATE), "--graph", str(graph), "--schema", str(schema),
+        "--ledger", str(ledger)]
+    p = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", env=gate_env() if env is None else env)
     return p.returncode, p.stdout
 
 
@@ -943,6 +959,186 @@ def preflight_cases() -> list[tuple[str, bool]]:
         out.append(("the corpus's git environment is constructed, not inherited",
                     leak_free and set(built) <= {"PATH", "HOME"}
                     and named["GIT_TERMINAL_PROMPT"] == "0"))
+
+        # EC-R1 --------------------------------------------------------------
+        # The gate parent spawns two python extractor children. Until now it
+        # handed them the whole parent environment. Three witnesses, split so
+        # that one does not have to prove everything: capability, call site,
+        # execution. The split is the lesson from this branch's failed
+        # harnesses — a probe that must both reach its target and prove a
+        # negative can stop running and report success by silence.
+
+        # 5a. CAPABILITY, proved constructively rather than by absence. Two
+        #     secret-shaped variables, not one: if only `ARLIAI_API_KEY` were
+        #     checked, an implementation that removed that single name would
+        #     pass while remaining a credential denylist. The schema extractor
+        #     projects to the EMPTY set — it imports argparse/json/sys/pathlib,
+        #     spawns nothing, reads no environment — and an unknown tool
+        #     projects empty too, so a third extractor cannot inherit the parent
+        #     by omission.
+        secrets = {"ARLIAI_API_KEY": "sk-sentinel",
+                   "SOME_OTHER_TOKEN": "also-secret",
+                   "PYTHONPATH": str(d / "evil"), "TMPDIR": str(d / "evil"),
+                   "VIRTUAL_ENV": str(d / "evil")}
+        saved_env = {k: os.environ.get(k) for k in secrets}
+        os.environ.update(secrets)
+        try:
+            g_env = gate.preflight_env(gate.GRAPH_EXTRACTOR, os.environ)
+            s_env = gate.preflight_env(gate.SCHEMA_EXTRACTOR, os.environ)
+            u_env = gate.preflight_env(Path("a1_v2_extract_future.py"), os.environ)
+            out.append(("preflight children get only declared capabilities",
+                        not (set(g_env) & set(secrets))
+                        and g_env == {} and s_env == {} and u_env == {}))
+        finally:
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        # 5b. CALL SITE. 5a describes a function; this requires the gate to use
+        #     it. A projection helper that exists and is never passed is the
+        #     exact failure this branch already shipped once, one layer down.
+        #     Read from the gate's own source: the preflight spawn must pass
+        #     `env=preflight_env(...)` and must carry `-I`.
+        import ast
+        gate_src = ast.parse(GATE.read_text())
+        spawns = [n for n in ast.walk(gate_src)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                  and n.func.attr == "run" and n.args
+                  and isinstance(n.args[0], (ast.List, ast.Tuple))
+                  and any(isinstance(e, ast.Attribute) and e.attr == "executable"
+                          for e in n.args[0].elts)]
+        wired = []
+        for call in spawns:
+            argv_flags = {e.value for e in call.args[0].elts
+                          if isinstance(e, ast.Constant)}
+            env_kw = next((k.value for k in call.keywords if k.arg == "env"), None)
+            wired.append({"-I", "-S"} <= argv_flags
+                         and isinstance(env_kw, ast.Call)
+                         and isinstance(env_kw.func, ast.Name)
+                         and env_kw.func.id == "preflight_env")
+        out.append(("the gate spawns through that projection, isolated and site-free",
+                    len(spawns) >= 1 and all(wired)))
+
+        # 5c. EXECUTION, and the preservation half of the contract. Removing
+        #     ambient state must not change the preflight result for the
+        #     committed artifacts. The control arm proves the fixture is
+        #     genuinely hostile: the SAME PYTHONPATH, handed to an extractor run
+        #     without isolation, hijacks it outright — a planted `json.py` is
+        #     imported before the extractor's first line.
+        evil = d / "evil"
+        evil.mkdir(exist_ok=True)
+        (evil / "json.py").write_text('raise SystemExit("HIJACKED")\n')
+        hostile = {**gate_env(), "ARLIAI_API_KEY": "sk-sentinel",
+                   "PYTHONPATH": str(evil), "TMPDIR": str(evil),
+                   "VIRTUAL_ENV": str(evil)}
+        hijacked = subprocess.run(
+            [sys.executable, str(REPO / "tools/a1_v2_extract_schema.py"),
+             "--check", "--out", str(SCHEMA_PATH)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**hostile})
+        code, txt = run_real(GRAPH_PATH, SCHEMA_PATH, env=hostile)
+        out.append(("preflights still PASS with ambient state removed",
+                    "HIJACKED" in hijacked.stdout + hijacked.stderr
+                    and txt.count(" PASS ") >= 2 and code == 1))
+
+        # 5d. THE GRANT IS SCOPED, AND NOTHING AMBIENT IS REQUIRED. `HOME` used
+        #     to be the graph extractor's one declared capability, justified by
+        #     a foreign-owned checkout that git refuses without `safe.directory`.
+        #     Review's objection was that the grant is far wider than its
+        #     justification: a home directory carries every global git setting,
+        #     credential-helper configuration and arbitrary `include.path`. The
+        #     requirement now travels in the git command line, scoped to one
+        #     path, and `GIT_ENV_ALLOW` is empty.
+        #
+        #     The foreign-ownership arm itself needs `chown`, so it is recorded
+        #     in §2.3.1 as an explicit command rather than carried here, where it
+        #     would either fail for a non-root developer or be skipped into a
+        #     vacuous pass. What IS carried is the pair that catches a
+        #     regression: nothing ambient is consulted, and the scoped grant is
+        #     really on the command line.
+        argv_seen = d / "argv.txt"
+        probe = d / "argvshim"
+        probe.mkdir()
+        (probe / "git").write_text(
+            "#!%s\nimport sys, pathlib\n"
+            "pathlib.Path(%r).write_text(repr(sys.argv))\n"
+            "sys.exit(1)\n" % (sys.executable, str(argv_seen)))
+        (probe / "git").chmod(0o755)
+        saved_cand, saved_environ = xg.GIT_CANDIDATES, dict(os.environ)
+        try:
+            xg.GIT_CANDIDATES = (str(probe / "git"),)
+            xg._local_object("0" * 40, repo=REPO)
+            argv = argv_seen.read_text()
+            os.environ.clear()          # nothing ambient at all
+            xg.GIT_CANDIDATES = saved_cand
+            stripped = xg._local_object(xg.PINNED_BLOB, repo=REPO)
+            env_built = xg._git_env()
+        finally:
+            xg.GIT_CANDIDATES = saved_cand
+            os.environ.clear()
+            os.environ.update(saved_environ)
+        out.append(("the safe.directory grant is scoped and nothing is inherited",
+                    f"safe.directory={REPO.resolve()}" in argv
+                    and xg.GIT_ENV_ALLOW == ()
+                    and stripped is not None and stripped[0] == "blob"
+                    and set(env_built) == {"PATH"} | set(xg.GIT_ENV)))
+
+        # 5f. AN EMPTY ENVIRONMENT DOES NOT EMPTY GIT'S CONFIGURATION. The
+        #     system scope is read from a fixed path and owes nothing to the
+        #     environment, so `env -i` leaves `/etc/gitconfig` fully in effect —
+        #     reproduced directly, and the reason the "only the scoped grant"
+        #     claim was false as first written. Both scopes are now pinned.
+        #
+        #     Witnessed through GIT_CONFIG_SYSTEM/GIT_CONFIG_GLOBAL rather than
+        #     by writing to /etc: a corpus that edits machine-level
+        #     configuration to make a point is a worse idea than the defect. The
+        #     control arms hand git the hostile file WITHOUT each guard and
+        #     require it to be read, so neither arm can pass by the file simply
+        #     being unreachable.
+        hostile_cfg = d / "hostile.gitconfig"
+        hostile_cfg.write_text("[user]\n\tname = HOSTILE-CONFIG-STATE\n")
+        def _cfg(env_extra):
+            return subprocess.run(
+                [GIT, "-C", str(REPO), "config", "--get", "user.name"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace",
+                env={"PATH": str(Path(GIT).parent), **env_extra}).stdout.strip()
+        sys_leaks = _cfg({"GIT_CONFIG_SYSTEM": str(hostile_cfg)})
+        sys_guarded = _cfg({"GIT_CONFIG_SYSTEM": str(hostile_cfg),
+                            "GIT_CONFIG_NOSYSTEM": "1"})
+        glob_leaks = _cfg({"GIT_CONFIG_GLOBAL": str(hostile_cfg)})
+        glob_guarded = _cfg({"GIT_CONFIG_GLOBAL": os.devnull})
+        out.append(("git's config scopes are pinned, not merely unset",
+                    sys_leaks == "HOSTILE-CONFIG-STATE" and sys_guarded == ""
+                    and glob_leaks == "HOSTILE-CONFIG-STATE" and glob_guarded == ""
+                    and xg.GIT_ENV.get("GIT_CONFIG_NOSYSTEM") == "1"
+                    and xg.GIT_ENV.get("GIT_CONFIG_GLOBAL") == os.devnull))
+
+        # 5e. `-I` DOES NOT IMPLY `-S`. It implies -E, -P and -s: PYTHON*
+        #     variables, the script directory, and the USER site directory. The
+        #     SYSTEM site directory still initializes, so a `.pth` file or a
+        #     `sitecustomize` there runs arbitrary code before the extractor's
+        #     first line — an import hook, an exit, a changed result. Confirmed
+        #     against a real `.pth` planted in system site-packages: under `-I`
+        #     it printed; under `-I -S` it did not.
+        #
+        #     Carried here as the property rather than the plant, since a corpus
+        #     that writes into system site-packages to prove a point is a worse
+        #     idea than the defect. The control arm is the same probe without
+        #     `-S`, which must show site loaded — otherwise this passes on an
+        #     installation where there was nothing to disable.
+        site_probe = ("import sys;"
+                      "print('site' in sys.modules,"
+                      "any('packages' in p for p in sys.path))")
+        with_S = subprocess.run([sys.executable, "-I", "-S", "-c", site_probe],
+                                capture_output=True, text=True, env={})
+        without_S = subprocess.run([sys.executable, "-I", "-c", site_probe],
+                                   capture_output=True, text=True, env={})
+        out.append(("preflight children start with site initialization disabled",
+                    with_S.stdout.strip() == "False False"
+                    and without_S.stdout.strip() == "True True"))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.

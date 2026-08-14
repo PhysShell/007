@@ -1,7 +1,10 @@
 # A1-F v2 — Envelope v2
 
 **Status: VERIFIER LAYER CLOSED at `47b8371` (merged in #134). Post-closure
-correction PC-1 applied. Evidence-binding series open: EB-R1.**
+correction PC-1 applied. Evidence binding CLOSED at `1847aaa` (merged in #141):
+two independent reviewers failed to refute that commit and all four repository
+CI checks passed on it — failed independent falsification plus CI, not proof of
+absence. Environment-capability series open: EC-R1.**
 
 The E-R sequence is the *verifier* revision sequence and it ends at E-R21.
 Post-closure corrections are numbered separately and carry **implementation
@@ -194,6 +197,144 @@ it. E-R3 moved it into an environment variable, which is the same invitation
 with worse ergonomics — **E-R6 removed it entirely.** Steps 1–5 are now an
 importable `run_steps()`, the corpus calls that, and the shipped executable
 contains no bypass of any kind.
+
+#### 2.3.1 The capability contract for preflight children (EC-R1)
+
+The preflight spawns two python children. The question is **not** "which
+environment variables should we keep?" — that question starts from inheritance
+and negotiates downward. It is:
+
+> **What capabilities does *this* child require for its current executable
+> contract?**
+
+A name enters the projection only after a witness that the contract fails
+without it. Both entries below were derived that way, and the derivation removed
+things a careful reader would have kept.
+
+```text
+a1_v2_extract_schema.py    { }   witnessed: succeeds under `env -i`
+a1_v2_extract_graph.py     { }   witnessed: see below
+<any unknown tool>         { }   fail-closed by omission
+```
+
+Both sets are empty, and that is the answer the question produced rather than a
+target aimed at. Asking *what does this child require* rather than *what should
+we keep* left nothing standing.
+
+**The schema extractor's requirement is empty, and that is a fact about its
+code**, not a preference: it imports `argparse`, `json`, `sys`, `pathlib` and
+nothing else, spawns no process, reads no `os.environ`, creates no temporary
+file.
+
+**The graph extractor needs no `PATH` either**, which is the entry most likely
+to be added on reflex — it spawns git, so surely it must find git. It must not:
+since the resolver was pinned to absolute candidates it looks up no executable
+by name and synthesizes its own child's `PATH` from whichever candidate
+answered. Inheriting `PATH` here would re-open, one level up, precisely what
+that pinning closed.
+
+**`HOME` was the one witnessed requirement, and review showed the grant was
+still wider than its witness.** Against a checkout owned by another uid, git
+refuses with `detected dubious ownership` unless it can read the global config
+where `safe.directory` lives:
+
+```text
+env -i                         git -C <foreign> cat-file -t <oid>  -> fatal: dubious ownership
+env -i HOME=<home w/ safe.dir> git -C <foreign> cat-file -t <oid>  -> blob
+```
+
+The requirement is *treat this repository as safe*. What `HOME` hands over is a
+home directory and every global git setting in it — credential-helper
+configuration, arbitrary `include.path`, and whatever else lives there.
+Demonstrated: with `HOME`, the child reads unrelated global state; with the
+grant below, it does not.
+
+So the requirement travels in the command line, where it is scoped to one path
+and legible at the call site:
+
+```text
+env -i  git -c safe.directory=<repo> -C <foreign> cat-file -t <oid>  -> blob
+```
+
+No home directory, no config file, no variable — and `GIT_ENV_ALLOW` is now
+empty.
+
+**An empty environment does not empty git's configuration**, which is where the
+first version of that claim was wrong. The system scope is read from a fixed
+path and owes nothing to the environment: with a setting in `/etc/gitconfig`,
+`env -i git config --get user.name` returns it. `GIT_CONFIG_NOSYSTEM=1` closes
+it. `GIT_CONFIG_GLOBAL=/dev/null` pins the remaining scope, and that one is
+**construction rather than a repaired leak** — git was tested here for a
+passwd-derived home with `HOME` unset and did not read one, so the pin exists so
+that the claim holds by construction rather than by which platform ran the test.
+The repository's own config is still read, necessarily; it cannot add an object
+directory, and this layer already asserts trust for exactly that path. Asserting trust for exactly this path grants nothing an attacker would
+not already hold: `repo` defaults to the checkout containing the extractor's own
+source, so anyone who owns it owns the program too.
+
+**The foreign-ownership arm is recorded here as a command rather than carried in
+the corpus.** Building it requires `chown`, which would make the case fail for a
+non-root developer or be skipped into a vacuous pass — and this effort has
+already paid twice for witnesses that could pass without demonstrating anything.
+What the corpus carries instead is the pair that catches a regression: that
+nothing ambient is consulted, and that the scoped grant is really on the git
+command line.
+
+That witness also exposed something the environment work was not looking for.
+Without `HOME`, `_local_object` returns `None`, which §2.5.1's vocabulary
+renders as **UNRESOLVABLE IN THIS CHECKOUT** — a statement about the object's
+availability standing in for a refusal about permission. The object is present;
+git declined to read the repository. That is the E-R9 family again, in the layer
+built to fix it: the resolver's observation granularity (`returncode != 0`) is
+coarser than the distinction its diagnostic claims. **Recorded as a finding, not
+fixed here** — it belongs to the extractor→git boundary, which this change
+declares out of scope.
+
+`TMPDIR`, `PYTHONPATH`, `VIRTUAL_ENV` are absent deliberately. None is a
+capability requirement; `PYTHONPATH` is a code-loading *surface*, and a
+demonstrated one — a `json.py` planted on it hijacks the schema extractor before
+its first line runs. Should a future extractor need temporary storage, that is a
+new capability satisfied by a **parent-created directory**, not by inheriting an
+ambient path.
+
+**Two properties, two mechanisms, neither subsuming the other.**
+
+```text
+constructed env   proves: the child never receives a forbidden capability
+python -I -S      proves: Python's startup and import machinery does not
+                          take ambient control back
+```
+
+**`-I` alone was not enough, and the gap is documented rather than inferred.**
+`-I` implies `-E`, `-P` and `-s`: `PYTHON*` variables, the script directory, and
+the *user* site directory. It does **not** imply `-S`, so the *system* site
+directory still initializes and a `.pth` file or `sitecustomize` there runs
+arbitrary code before the extractor's first line — an import hook, an exit, an
+altered result. Confirmed against a real `.pth` planted in system
+site-packages: under `-I` it executed, under `-I -S` it did not. Both extractors
+are standard-library-only, so `-S` costs them nothing.
+
+`-I -S` would not stop a child reading a credential out of `os.environ`; a
+constructed environment would not stop an interpreter that was told to import
+from elsewhere before this file's first line runs. The pairing is the same shape
+as the `GIT_ENV` guards standing next to the object-id postcondition one floor
+down, which is either a coincidence or the only way this kind of property is
+ever actually held.
+
+**The guarantee, stated exactly.** A python preflight child receives only
+explicitly granted environment capabilities; a credential present in the gate
+parent's environment is absent from every extractor child's environment; Python
+startup and import configuration is not inherited as an undeclared capability.
+And the preservation half, which is not optional: removing ambient state does
+not change the successful preflight result for the currently committed
+artifacts.
+
+**What this does not claim.** The gate *parent* is launched by whoever runs it,
+and its own imports are ambient — demonstrated, since the same planted
+`PYTHONPATH` hijacks the parent before it constructs any child environment at
+all. EC-R1 is a statement about the parent→child boundary, not about the
+parent's own provenance. That premise is the one already declared in §2.5.1: a
+program cannot verify the machine executing it.
 
 ### 2.4 It fails closed, and the corpus is executable
 
@@ -669,6 +810,100 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### EC-R1 — the preflight child's environment becomes a declared capability set
+
+**A new series, and deliberately not `EB-R2`.** §8.5 is closed and merged at
+`1847aaa`; evidence binding is finished. This is environment capability, whose
+acceptance target is different in kind: not git **object** provenance but
+**process capability** provenance — above all, that a credential in the parent's
+environment does not become readable by an extractor child without an explicit
+grant.
+
+**What was open.** EB-R1 recorded a residual four times without closing it: the
+gate spawns both extractors with an inherited environment. It predated that
+branch and was correctly kept out of it. It is the subject here.
+
+**The contract was frozen before the code**, in §2.3.1, and deriving it changed
+the answer twice against the expectation it started from.
+
+*`PATH` came out.* It was expected to stay for the graph extractor, on the
+reasoning that a process spawning git must be able to find git. It must not:
+pinning the resolver to absolute candidates removed every by-name lookup, so
+inheriting `PATH` at this level would re-open one floor up exactly what
+`034f4f2` closed one floor down. The rationale for keeping it described the
+code as it stood two commits earlier.
+
+*`HOME` went in on a witness rather than on plausibility* — a foreign-owned
+checkout, where git refuses with `detected dubious ownership` unless it can read
+`safe.directory` from the global config.
+
+**Both reviewers then took one of those two entries apart, on the exact head,
+each on a different mechanism.**
+
+*CodeRabbit, P1 — the grant was still wider than its witness.* The requirement
+is "treat this repository as safe"; `HOME` hands over a home directory and every
+global git setting in it. Reproduced: with `HOME` the child reads unrelated
+global state. The proposed repair was a parent-created minimal config passed as
+`GIT_CONFIG_GLOBAL`; testing found something narrower still — `git -c
+safe.directory=<repo>` needs no file, no variable and no home directory, works
+under `env -i`, and is scoped to exactly one path. `GIT_ENV_ALLOW` and both
+capability sets are now **empty**. The finding was correct and its severity was
+correct; the fix is smaller than the one suggested, which is the good case.
+
+*Codex, P1 — `-I` does not imply `-S`.* It implies `-E`, `-P` and `-s`, so the
+*system* site directory still initializes and a `.pth` or `sitecustomize` there
+executes before the extractor's first line. Reproduced with a real `.pth`
+planted in system site-packages: under `-I` it ran, under `-I -S` it did not.
+This is precisely the review question that was asked — *what does `-I` cover
+that I have assumed it covers* — answered against the assumption. The
+preservation claim had been true only on installations with no relevant system
+site customization, which is a weaker statement than the one written down.
+
+*CodeRabbit again, P1 on the fix — an empty environment is not an empty
+configuration.* `-c safe.directory=<repo>` adds one value; it does not close
+git's configuration scopes, and the system scope is read from a fixed path
+regardless of the environment. Reproduced. `GIT_CONFIG_NOSYSTEM=1` and
+`GIT_CONFIG_GLOBAL=/dev/null` join the guards. One half of that report did **not**
+reproduce and is recorded as not reproduced: git was tested for a passwd-derived
+home directory with `HOME` unset, and did not read one — the reviewer had
+correctly hedged it as conditional, and it stays a construction rather than a
+fixed leak.
+
+Every one of these is the same shape as the whole effort: **the guarantee was
+narrower than its wording** — once by granting more than the witness required,
+once by assuming a flag covered more than it does, once by assuming an empty
+environment implied an empty configuration.
+
+**A finding fell out of that witness, and it is not an environment problem.**
+Without `HOME`, `_local_object` returns `None` and the diagnostic reads
+`UNRESOLVABLE IN THIS CHECKOUT`. The object is present; git declined to read the
+repository. An availability claim is standing in for a permission refusal —
+the E-R9 family, inside the layer built to answer it, found by an experiment
+aimed at something else. **Open, not fixed**: it lives on the extractor→git
+boundary, which this change lists OUT of scope, and folding it in would repeat
+the mistake of shipping an unwitnessed correction inside a change about
+witnesses.
+
+**Three witnesses, split by what they prove.** The lesson from this effort's
+failed harnesses is that a probe required to both reach its target *and* prove a
+negative can stop running and report success by silence. So: 5a proves the
+**capability** constructively (two secret-shaped variables, not one, so the fix
+cannot degrade into a credential denylist; schema projects to `{}`; an unknown
+tool projects to `{}` rather than to everything). 5b proves the **call site**,
+by reading the gate's own AST — a projection helper that exists and is never
+passed is the exact failure this effort already shipped once. 5c proves
+**execution**, with a control arm establishing the fixture is genuinely hostile:
+the same `PYTHONPATH`, handed to an extractor without isolation, hijacks it.
+
+**`run_real` is held to the property, not exempted from it.** It reproduces the
+gate-invocation path rather than owning an independent one, so it now spawns
+through a constructed environment too. It is witness infrastructure, and is not
+being promoted into a second production security boundary.
+
+**Corpus 63 → 69.** `graph.json` byte-identical at `5c69fde8`; Phase G,
+`PINNED_BLOB`, `PIN_HISTORY`, the semantic registry, steps 1–5 and gate
+semantics all unchanged; gate still exit 1.
 
 ### EB-R1 — `superseding_authority` becomes resolvable, and stays non-adjudicating
 

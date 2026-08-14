@@ -95,8 +95,26 @@ _OID = re.compile(r"[0-9a-f]{40}")
 # or fetch — verified — so the reach is a local checkout, i.e. exactly the
 # reach of an ambient environment variable, and exactly the threat this layer
 # is about.
+# The fourth and fifth guards close git's CONFIGURATION scopes, which an empty
+# environment does not. Reproduced: with `/etc/gitconfig` carrying a setting,
+# `env -i git config --get user.name` returns it — the system scope is read from
+# a fixed path and owes nothing to the environment. `GIT_CONFIG_NOSYSTEM=1`
+# suppresses it.
+#
+# `GIT_CONFIG_GLOBAL=/dev/null` pins the remaining scope shut. This one is
+# CONSTRUCTION, not a repaired leak, and the difference is worth keeping
+# straight: git was tested here for a passwd-derived home when `HOME` is unset,
+# and it did not read one. The pin is there so the claim — the child's
+# configuration is exactly the scoped grant on the command line — is true by
+# construction rather than by which platform happened to run the test.
+#
+# The repository's OWN config is still read, necessarily: without it the
+# directory is not a repository. It cannot add an object directory (alternates
+# are a file in the object store, not a config key), and this layer already
+# asserts trust for exactly this path.
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
-           "GIT_NO_REPLACE_OBJECTS": "1"}
+           "GIT_NO_REPLACE_OBJECTS": "1",
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
 
 # The child environment is CONSTRUCTED, not inherited. Copying `os.environ`
 # wholesale made 135 ambient variables part of this extractor's input surface
@@ -117,10 +135,28 @@ GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
 #
 # Hazard 2 is why this is an allowlist and not a denylist of credential names:
 # a denylist strips the names someone remembered, and the redirection family is
-# open-ended in exactly that way. `HOME` is passed so git can read the global
-# config where CI records `safe.directory`; it cannot add an object directory.
-# Nothing else is inherited.
-GIT_ENV_ALLOW = ("HOME",)
+# open-ended in exactly that way.
+#
+# The allowlist is now EMPTY. It held `HOME`, so that git could read the global
+# config where `safe.directory` is recorded — a checkout owned by another uid is
+# refused with "detected dubious ownership" without it. EC-R1's review pointed
+# out that this grant is far wider than the requirement that justified it: the
+# need is "treat THIS repository as safe", and what was handed over was the
+# whole home directory and every global git setting in it, credential-helper
+# configuration and arbitrary `include.path` among them. Demonstrated — with
+# `HOME` the child reads unrelated global state; with the grant below it does
+# not.
+#
+# The requirement is therefore expressed where it belongs, in the command line,
+# scoped to the one repository being read:
+#
+#     git -c safe.directory=<repo> -C <repo> cat-file …
+#
+# which succeeds under `env -i`. No home directory, no config file, no variable.
+# Asserting trust for exactly this path grants nothing an attacker would not
+# already hold: `repo` defaults to the checkout that contains this file, so
+# anyone who owns it owns this program's source too.
+GIT_ENV_ALLOW: tuple[str, ...] = ()
 
 # `PATH` is NOT among them, and that is a third hazard rather than tidiness.
 # While it was inherited, this module ran the unqualified command `git`, so the
@@ -187,13 +223,17 @@ def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
     it enforces, instead of enumerating the ways the distinction can be lost.
     """
     env, git = _git_env(), _git_binary()
-    kind = subprocess.run([git, "-C", str(repo), "cat-file", "-t", oid],
+    # `-c safe.directory` is a CAPABILITY GRANT, written where it can be read.
+    # It is scoped to this one path, it survives an empty environment, and it
+    # replaces handing the child a home directory to go looking in.
+    base = [git, "-c", f"safe.directory={Path(repo).resolve()}", "-C", str(repo)]
+    kind = subprocess.run([*base, "cat-file", "-t", oid],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env)
     if kind.returncode != 0:
         return None
     kind = kind.stdout.strip()
-    body = subprocess.run([git, "-C", str(repo), "cat-file", kind, oid],
+    body = subprocess.run([*base, "cat-file", kind, oid],
                           capture_output=True, env=env)
     # Not a locator defect and not "unresolvable": git answered, and answered
     # with bytes that are not the object asked for. No verdict computed on top
