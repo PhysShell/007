@@ -150,10 +150,9 @@ prevents it.
 ### 4.2 The states
 
 Every branch below presupposes §4.3. Where its prerequisites do not hold, the
-classification is not entered at all. The `RESOLVED` branch additionally
-requires the replacement guard, for the reason §4.3.2 gives: that state rests on
-the postcondition being **complete**, and the guard is what keeps an unchecked
-collision premise from having to hold against a deliberate attack.
+classification is not entered at all. No branch carries a replacement-guard
+condition: that condition was added in an earlier revision on a justification
+§4.3.2 records as false, and withdrawn with it.
 
 ```text
 every git invocation exited zero
@@ -247,8 +246,8 @@ that sentence carries a requirement.
 The trust-boundary clause is narrow on purpose, and the first version of it was
 not. It said *nothing the repository controls may execute or transform anything*
 — which swallows `refs/replace`, since a replace ref is repository-controlled
-and does substitute the bytes returned for a name. §4.4 designates exactly that
-case a **guard** failure, classified by the identity postcondition, and §7's
+and does substitute the bytes returned for a name. §4.3.1 below designates exactly
+that case a **guard** failure, classified by the identity postcondition, and §7's
 witness 4 requires it to yield `IDENTITY_VIOLATION`. A blanket clause made those
 unsatisfiable — the same contradiction as finding 4, reintroduced by a broader
 rule while repairing something else.
@@ -271,6 +270,48 @@ A prerequisite is required precisely where the postcondition is blind. Where the
 postcondition can see, a guard is defence in depth and its failure is a finding
 rather than a disqualification — which is what witness 4 exercises, and what
 corpus case 3t already asserts.
+
+This is not a new position, and the artifact is named so it can be re-checked
+rather than taken from this document's summary of it:
+
+```text
+artifact   tools/tests/test_a1_v2_ledger_gate.py, case 3t (~L880-L900)
+introduced 2d372a7  ("EB-R1 review fix 4 — check the bytes against the name
+                     asked for")
+asserts    with GIT_NO_REPLACE_OBJECTS deliberately removed from GIT_ENV,
+           a substituted object still raises OBJECT IDENTITY VIOLATED
+```
+
+What the witness **asserts** is that one abort still happens without that one
+guard. The guard/prerequisite distinction in this section is an **inference**
+drawn from it — the witness is evidence for the principle, not a statement of
+it, and a reader who disagrees with the inference should be able to go and read
+the assertion. The first draft of this contract contradicted the asserted
+behaviour outright, which had already shipped and been independently reviewed
+twice.
+
+These are already-merged properties, not new work. Naming them here binds this
+contract to them, so that a future implementation cannot satisfy the letter of
+§4.2 while answering a weaker question than §3 asks. **This does not choose the
+git command** — that stays out of scope per §10. It forbids the byte-derived
+states from floating free of the guarantees that make them mean anything.
+
+The merged implementation already holds every prerequisite, so the counterfeit
+scenario above is not reachable there today. The defect is in what this
+document would have *licensed*: an implementation could satisfy the frozen rule,
+drop a prerequisite, and issue the system's strongest accusation on the strength
+of output from an arbitrary program. A preregistration is judged by what it
+permits, not by what the current code happens to do.
+
+**The cause of a non-zero exit is not classified.** No branch of this rule reads
+`stderr`, matches on a message, or consults an exit code beyond
+"did we obtain a trustworthy kind and bytes". Enumerating known failure
+messages is the instance-by-instance repair this effort has spent six rounds
+declining, and a resolver that classifies by diagnostic string inherits every
+future change to git's wording as a silent semantic change.
+
+`RESOLVED` carries `kind` because the resolver observed it. It does **not**
+judge whether that kind is the one the citation required.
 
 **This criterion rests on a premise, and the premise is stated rather than
 assumed.** "The bytes necessarily change, so recomputing the object id reveals
@@ -365,7 +406,7 @@ PREMISE (inherited from §2.5.1, not introduced here, not dischargeable here)
 ```
 
 Recording it at this layer is therefore all this document can honestly do, and
-the replacement guard returns to being a **guard** under §4.4: its failure
+the replacement guard returns to being a **guard** under §4.3.1: its failure
 produces bytes that do not hash to the name, and the postcondition detects them.
 
 ## 5. Explicit non-claims
@@ -439,7 +480,7 @@ Listed here so the implementation cannot choose the experiments that suit it.
    both commands fail immediately and no debris is produced to misclassify.
 4. **Substituted bytes** (replace-style identity violation) →
    `IDENTITY_VIOLATION`, existing postcondition intact. The §4.3 prerequisites
-   all hold throughout; only the §4.4 *guard* is removed, which is what makes
+   all hold throughout; only the §4.3.1 *guard* is removed, which is what makes
    this witness reachable at all.
 5. **A non-blob object that resolves** → `RESOLVED(kind, bytes)`; the *locator*
    layer, not the resolver, classifies the wrong type.
