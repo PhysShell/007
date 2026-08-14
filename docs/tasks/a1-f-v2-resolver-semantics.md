@@ -359,7 +359,8 @@ PREREQUISITE   the interference can leave the object id MATCHING, so
                - smudge/textconv filters  (pass-through leaves bytes identical)
 
 GUARD          the interference changes the bytes, so recomputing the object
-               id reveals it — UNDER THE PREMISE BELOW
+               id reveals it — see §4.3.2 for which hash property that needs,
+               and for which state actually needs it
                - refs/replace substitution (substitute bytes, different hash)
 ```
 
@@ -411,18 +412,18 @@ future change to git's wording as a silent semantic change.
 judge whether that kind is the one the citation required.
 
 
-**This criterion rests on a premise, and the premise is stated rather than
-assumed.** "The bytes necessarily change, so recomputing the object id reveals
-it" is not a mechanical fact; it holds only if the object-id algorithm is
-collision resistant. Two distinct byte sequences sharing an id would let a
-replace ref substitute content that hashes correctly, and the postcondition —
-the thing this whole classification leans on — would see nothing.
+**What this criterion does and does not need.** "The bytes change, so
+recomputing the object id reveals it" is not a mechanical fact — but the
+property it needs is **second-preimage resistance for the cited oid**, stated in
+§4.3.2, and not collision resistance. A substitution aimed at an oid that
+already exists must produce different bytes with that same id, which is the
+second-preimage problem.
+
+The premise therefore bears on `RESOLVED` only. `IDENTITY_VIOLATION` needs
+nothing here: it fires on an *observed* mismatch, and an observation does not
+depend on the strength of the hash.
 
 ```text
-PREMISE (declared, not proved here)
-    the repository's object-id algorithm is collision resistant for the
-    substitutions this contract classifies
-
 verified about this repository and toolchain:
     object format          sha1        (git rev-parse --show-object-format)
     postcondition digest   Python hashlib.sha1 — PLAIN SHA-1, no collision
@@ -599,7 +600,8 @@ applied one floor down.
 
 `IDENTITY_VIOLATION` preserves the existing family-level postcondition
 (recompute the object id; whatever substitutes the bytes, the substitute does
-not hash to the name — under §4.3.1's declared collision-resistance premise).
+not hash to the name). This state rests on the postcondition's SOUNDNESS and
+carries no hash premise at all — §4.3.2.
 This preregistration does not weaken it and does not propose to.
 
 **`MALFORMED_LOCATOR` stays one floor up.** A resolver that successfully
