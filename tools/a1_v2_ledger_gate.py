@@ -67,23 +67,33 @@ SCHEMA_EXTRACTOR = REPO / "tools/a1_v2_extract_schema.py"
 #     requirement is therefore the empty set, witnessed: it succeeds under
 #     `env -i`.
 #
-#   graph extractor — also stdlib-only, but it spawns git. It still needs no
-#     PATH: since the git resolver was pinned to absolute candidates it looks up
-#     no executable by name and synthesizes its own child's PATH. HOME is the
-#     one witnessed requirement, and the witness is specific — against a
-#     checkout owned by another uid, git refuses with "detected dubious
-#     ownership" unless it can read the global config where `safe.directory`
-#     lives. Without HOME the resolver returns None, which this repository's
-#     vocabulary renders as UNRESOLVABLE IN THIS CHECKOUT: a statement about the
-#     object's availability, standing in for a refusal about permission.
+#   graph extractor — also stdlib-only, but it spawns git. It needs no PATH:
+#     the git resolver is pinned to absolute candidates, looks up no executable
+#     by name, and synthesizes its own child's PATH.
+#
+#     It briefly held HOME, so git could read the global config where
+#     `safe.directory` lives — a checkout owned by another uid is refused with
+#     "detected dubious ownership" without it. Review showed that grant to be far
+#     wider than the requirement justifying it: what the extractor needs is
+#     "treat THIS repository as safe", and HOME hands over a whole home
+#     directory, every global git setting in it, credential-helper configuration
+#     and arbitrary `include.path`. The requirement now travels in the git
+#     command line instead — `git -c safe.directory=<repo>` — scoped to one path
+#     and working under `env -i`. So this entry is empty too.
 #
 # TMPDIR, PYTHONPATH, VIRTUAL_ENV are absent deliberately. None is a capability
 # requirement here; PYTHONPATH in particular is a code-loading surface, and a
 # demonstrated one — a `json.py` planted on it hijacks the schema extractor
 # outright. Should a future extractor need temporary storage, that is a new
 # capability with a parent-created directory, not an inherited ambient path.
+#
+# BOTH SETS ARE NOW EMPTY. That is the answer the question produced, not a
+# target aimed at: asking "what does this child require?" rather than "what
+# should we keep?" left nothing standing. The projection is kept rather than
+# replaced by passing `env={}`, because the next extractor will need something,
+# and the place to declare it should already exist.
 PREFLIGHT_CAPABILITIES: dict[str, tuple[str, ...]] = {
-    GRAPH_EXTRACTOR.name: ("HOME",),
+    GRAPH_EXTRACTOR.name: (),
     SCHEMA_EXTRACTOR.name: (),
 }
 
@@ -584,7 +594,7 @@ def main() -> int:
         # and a constructed env would not stop an interpreter told to import
         # from elsewhere before this file's first line runs. The same shape as
         # the GIT_ENV guards next to the object-id postcondition one floor down.
-        p = subprocess.run([sys.executable, "-I", str(tool), "--check", "--out", out],
+        p = subprocess.run([sys.executable, "-I", "-S", str(tool), "--check", "--out", out],
                            capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
                            env=preflight_env(tool, os.environ))

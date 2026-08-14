@@ -210,10 +210,14 @@ without it. Both entries below were derived that way, and the derivation removed
 things a careful reader would have kept.
 
 ```text
-a1_v2_extract_schema.py    { }            witnessed: succeeds under `env -i`
-a1_v2_extract_graph.py     { HOME }       witnessed: see below
-<any unknown tool>         { }            fail-closed by omission
+a1_v2_extract_schema.py    { }   witnessed: succeeds under `env -i`
+a1_v2_extract_graph.py     { }   witnessed: see below
+<any unknown tool>         { }   fail-closed by omission
 ```
+
+Both sets are empty, and that is the answer the question produced rather than a
+target aimed at. Asking *what does this child require* rather than *what should
+we keep* left nothing standing.
 
 **The schema extractor's requirement is empty, and that is a fact about its
 code**, not a preference: it imports `argparse`, `json`, `sys`, `pathlib` and
@@ -227,14 +231,41 @@ by name and synthesizes its own child's `PATH` from whichever candidate
 answered. Inheriting `PATH` here would re-open, one level up, precisely what
 that pinning closed.
 
-**`HOME` is the one witnessed requirement, and the witness is specific.**
-Against a checkout owned by another uid, git refuses with `detected dubious
-ownership` unless it can read the global config where `safe.directory` lives:
+**`HOME` was the one witnessed requirement, and review showed the grant was
+still wider than its witness.** Against a checkout owned by another uid, git
+refuses with `detected dubious ownership` unless it can read the global config
+where `safe.directory` lives:
 
 ```text
 env -i                         git -C <foreign> cat-file -t <oid>  -> fatal: dubious ownership
 env -i HOME=<home w/ safe.dir> git -C <foreign> cat-file -t <oid>  -> blob
 ```
+
+The requirement is *treat this repository as safe*. What `HOME` hands over is a
+home directory and every global git setting in it — credential-helper
+configuration, arbitrary `include.path`, and whatever else lives there.
+Demonstrated: with `HOME`, the child reads unrelated global state; with the
+grant below, it does not.
+
+So the requirement travels in the command line, where it is scoped to one path
+and legible at the call site:
+
+```text
+env -i  git -c safe.directory=<repo> -C <foreign> cat-file -t <oid>  -> blob
+```
+
+No home directory, no config file, no variable — and `GIT_ENV_ALLOW` is now
+empty. Asserting trust for exactly this path grants nothing an attacker would
+not already hold: `repo` defaults to the checkout containing the extractor's own
+source, so anyone who owns it owns the program too.
+
+**The foreign-ownership arm is recorded here as a command rather than carried in
+the corpus.** Building it requires `chown`, which would make the case fail for a
+non-root developer or be skipped into a vacuous pass — and this effort has
+already paid twice for witnesses that could pass without demonstrating anything.
+What the corpus carries instead is the pair that catches a regression: that
+nothing ambient is consulted, and that the scoped grant is really on the git
+command line.
 
 That witness also exposed something the environment work was not looking for.
 Without `HOME`, `_local_object` returns `None`, which §2.5.1's vocabulary
@@ -257,11 +288,20 @@ ambient path.
 
 ```text
 constructed env   proves: the child never receives a forbidden capability
-python -I         proves: Python's startup and import machinery does not
+python -I -S      proves: Python's startup and import machinery does not
                           take ambient control back
 ```
 
-`-I` would not stop a child reading a credential out of `os.environ`; a
+**`-I` alone was not enough, and the gap is documented rather than inferred.**
+`-I` implies `-E`, `-P` and `-s`: `PYTHON*` variables, the script directory, and
+the *user* site directory. It does **not** imply `-S`, so the *system* site
+directory still initializes and a `.pth` file or `sitecustomize` there runs
+arbitrary code before the extractor's first line — an import hook, an exit, an
+altered result. Confirmed against a real `.pth` planted in system
+site-packages: under `-I` it executed, under `-I -S` it did not. Both extractors
+are standard-library-only, so `-S` costs them nothing.
+
+`-I -S` would not stop a child reading a credential out of `os.environ`; a
 constructed environment would not stop an interpreter that was told to import
 from elsewhere before this file's first line runs. The pairing is the same shape
 as the `GIT_ENV` guards standing next to the object-id postcondition one floor
@@ -785,6 +825,32 @@ code as it stood two commits earlier.
 checkout, where git refuses with `detected dubious ownership` unless it can read
 `safe.directory` from the global config.
 
+**Both reviewers then took one of those two entries apart, on the exact head,
+each on a different mechanism.**
+
+*CodeRabbit, P1 — the grant was still wider than its witness.* The requirement
+is "treat this repository as safe"; `HOME` hands over a home directory and every
+global git setting in it. Reproduced: with `HOME` the child reads unrelated
+global state. The proposed repair was a parent-created minimal config passed as
+`GIT_CONFIG_GLOBAL`; testing found something narrower still — `git -c
+safe.directory=<repo>` needs no file, no variable and no home directory, works
+under `env -i`, and is scoped to exactly one path. `GIT_ENV_ALLOW` and both
+capability sets are now **empty**. The finding was correct and its severity was
+correct; the fix is smaller than the one suggested, which is the good case.
+
+*Codex, P1 — `-I` does not imply `-S`.* It implies `-E`, `-P` and `-s`, so the
+*system* site directory still initializes and a `.pth` or `sitecustomize` there
+executes before the extractor's first line. Reproduced with a real `.pth`
+planted in system site-packages: under `-I` it ran, under `-I -S` it did not.
+This is precisely the review question that was asked — *what does `-I` cover
+that I have assumed it covers* — answered against the assumption. The
+preservation claim had been true only on installations with no relevant system
+site customization, which is a weaker statement than the one written down.
+
+Both findings are the same shape as the whole effort: **the guarantee was
+narrower than its wording**, once by granting more than the witness required,
+once by assuming a flag covered more than it does.
+
 **A finding fell out of that witness, and it is not an environment problem.**
 Without `HOME`, `_local_object` returns `None` and the diagnostic reads
 `UNRESOLVABLE IN THIS CHECKOUT`. The object is present; git declined to read the
@@ -811,7 +877,7 @@ gate-invocation path rather than owning an independent one, so it now spawns
 through a constructed environment too. It is witness infrastructure, and is not
 being promoted into a second production security boundary.
 
-**Corpus 63 → 66.** `graph.json` byte-identical at `5c69fde8`; Phase G,
+**Corpus 63 → 68.** `graph.json` byte-identical at `5c69fde8`; Phase G,
 `PINNED_BLOB`, `PIN_HISTORY`, the semantic registry, steps 1–5 and gate
 semantics all unchanged; gate still exit 1.
 

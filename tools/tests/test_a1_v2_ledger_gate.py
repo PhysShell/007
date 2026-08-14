@@ -97,7 +97,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 66
+EXPECTED_TOTAL = 68
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -988,7 +988,7 @@ def preflight_cases() -> list[tuple[str, bool]]:
             u_env = gate.preflight_env(Path("a1_v2_extract_future.py"), os.environ)
             out.append(("preflight children get only declared capabilities",
                         not (set(g_env) & set(secrets))
-                        and set(g_env) <= {"HOME"} and s_env == {} and u_env == {}))
+                        and g_env == {} and s_env == {} and u_env == {}))
         finally:
             for k, v in saved_env.items():
                 if v is None:
@@ -1014,11 +1014,11 @@ def preflight_cases() -> list[tuple[str, bool]]:
             argv_flags = {e.value for e in call.args[0].elts
                           if isinstance(e, ast.Constant)}
             env_kw = next((k.value for k in call.keywords if k.arg == "env"), None)
-            wired.append("-I" in argv_flags
+            wired.append({"-I", "-S"} <= argv_flags
                          and isinstance(env_kw, ast.Call)
                          and isinstance(env_kw.func, ast.Name)
                          and env_kw.func.id == "preflight_env")
-        out.append(("the gate actually spawns through that projection",
+        out.append(("the gate spawns through that projection, isolated and site-free",
                     len(spawns) >= 1 and all(wired)))
 
         # 5c. EXECUTION, and the preservation half of the contract. Removing
@@ -1042,6 +1042,72 @@ def preflight_cases() -> list[tuple[str, bool]]:
         out.append(("preflights still PASS with ambient state removed",
                     "HIJACKED" in hijacked.stdout + hijacked.stderr
                     and txt.count(" PASS ") >= 2 and code == 1))
+
+        # 5d. THE GRANT IS SCOPED, AND NOTHING AMBIENT IS REQUIRED. `HOME` used
+        #     to be the graph extractor's one declared capability, justified by
+        #     a foreign-owned checkout that git refuses without `safe.directory`.
+        #     Review's objection was that the grant is far wider than its
+        #     justification: a home directory carries every global git setting,
+        #     credential-helper configuration and arbitrary `include.path`. The
+        #     requirement now travels in the git command line, scoped to one
+        #     path, and `GIT_ENV_ALLOW` is empty.
+        #
+        #     The foreign-ownership arm itself needs `chown`, so it is recorded
+        #     in §2.3.1 as an explicit command rather than carried here, where it
+        #     would either fail for a non-root developer or be skipped into a
+        #     vacuous pass. What IS carried is the pair that catches a
+        #     regression: nothing ambient is consulted, and the scoped grant is
+        #     really on the command line.
+        argv_seen = d / "argv.txt"
+        probe = d / "argvshim"
+        probe.mkdir()
+        (probe / "git").write_text(
+            "#!%s\nimport sys, pathlib\n"
+            "pathlib.Path(%r).write_text(repr(sys.argv))\n"
+            "sys.exit(1)\n" % (sys.executable, str(argv_seen)))
+        (probe / "git").chmod(0o755)
+        saved_cand, saved_environ = xg.GIT_CANDIDATES, dict(os.environ)
+        try:
+            xg.GIT_CANDIDATES = (str(probe / "git"),)
+            xg._local_object("0" * 40, repo=REPO)
+            argv = argv_seen.read_text()
+            os.environ.clear()          # nothing ambient at all
+            xg.GIT_CANDIDATES = saved_cand
+            stripped = xg._local_object(xg.PINNED_BLOB, repo=REPO)
+            env_built = xg._git_env()
+        finally:
+            xg.GIT_CANDIDATES = saved_cand
+            os.environ.clear()
+            os.environ.update(saved_environ)
+        out.append(("the safe.directory grant is scoped and nothing is inherited",
+                    f"safe.directory={REPO.resolve()}" in argv
+                    and xg.GIT_ENV_ALLOW == ()
+                    and stripped is not None and stripped[0] == "blob"
+                    and set(env_built) == {"PATH"} | set(xg.GIT_ENV)))
+
+        # 5e. `-I` DOES NOT IMPLY `-S`. It implies -E, -P and -s: PYTHON*
+        #     variables, the script directory, and the USER site directory. The
+        #     SYSTEM site directory still initializes, so a `.pth` file or a
+        #     `sitecustomize` there runs arbitrary code before the extractor's
+        #     first line — an import hook, an exit, a changed result. Confirmed
+        #     against a real `.pth` planted in system site-packages: under `-I`
+        #     it printed; under `-I -S` it did not.
+        #
+        #     Carried here as the property rather than the plant, since a corpus
+        #     that writes into system site-packages to prove a point is a worse
+        #     idea than the defect. The control arm is the same probe without
+        #     `-S`, which must show site loaded — otherwise this passes on an
+        #     installation where there was nothing to disable.
+        site_probe = ("import sys;"
+                      "print('site' in sys.modules,"
+                      "any('packages' in p for p in sys.path))")
+        with_S = subprocess.run([sys.executable, "-I", "-S", "-c", site_probe],
+                                capture_output=True, text=True, env={})
+        without_S = subprocess.run([sys.executable, "-I", "-c", site_probe],
+                                   capture_output=True, text=True, env={})
+        out.append(("preflight children start with site initialization disabled",
+                    with_S.stdout.strip() == "False False"
+                    and without_S.stdout.strip() == "True True"))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.

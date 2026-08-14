@@ -117,10 +117,28 @@ GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
 #
 # Hazard 2 is why this is an allowlist and not a denylist of credential names:
 # a denylist strips the names someone remembered, and the redirection family is
-# open-ended in exactly that way. `HOME` is passed so git can read the global
-# config where CI records `safe.directory`; it cannot add an object directory.
-# Nothing else is inherited.
-GIT_ENV_ALLOW = ("HOME",)
+# open-ended in exactly that way.
+#
+# The allowlist is now EMPTY. It held `HOME`, so that git could read the global
+# config where `safe.directory` is recorded — a checkout owned by another uid is
+# refused with "detected dubious ownership" without it. EC-R1's review pointed
+# out that this grant is far wider than the requirement that justified it: the
+# need is "treat THIS repository as safe", and what was handed over was the
+# whole home directory and every global git setting in it, credential-helper
+# configuration and arbitrary `include.path` among them. Demonstrated — with
+# `HOME` the child reads unrelated global state; with the grant below it does
+# not.
+#
+# The requirement is therefore expressed where it belongs, in the command line,
+# scoped to the one repository being read:
+#
+#     git -c safe.directory=<repo> -C <repo> cat-file …
+#
+# which succeeds under `env -i`. No home directory, no config file, no variable.
+# Asserting trust for exactly this path grants nothing an attacker would not
+# already hold: `repo` defaults to the checkout that contains this file, so
+# anyone who owns it owns this program's source too.
+GIT_ENV_ALLOW: tuple[str, ...] = ()
 
 # `PATH` is NOT among them, and that is a third hazard rather than tidiness.
 # While it was inherited, this module ran the unqualified command `git`, so the
@@ -187,13 +205,17 @@ def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
     it enforces, instead of enumerating the ways the distinction can be lost.
     """
     env, git = _git_env(), _git_binary()
-    kind = subprocess.run([git, "-C", str(repo), "cat-file", "-t", oid],
+    # `-c safe.directory` is a CAPABILITY GRANT, written where it can be read.
+    # It is scoped to this one path, it survives an empty environment, and it
+    # replaces handing the child a home directory to go looking in.
+    base = [git, "-c", f"safe.directory={Path(repo).resolve()}", "-C", str(repo)]
+    kind = subprocess.run([*base, "cat-file", "-t", oid],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env)
     if kind.returncode != 0:
         return None
     kind = kind.stdout.strip()
-    body = subprocess.run([git, "-C", str(repo), "cat-file", kind, oid],
+    body = subprocess.run([*base, "cat-file", kind, oid],
                           capture_output=True, env=env)
     # Not a locator defect and not "unresolvable": git answered, and answered
     # with bytes that are not the object asked for. No verdict computed on top
