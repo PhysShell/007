@@ -159,7 +159,11 @@ every git invocation exited zero
   AND kind and bytes were obtained
   AND recomputed object id == requested oid
       -> RESOLVED(kind, bytes)
-         (subject to the citation-scheme premise, §4.3.2)
+         CLAIMS: these bytes were obtained locally under §4.3 and their
+                 object id equals the cited oid.
+         DOES NOT CLAIM: that they are the bytes the citer intended.
+                 See §4.3.2 — that is a property of the citation, not an
+                 observation available here.
 
 every git invocation exited zero
   AND bytes were obtained
@@ -497,14 +501,52 @@ property that still holds. Witness 1 is therefore satisfiable, and satisfiable
 on the property that is not broken rather than by quietly assuming the one that
 is.
 
-**Where collision resistance does bite, named rather than absorbed.** An
-adversary who *authored* an artifact before it was pinned could prepare a
-colliding pair in advance and pin the innocuous one. That is the choose-both
-case, and SHA-1 does not defend against it — but the attack is on **authorship
-and pinning**, one floor up in Phase G, not on a resolver reading an oid someone
-else already chose. This document neither defends against it nor claims to. It
-is recorded so the reader can see which threat lives at which layer, rather than
-finding a resolver silently carrying a premise belonging to another one.
+**Where collision resistance bites, and why relocating it is not enough.** An
+adversary who *authored* an artifact before it was pinned can prepare a colliding
+pair, cause the locator to cite the shared oid while the benign blob is present,
+and later swap in the malicious twin. Every §4.3 prerequisite holds, the lookup
+exits zero, the object id matches — and no second preimage was ever needed,
+because the collision was prepared before the citation existed.
+
+An earlier revision answered this by assigning the attack to Phase G. That was
+wrong as a *defence*: saying an attack belongs to another layer does not license
+a claim at this one. What it does establish is which claim this layer may make.
+
+**So `RESOLVED` is narrowed to what the resolver can observe:**
+
+```text
+RESOLVED CLAIMS
+    these bytes were obtained locally, under every §4.3 requirement, and
+    their object id equals the cited oid
+
+RESOLVED DOES NOT CLAIM
+    that these are the bytes the citer intended
+
+    whether the cited oid denotes a unique artifact is a property of the
+    CITATION, fixed when the oid was chosen. A resolver handed an oid
+    cannot recover the intent behind it, and no amount of care at this
+    boundary can.
+```
+
+That narrowing costs the consumer nothing it actually had. §8.5 asks whether
+exact bytes for a cited oid can be obtained here without network access; it does
+not ask the resolver to audit the citation's authorship, which the resolver has
+no means to do.
+
+The two hash properties then land where they belong, and neither is a premise
+this layer can discharge:
+
+```text
+second-preimage resistance   makes RESOLVED useful for a citation already
+                             trusted — no practical attack against SHA-1
+
+collision resistance         determines whether the CITATION denotes
+                             uniquely at all. Settled when the oid was
+                             chosen, and SHA-1 does not provide it.
+                             Inherited by every consumer of the pin,
+                             including PINNED_BLOB, and not observable
+                             from inside a resolver.
+```
 
 **What §2.5.1 says, and what this document infers, kept apart:**
 
@@ -580,6 +622,7 @@ would repeat the defect with extra steps.
 ```text
 RESOLVED(kind, bytes)
     -> continue referential validation
+       claims hash equality under §4.3, NOT the citer's intent (§4.3.2)
        (object type, encoding, anchor uniqueness — the locator layer's work)
 
 LOOKUP_UNOBTAINABLE
