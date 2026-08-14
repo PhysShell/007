@@ -70,9 +70,15 @@ Current authoritative state:
   likewise **proved NONE** — by input identity rather than by a second re-run:
   the diff touches Status, FD-1.3, §5.4, one acceptance-ledger line and the new
   §9 record, and every section the five derivations read is byte-identical, so
-  37/5/11/11/11 stand unchanged. Phase G is *not* re-adjudicated against `B2`;
-  its anchor remains `B1` and what is established is the narrower claim that its
-  graph conclusions remain current. One non-graph consequence **is** outstanding:
+  37/5/11/11/11 stand unchanged; the section-digest manifest backing that is
+  filed in the ledger's §0.1 rather than asserted. Phase G is *not*
+  re-adjudicated against `B2`; its anchor remains `B1` and what is established
+  is the narrower claim that its graph conclusions remain current. **The Phase G
+  document itself is not edited by that finding and cannot be** — it is the
+  pinned source artifact behind `tools/a1_v2_extract_graph.py`
+  (`PINNED_BLOB = 450380ff`), so any edit, including fixing its own stale
+  authority pointer, trips `EXTRACT MISMATCH`. That pointer moves at the §2.5
+  re-pin ceremony and not before. One non-graph consequence **is** outstanding:
   the convergence ledger's §4.1 extracts §5.4 row by row, and S2 added two rows
   there, so that inventory is two short of `B2`. The frozen result: a **semantic edge
   registry of 69 exact edges** — 56 `Intra` / 13 `Causal`, exact source and

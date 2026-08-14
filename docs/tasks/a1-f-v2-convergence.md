@@ -53,7 +53,21 @@ current_v1_authority:
                   unchanged output, so 37/5/11/11/11 stand. Deliberately not a
                   re-run: the original extractor is not preserved, and a
                   rebuilt one would carry less authority than the check it
-                  claimed to repeat. See a1-f-v2-phase-g.md, "S2 graph delta".
+                  claimed to repeat. The section-digest manifest is committed
+                  below rather than asserted here, so the claim is checkable
+                  without trusting this field.
+  phase_g_pointer: FROZEN AT B1, deliberately. a1-f-v2-phase-g.md carries its
+                  own current_v1_authority block naming B1, and that field is
+                  now stale — and it stays stale. The document is a PINNED
+                  SOURCE ARTIFACT: tools/a1_v2_extract_graph.py binds
+                  PINNED_BLOB = 450380ff, and any edit, including correcting a
+                  stale pointer, changes the blob and makes
+                  `a1_v2_extract_graph.py --check` exit EXTRACT MISMATCH.
+                  Moving it requires the §2.5 re-pin ceremony, which is not
+                  this change. Recorded here because a stale pointer that
+                  cannot be moved is a third category the pointer/record
+                  distinction did not have, and silence about it would read as
+                  an oversight rather than a constraint.
   s2_non_graph_dependency: §4.1 IS STALE, and separately from the graph.
                   Phase G's recorded procedure for a supersede is "authority
                   diff -> enumerate changed normative regions -> enumerate live
@@ -67,7 +81,85 @@ current_v1_authority:
                   adjudication should not grow rows by side effect. Recorded so
                   that "S2 graph delta = NONE" is not read as "S2 touched
                   nothing here", which is a different and false claim.
+```
 
+### 0.1 S2 graph delta — the committed evidence
+
+`graph_delta_S2 = NONE` above is an argument, and an argument in a frozen
+ledger is worth exactly as much as the evidence filed with it. The evidence is
+the input-section digest manifest, not a sentence claiming the manifest was
+checked.
+
+**Complete B1 → B2 change set**, by per-section SHA-256 over all 66 sections of
+the authority document, with `FD-1` additionally split per `FD-1.x`:
+
+```text
+## Status                          rewritten
+FD-1.3                             the member-name uniqueness rule
+### 5.4 Required negative tests    two rows added
+### Acceptance                     one line, "superseded  S2 — FD-1.3 only"
+### S2 — ...duplicate member names new §9 record   (added)
+every other section                byte-identical
+```
+
+**The five derivations' inputs**, sha256 truncated to 16 hex, `B1` then `B2`:
+
+```text
+FD-1.9                              7848881622896d40  7848881622896d40
+## 3. Frozen wire schemas           74fb24faff53eb14  74fb24faff53eb14
+### 3.0 Common envelope v1          fb5454c56950934e  fb5454c56950934e
+### 3.1 WorkOrderV1                 dd5a3c5fb0f363dd  dd5a3c5fb0f363dd
+### 3.2 CoderReportV1               deff25e883a42cd6  deff25e883a42cd6
+### 3.3 CandidateReceiptV1          96f94681e6a5a1fc  96f94681e6a5a1fc
+### 3.4 ReviewRequestV1             f4baba4989f8a919  f4baba4989f8a919
+### 3.5 ReviewerReportV1            57904c49e24e7481  57904c49e24e7481
+### 3.6 ReviewVerdictV1             68620695612b7ae2  68620695612b7ae2
+### 3.7 CorrectiveDirectiveV1       02eae2ceb7bb8d0c  02eae2ceb7bb8d0c
+### 3.8 CampaignFeedItemV1          c4590340da2a910d  c4590340da2a910d
+### 3.9 HumanAttentionRequestV1     eb1044cdc8f1144c  eb1044cdc8f1144c
+### 3.10 HumanCommandRequestV1      16cc9cc731513554  16cc9cc731513554
+### 3.11 HumanDecisionV1            d6458eedfc75d6ec  d6458eedfc75d6ec
+### 3.12 ProviderExecutionReceiptV1 eddb44c3eaabff7e  eddb44c3eaabff7e
+#### 3.12.1 InteractionManifestV1   8b00cb2de6ed6de3  8b00cb2de6ed6de3
+### 3.13 ScopeContractV1            5d8ca064b4344279  5d8ca064b4344279
+### 3.14 CampaignStateV1            37d82b4b4590cd1c  37d82b4b4590cd1c
+### 3.15 CampaignEventV1            40fb4af61d954f8c  40fb4af61d954f8c
+#### 3.15.1 Per-kind contract       fe48caeb69fb4bfa  fe48caeb69fb4bfa
+#### 3.15.2 Event payload schemas   c0d53e9d6464b670  c0d53e9d6464b670
+#### 3.15.3 Reducer-owned congruence 5b4cd4c1c1df33f4 5b4cd4c1c1df33f4
+
+22 input sections compared, 0 differing
+```
+
+**Which derivation reads which**, so the mapping is inspectable rather than
+implied:
+
+```text
+direct ArtifactRef schema rows   37   <- §3.0 - §3.15.3
+cross-schema type references      5   <- §3.0 - §3.15.3
+FD-1.9 message kinds             11   <- FD-1.9
+event source_ref mappings        11   <- §3.15.1
+event payload schemas            11   <- §3.15.2
+```
+
+Reproduce without trusting any of the above:
+
+```text
+git cat-file blob 3b26849cc39a3391aaed46cca56be3b6715afabb > B1.md
+git cat-file blob e22539ddf4f7c9ab260e16835eef8ef18abbe726 > B2.md
+split each on ^#{1,6}[ ] and on ^\*\*FD-1\.[0-9], sha256 each part, compare
+```
+
+**What this does not establish.** That the five derivations read *only* these
+sections is taken from Phase G §0's own statement of its inputs, not
+independently re-derived — the extractor that would settle it is not preserved,
+which is the reason this route was taken at all. If Phase G's stated input set
+is itself incomplete, this manifest inherits that gap, and the honest scope of
+the claim is: *given Phase G's declared inputs, every one of them is unchanged.*
+
+### 0.2 Remaining inputs (continues §0)
+
+```text
 prototype_design_input:
   reviewed_commit: 37502e3ce5c397a7437445aafb88c13d84ba4ac0
   status:          REVIEWED_WITH_KNOWN_W1_TAIL
