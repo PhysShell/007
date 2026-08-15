@@ -17,18 +17,44 @@ That impossibility does NOT establish that the pairing holds. Co-versioning
 is an OBLIGATION, and the reader tests it by ENUMERATING every commit that
 changed the contract alone -- not by comparing two last-touch commits:
 
-    git log --format=%H e70d019923a958bb18d8dbb266da007c6e93a88c..HEAD \
-        -- docs/tasks/a1-f-v2-resolver-semantics.md |
-    while read -r c; do
-      git diff-tree --no-commit-id --name-only -r "$c" |
-        grep -qx docs/tasks/a1-resolver-semantics-evidence.md ||
+    set -eu
+    base=e70d019923a958bb18d8dbb266da007c6e93a88c
+    contract=docs/tasks/a1-f-v2-resolver-semantics.md
+    record=docs/tasks/a1-resolver-semantics-evidence.md
+
+    git rev-parse --verify --quiet "$base^{commit}" >/dev/null ||
+      { echo 'CANNOT CHECK: base commit absent'; exit 2; }
+
+    commits=$(git log --format=%H "$base"..HEAD -- "$contract") ||
+      { echo 'CANNOT CHECK: history enumeration failed'; exit 2; }
+
+    for c in $commits; do
+      git diff-tree --no-commit-id --name-only -r "$c" | grep -qx "$record" ||
         printf 'contract changed alone at %s\n' "$c"
     done
 
-Every commit that prints must appear in the ledger below, naming what was
-re-checked and what was found. One that appears in neither is a GAP: the
-contract moved and nothing here records whether these observations still
-support it.
+THREE outcomes, and they must not be collapsed:
+
+    exit 2            CANNOT CHECK -- says NOTHING about the pairing
+    commits printed   GAPS         -- each must appear in the ledger below
+    exit 0, no output NONE FOUND   -- examined, and the obligation held
+
+Every commit that prints must appear in the ledger, naming what was
+re-checked and what was found. One in neither is a GAP: the contract moved
+and nothing here records whether these observations still support it.
+
+An earlier revision ran this as a bare pipeline with `git log` as producer.
+With the base absent -- a shallow clone, or an exported tree -- `git log`
+died with `fatal: Invalid revision range`, and because a pipeline reports
+only its LAST command's status, the check exited 0 and printed nothing. It
+therefore rendered CANNOT CHECK as NONE FOUND, announcing a healthy pairing
+having examined no history at all. Reproduced before this repair was
+written, not reasoned about.
+
+That is the failure this repository's own verdict rule already forbids:
+`FAIL` means the gate ran and the target failed it; `ERROR` means the
+harness could not obtain a trustworthy answer. A check that cannot run must
+not report success.
 
 RE-VERIFICATION LEDGER -- contract revisions changed without this record.
 A re-verification that finds nothing to change produces NO DIFF, so without
