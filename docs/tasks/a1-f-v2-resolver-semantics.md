@@ -226,17 +226,35 @@ as something that satisfies it rather than as its definition.
 boundary, obtain exact bytes corresponding to the cited OID?* Each clause of
 that sentence carries a requirement.
 
-**Each requirement below is scoped by §4.3.1's criterion**, and the scoping is
-not decoration: several findings against this document were one defect — a
-requirement phrased broadly enough to exclude interference the postcondition can
-already see. A requirement may exclude only interference that can leave the
-object id **matching**. Interference whose *effect* is a different object id is
-§4.3.1's guard case, and saying so inside each clause is what stops the next
-rewrite from reintroducing the error.
+The requirements fall into two kinds, and conflating them has produced findings
+in both directions:
 
-Note that this is a statement about **effects, never about mechanisms**: the
-same mechanism can produce either effect depending on composition, which
-§4.3.1 demonstrates.
+```text
+PROVENANCE      is this an observation OF AN OBJECT STORE at all?
+                "I", no network, trust boundary.
+                Absent -> nothing to classify. Gates BOTH hash outcomes,
+                including an observed mismatch: bytes from an untrusted
+                program say nothing about a repository, whatever they
+                hash to.
+
+TRANSFORMATION  were the bytes altered on the way back?
+                the "exact bytes" clause.
+                Scoped by §4.3.1: it may exclude only alteration that can
+                leave the object id MATCHING, because alteration yielding
+                a different id is already visible to the postcondition and
+                is the guard case.
+```
+
+Only the **transformation** requirement is scoped by the detectability
+criterion. An earlier revision applied that scoping to every requirement, which
+made the provenance clauses unable to exclude different-id interference — so a
+counterfeit executable returning mismatching bytes fell into the guard case and
+licensed `IDENTITY_VIOLATION`, contradicting §4.3.1's gate. Provenance comes
+first and answers a prior question; detectability only becomes meaningful once
+there is an observation to detect anything in.
+
+Both statements are about **effects, never mechanisms**: the same mechanism can
+produce either effect depending on composition, which §4.3.1 demonstrates.
 
 ```text
 "I"                      the program that produced the answer is chosen by
