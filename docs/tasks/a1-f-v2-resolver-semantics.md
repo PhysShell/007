@@ -138,9 +138,28 @@ by a program the repository could choose is not a check; it is a second thing to
 trust.
 
 **The algorithm is the REPOSITORY'S OBJECT FORMAT, not a fixed choice.** A git
-repository declares its object format, and the object ids it issues are digests
-under that format — 40 hex characters for `sha1`, 64 for `sha256`. This layer must
-compute the same function the repository used.
+repository declares its object format in the `extensions.objectFormat`
+configuration variable, and the object ids it issues are digests under that format
+— 40 hex characters for `sha1`, 64 for `sha256`. This layer must compute the same
+function the repository used.
+
+**The read is fixed, and it is not the configuration variable.** The resolver
+obtains the format from `rev-parse --show-object-format`, invoked under the same
+§2.1 requirements as the lookup. Reading `extensions.objectFormat` directly would
+be wrong in the ordinary case: a `sha1` repository normally leaves it **unset**,
+and `git config --get extensions.objectformat` exits 1 while
+`--show-object-format` still answers `sha1` (evidence E-8.3). The variable names
+the property; the command is how the property is read.
+
+**Absent and unsupported values.** An absent value is not an error — it is the
+`sha1` default, and `--show-object-format` reports it as such, so the resolver
+simply uses what it is told. An **unsupported** value is not this layer's problem
+to interpret: git itself refuses to operate in such a repository, so the lookup
+operations fail, §2.2 is unsatisfied, and §3's default branch yields
+`LOOKUP_UNOBTAINABLE`. The resolver must **never** guess a format when the read
+fails or returns something it does not recognise — guessing reintroduces exactly
+the mismatch this clause exists to prevent, and `LOOKUP_UNOBTAINABLE` is the
+honest answer for a repository whose identity function is unknown.
 
 Fixing the algorithm at SHA-1 would be wrong rather than merely narrow: in a
 `sha256` repository, a SHA-1 recomputation cannot equal the requested 64-character

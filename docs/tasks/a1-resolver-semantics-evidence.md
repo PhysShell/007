@@ -35,8 +35,12 @@ deciding case by case which invocations matter is a judgement that kept failing.
 An inherited variable can redirect *any* invocation — demonstrated, not assumed:
 
 ```console
-$ GIT_DIR=<sha1-repo>/.git /usr/bin/git -C <sha256-repo> rev-parse --show-object-format
-sha1                          # -C names the sha256 repo; GIT_DIR wins
+$ /usr/bin/git init -q gd1
+$ /usr/bin/git init -q --object-format=sha256 gd256
+$ env -i PATH=/usr/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      GIT_DIR=$(pwd)/gd1/.git \
+      /usr/bin/git -C gd256 rev-parse --show-object-format
+sha1                          # -C names gd256; GIT_DIR names gd1, and wins
 ```
 
 Two entries deliberately run a **variant** of the control set, to exhibit a route
@@ -269,19 +273,24 @@ variable deliberately present in the parent shell, the same prefix yields a chil
 that cannot see it:
 
 ```console
-$ export SNEAKY=leaked
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
-      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-      /usr/bin/env | sort
-GIT_CONFIG_GLOBAL=/dev/null
-GIT_CONFIG_NOSYSTEM=1
-GIT_NO_LAZY_FETCH=1
-GIT_NO_REPLACE_OBJECTS=1
-GIT_TERMINAL_PROMPT=0
-PATH=/usr/bin
-$ echo $SNEAKY               # still set in the PARENT
-leaked
+$ export SNEAKY=leaked       # a name deliberately present in the PARENT
+
+$ CTRL /bin/sh -c 'test -z "${SNEAKY-}"' && echo child_sees_SNEAKY=no
+child_sees_SNEAKY=no
+
+$ [ -n "${SNEAKY-}" ] && echo parent_still_has_it=yes
+parent_still_has_it=yes
 ```
+
+**No environment is printed, by rule.** `AGENTS.md` forbids an environment dump
+entering the tree at all — it is listed under credential leakage, the repository's
+central claim — so this arm asserts the property as a **boolean** instead of
+displaying the child's variables. An earlier revision printed both the child
+environment and the parent value; that was a violation of the rule, in the file
+whose purpose is careful evidence, and it was introduced by me while demonstrating
+rigour. A recorded dump is also a live hazard rather than a stale one: anyone
+re-running the block with a real secret in the parent would write it into the
+record.
 
 **Observed:** under that invocation both operations exit 0, the lookup returns
 bytes whose recomputed id differs from the requested one, and a separate command,
@@ -722,9 +731,20 @@ $ printf 'AUTHENTIC AUTHORITY' \
 b959693d240b3325123359c1907748c20df3be759f79d5525f2bf64416ca055a   # 64 chars
 ```
 
+**The variable is normally UNSET, and the command still answers.** This matters
+because it decides which of the two a resolver may read:
+
+```console
+$ CTRL /usr/bin/git -C of1 config --local --get extensions.objectformat
+                                        # exit 1 — unset
+$ CTRL /usr/bin/git -c safe.directory=$(pwd)/of1 -C of1 rev-parse --show-object-format
+sha1                                    # exit 0 — answered anyway
+```
+
 **Observed:** the two repositories report different object formats; the identical
-content receives a 40-character id in one and a 64-character id in the other. The
-format is reported successfully under the full §2.1 control set.
+content receives a 40-character id in one and a 64-character id in the other; and
+in the `sha1` repository `extensions.objectFormat` is unset while
+`--show-object-format` still reports `sha1`. All under the full §2.1 control set.
 
 **Inference:** a resolver that fixes its recomputation at SHA-1 would, in a
 `sha256` repository, produce a 40-character value that cannot equal the requested
@@ -790,8 +810,8 @@ leaves without a defined state and downstream action.*
 | lazy / network acquisition | core — §2.1 provenance; no witness (E-8.1) |
 | smudge / textconv / filter transformation | core — §2.1 raw read; witness E-8 |
 | `refs/replace` yielding a different id | core — §3 `IDENTITY_VIOLATION`, W4 |
-| `refs/replace` composed to yield a matching id | core — §5, W8 |
-| prepared collision | core — §5 `RESOLVED` + §4 non-claim, W8 |
+| `refs/replace` composed to yield a matching id | core — §5; **W8 OUTSTANDING** |
+| prepared collision | core — §5 `RESOLVED` + §4 non-claim; **W8 OUTSTANDING — never exercised** |
 | hash-strength premises (collision / second preimage) | core — §4 removes the dependency entirely; the caveats are evidence-only |
 | mechanism-vs-effect misclassification | core — §3 partitions by outcome; no mechanism vocabulary exists here to misclassify with |
 | over-strong claims about git internals | evidence appendix only, under its mandatory *Observed / Inference* split |
@@ -799,6 +819,12 @@ leaves without a defined state and downstream action.*
 | wrong object kind treated as resolver failure | core — §8 |
 | `NOT_PRESENT_LOCALLY` frozen without an oracle | core — §10 refuses it |
 | diagnostic text used as a state discriminator | core — §6, W6 |
+
+**W8 is marked outstanding wherever it appears here.** E-5 records that no
+colliding `D` was ever produced, and the contract states that W8 is OWED until
+genuine collision material exists. A disposition row citing W8 without that mark
+would let a reader treat the witness as evidence-backed, which is the precise
+failure the OWED rule exists to prevent.
 
 This table is a coverage argument, like everything else in this file. An error in
 it is an error about the previous attempt or about coverage — never a change to
