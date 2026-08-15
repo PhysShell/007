@@ -35,17 +35,32 @@ deciding case by case which invocations matter is a judgement that kept failing.
 An inherited variable can redirect *any* invocation — demonstrated, not assumed:
 
 ```console
-$ /usr/bin/git init -q gd1
-$ /usr/bin/git init -q --object-format=sha256 gd256
-$ env -i PATH=/usr/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-      GIT_DIR=$(pwd)/gd1/.git \
-      /usr/bin/git -C gd256 rev-parse --show-object-format
+$ CTRL /usr/bin/git init -q gd1
+$ CTRL /usr/bin/git init -q --object-format=sha256 gd256
+$ CTRL /usr/bin/git -C gd1   rev-parse --show-object-format
+sha1
+$ CTRL /usr/bin/git -C gd256 rev-parse --show-object-format
+sha256
+$ CTRL /usr/bin/env GIT_DIR="$(pwd)/gd1/.git" \
+       /usr/bin/git -C gd256 rev-parse --show-object-format
 sha1                          # -C names gd256; GIT_DIR names gd1, and wins
 ```
 
-Two entries deliberately run a **variant** of the control set, to exhibit a route
-that the full set closes. Each defines its variant in full at the point of use and
-says why.
+The **setup** commands are controlled too, and that is not decoration. An
+uncontrolled `init` can be redirected by an inherited `GIT_DIR` or
+`GIT_OBJECT_DIRECTORY` exactly as the command being demonstrated can, so the
+final line would still print `sha1` while proving nothing about *which*
+repositories it compared. The two `rev-parse` calls in the middle exist for the
+same reason: they establish that `gd1` and `gd256` really do differ in object
+format, so the last line's `sha1` is a precedence result and not a coincidence.
+
+`CTRL /usr/bin/env GIT_DIR=… /usr/bin/git …` is the full control set **plus one
+deliberately added variable**, not a weakened one: `CTRL` clears the environment
+first, and the inner `env` then adds `GIT_DIR` to that cleared set.
+
+Two entries elsewhere deliberately run a **variant** of the control set, to
+exhibit a route that the full set closes. Each defines its variant in full at the
+point of use and says why.
 
 ---
 
