@@ -259,7 +259,7 @@ oid for **any** input, so §3 would report `IDENTITY_VIOLATION` for every authen
 object and the consumer would return `ERROR` on a lookup that fully succeeded.
 This also contradicts the frozen scalar definition in
 `docs/q-deck/a1-authority-contracts.md`, **pinned to the reviewed base commit
-`e70d019`** — line 1216 at that revision, blob `e22539ddf4f7c9ab260e16835eef8ef18abbe726`:
+`e70d019923a958bb18d8dbb266da007c6e93a88c`** — line 1216 at that revision, blob `e22539ddf4f7c9ab260e16835eef8ef18abbe726`:
 
 ```text
 | `CommitId` | full object id, the repository's object-format width | never abbreviated … |

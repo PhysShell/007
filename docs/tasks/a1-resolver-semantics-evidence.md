@@ -7,6 +7,15 @@ Nothing in this file defines resolver states, classification precedence,
 or consumer authority. If this file conflicts with the normative contract
 in docs/tasks/a1-f-v2-resolver-semantics.md, the normative contract wins
 and the discrepancy is a defect in this evidence record.
+
+The contract is cited by PATH, deliberately and not as an oversight: the
+two files are versioned TOGETHER in one commit, so the governing revision
+of the contract is always the revision at which this file is read. A pin
+here could only name a commit that did not exist when the pair was
+written, and would go stale on the next push to this branch.
+
+Citations of any OTHER artifact are pinned to a full 40-hex revision --
+see E-7 and E-8.3. The distinction is co-versioning, not convenience.
 ```
 
 Every entry uses the same fixed shape. The **Observed** and **Inference** fields
@@ -75,9 +84,22 @@ format, so the last line's `sha1` is a precedence result and not a coincidence.
 deliberately added variable**, not a weakened one: `CTRL` clears the environment
 first, and the inner `env` then adds `GIT_DIR` to that cleared set.
 
-Two entries elsewhere deliberately run a **variant** of the control set, to
-exhibit a route that the full set closes. Each defines its variant in full at the
-point of use and says why.
+**The "every invocation" claim above has EXACTLY TWO EXCEPTIONS, named here.**
+Both deliberately omit `GIT_NO_REPLACE_OBJECTS=1`, because each exists to exhibit
+a route that the full control set closes — a route that is invisible if the
+control is in force:
+
+| Arm | Where | Omits | Why |
+|---|---|---|---|
+| `NOREPL` | E-3, defined in full at its point of use | `GIT_NO_REPLACE_OBJECTS=1` | shows what a replace ref does when the route is open |
+| route-OPEN lookup | E-5, marked inline | `GIT_NO_REPLACE_OBJECTS=1` | contrasts with the route-CLOSED arm in the same entry |
+
+**Neither arm is §2.1-controlled, and no observation made under them may be cited
+as a §2.1-controlled result.** Stating this in the header rather than only at the
+point of use matters: a reader who takes "every git invocation runs under the
+§2.1 control set" at face value could classify active replace-ref behaviour as
+something the contract's provenance requirements permit, when in fact these two
+arms are exactly where those requirements were switched off.
 
 ---
 
@@ -131,29 +153,34 @@ what command shows scopes?
 **Reproduction and observed result:**
 
 ```console
+# --- setup: the repository must exist and be entered FIRST. Without this,
+# --- `config example.local fromrepo` fails `fatal: not in a git directory`.
+# --- A fixed path is used so every output below is a literal value.
+$ rm -rf /tmp/rs-x2 && CTRL /usr/bin/git init -q /tmp/rs-x2 && cd /tmp/rs-x2
+
 $ CTRL /usr/bin/git --show-scope
 unknown option: --show-scope
 
-$ CTRL /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" config --show-scope --list
-local     core.repositoryformatversion=0
-local     core.filemode=true
-local     core.bare=false
-local     core.logallrefupdates=true
-command   safe.directory=/…/x2
+$ CTRL /usr/bin/git -c safe.directory=/tmp/rs-x2 -C /tmp/rs-x2 config --show-scope --list
+local	core.repositoryformatversion=0
+local	core.filemode=true
+local	core.bare=false
+local	core.logallrefupdates=true
+command	safe.directory=/tmp/rs-x2
 
 $ CTRL /usr/bin/git config -h | grep show-scope
     --[no-]show-scope     show scope of config (worktree, local, global, system, command)
 
-$ CTRL /usr/bin/git -c example.key=value config --show-scope --get example.key
-command value
+$ CTRL /usr/bin/git -c example.key=value -C /tmp/rs-x2 config --show-scope --get example.key
+command	value
 
-$ CTRL /usr/bin/git config example.local fromrepo          # set IN the repository
-$ CTRL /usr/bin/git config --show-scope --get example.local
-local   fromrepo
+$ CTRL /usr/bin/git -C /tmp/rs-x2 config example.local fromrepo   # set IN the repository
+$ CTRL /usr/bin/git -C /tmp/rs-x2 config --show-scope --get example.local
+local	fromrepo
 
-$ CTRL /usr/bin/git -c example.key=value config --show-scope --list | grep example
-local     example.local=fromrepo
-command   example.key=value
+$ CTRL /usr/bin/git -c example.key=value -C /tmp/rs-x2 config --show-scope --list | grep example
+local	example.local=fromrepo
+command	example.key=value
 ```
 
 **Observed:** `--show-scope` is rejected as a top-level git option; it is an option
@@ -290,7 +317,8 @@ SUBSTITUTED CONTENT
 $ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git hash-object --stdin < body.out
-7feb07853362884e770de9cde3265336be1697fb     # != the requested 36ae691f…
+7feb07853362884e770de9cde3265336be1697fb     # != the requested
+                                             # 36ae691f4261ce7008c7bfc827233e74dc3fc96e
 
 $ python3 -c "                               # SECOND, INDEPENDENT implementation
 import hashlib, sys                          # — no git involved at all
@@ -299,7 +327,7 @@ print(hashlib.sha1(b'blob %d\\0' % len(b) + b).hexdigest())"
 7feb07853362884e770de9cde3265336be1697fb     # agrees
 
 $ CTRL /usr/bin/git fsck
-error: 7feb0785…: hash-path mismatch, found at: .git/objects/36/ae691f…
+error: 7feb07853362884e770de9cde3265336be1697fb: hash-path mismatch, found at: .git/objects/36/ae691f4261ce7008c7bfc827233e74dc3fc96e
 ```
 
 **The prefix constrains the child, and that is shown rather than assumed.** With a
@@ -585,7 +613,7 @@ blob                                    # exit 0   <-- the kind operation SUCCEE
 $ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob $B > body.out
-fatal: unable to stream a394ec43… to stdout
+fatal: unable to stream a394ec43d91e167d3dae803e62e1049e0b642694 to stdout
                                         # exit 128 <-- the body operation FAILS
 $ stat -c%s body.out
 6225920                                 # 6.2 MB of stdout from the FAILED command
@@ -619,13 +647,13 @@ the read is raw — so what is exhibited is the full **`§2.1 holds` + §2.2 fai
 shape witness W3 names, not the §2.2 half alone. A resolver that checks the
 first command's status but not the second's will hash 6.2 MB of debris and report
 `IDENTITY_VIOLATION` where the correct state is `LOOKUP_UNOBTAINABLE`. The failure
-is not hypothetical. **Pinned to the reviewed base commit `e70d019`**, not to a
+is not hypothetical. **Pinned to the reviewed base commit `e70d019923a958bb18d8dbb266da007c6e93a88c`**, not to a
 mutable branch name: in `tools/a1_v2_extract_graph.py` at that revision,
 `_local_object` tests `kind.returncode != 0` and returns `None`, then runs the body
 command and passes `body.stdout` directly into `hashlib.sha1(...)` **without
 testing `body.returncode`**. That exact property is what E-7 exhibits.
 
-A reader checking this after the implementation lands should read it at `e70d019`
+A reader checking this after the implementation lands should read it at `e70d019923a958bb18d8dbb266da007c6e93a88c`
 and expect the property to be **gone** at later revisions — its removal is the
 point of the work this contract precedes, so finding it absent on a current branch
 confirms the record rather than contradicting it.
@@ -883,7 +911,7 @@ values are unchanged.
 **Why this entry exists.** §3.1 previously fixed the algorithm at plain SHA-1. That
 was introduced to guarantee totality, and it did — but it also silently narrowed
 the contract to one object format, contradicting the frozen scalar definition in
-`docs/q-deck/a1-authority-contracts.md` at the reviewed base commit **`e70d019`**,
+`docs/q-deck/a1-authority-contracts.md` at the reviewed base commit **`e70d019923a958bb18d8dbb266da007c6e93a88c`**,
 line 1216, blob `e22539ddf4f7c9ab260e16835eef8ef18abbe726`, which defines a full object id as "the repository's
 object-format width". Totality was the right requirement; naming a specific
 algorithm to obtain it was not.
