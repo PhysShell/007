@@ -65,7 +65,29 @@ admissible. They are checked in the order given.
   invocation**: the transformation path is opt-in, so the obligation is that the
   resolver never requests it (evidence E-8);
 - the repository under inspection **cannot choose** which program runs or which
-  transformation path is taken.
+  transformation path is taken;
+- **no repository-controlled indirection may change WHICH OBJECT the lookup
+  returns.** The requested oid must be resolved from the object store directly,
+  with every repository-supplied redirection layer disabled.
+
+  Two such layers exist in git and are named because this record has observed or
+  relied on them; the clause is the property, not the list:
+
+  | Layer | Repository-supplied | Disabled by |
+  |---|---|---|
+  | `refs/replace` object replacement | a ref in the repository | `GIT_NO_REPLACE_OBJECTS=1`, or equivalent |
+  | alternate object directories | `objects/info/alternates` | not honouring repository-supplied alternates |
+
+  **The enumeration is not claimed complete.** A redirection layer this contract
+  has not named is still forbidden by the clause; discovering one is a §10 change
+  to the table, never a licence to permit it.
+
+  Without this clause an implementation could satisfy every other §2.1
+  requirement — chosen executable, constructed environment, no network, raw read —
+  and still return the bytes of a different object because a ref in the repository
+  said so. Evidence E-5 exhibits exactly that route, and previously cited
+  *"§2.1 (route closure)"* as its supported clause while §2.1 contained no such
+  clause; the evidence claimed a requirement the contract did not make.
 
 ### 2.2 RESPONSE complete
 
@@ -476,12 +498,28 @@ W9  §2.1 holds; the kind and the complete bytes ARE obtained, but the
         the other to sha1.
 ```
 
-**W1, W4, W5 and W8 are all OWED on §2.1's no-network clause.** They are
-conditioned on `§2 holds`, which is three prerequisites; the evidence record can
-witness the executable, environment, raw-read, completeness and identity-function
-clauses, but not the absence of network access — that is a claim about what did
-not happen on a socket. Until an egress-denying or egress-observing witness
-exists, no exercise of these four is complete, however healthy the lookup looks.
+**Every witness conditioned on `§2.1 holds` — directly or through `§2 holds` — is
+OWED on the no-network clause.** Derived, not enumerated:
+
+```text
+W1  §2 holds     -> OWED        W6  diagnostic text     -> not conditioned
+W3  §2.1 holds   -> OWED        W7  §2.1 prerequisite ABSENT -> not conditioned
+W4  §2 holds     -> OWED        W2  object unproducible -> not conditioned
+W5  §2 holds     -> OWED
+W8  §2 holds     -> OWED
+W9  §2.1 holds   -> OWED
+```
+
+The evidence record can witness the executable, environment, raw-read,
+completeness, indirection and identity-function clauses, but **not** the absence
+of network access — that is a claim about what did not happen on a socket. Until
+an egress-denying or egress-observing witness exists, no exercise of those six is
+complete, however healthy the lookup looks.
+
+An earlier revision listed only W1, W4, W5 and W8, having enumerated the
+`§2 holds` witnesses and overlooked the two conditioned on `§2.1 holds` directly.
+The list above is therefore stated as a derivation from the condition, so that
+adding a witness cannot silently omit it from the debt.
 
 W4, W5 and W8 are conditioned on `§2 holds` because a complete successful response
 establishes **§2.2 only**. Without that condition each of them would overlap W7 on

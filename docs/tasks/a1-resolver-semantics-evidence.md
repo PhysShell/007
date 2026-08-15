@@ -544,8 +544,15 @@ recomputed id would match and the postcondition would see nothing wrong. That st
 requires SHA-1 collision material that was not available here; it is arithmetic
 over the observed route, not an observation.
 
-**Normative clause supported:** §2.1 (route closure), §5 (why composition does not
-create a fourth state).
+**Normative clause supported:** §2.1's **no-repository-controlled-indirection**
+clause — the requirement this entry exhibits the need for; §5 (why composition does
+not create a fourth state).
+
+**Provenance of this citation.** Until `d993e48` this line read *"§2.1 (route
+closure)"* while §2.1 contained **no such clause** — the evidence cited a
+requirement the contract did not make, and an implementation conforming to §2.1 as
+written could have left the route open. A reviewer found it. The clause now exists,
+so the citation is checkable; before, it was not.
 
 **Does NOT establish:** that a colliding `D` was ever produced, or that the
 composition is undetectable in the general case. The three blobs used here do not
