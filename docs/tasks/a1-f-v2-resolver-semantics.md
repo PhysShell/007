@@ -56,27 +56,32 @@ admissible. They are checked in the order given.
 
 ### 2.2 RESPONSE complete
 
-**Two conditions, and BOTH are required.** This section is named for the
-*response*, not for the commands: an operation reporting success is not the same
-as an answer having arrived.
+The response is complete **when, and only when, BOTH of these were obtained**:
 
-- **every operation the lookup requires must SUCCEED.** A required operation that
-  fails leaves the response incomplete **whether or not it emitted anything** —
-  including a first operation that fails producing nothing;
-- **AND those operations must actually YIELD a usable kind and the complete bytes
-  for the requested oid.** An operation that exits zero while reporting the object
-  missing, truncated, or otherwise unavailable **has not produced a response**.
+- a **usable kind** for the requested oid, and
+- the **complete bytes** for it,
 
-The second condition is not redundant, and assuming it followed from the first is
-how an earlier revision of this contract left a case unassigned. **Git offers
-lookup forms that report absence through a ZERO exit status** — `cat-file --batch`
-and `--batch-check` answer `<oid> missing` and exit `0` (evidence E-8.2). A
-resolver may therefore never infer availability from exit status alone: success is
-a property of the command, availability is a property of the answer, and §2.2
-requires the second.
+each through an operation that **succeeded**.
 
-- the output of a failed command is **debris, never evidence** — it is never
-  hashed, never parsed, and never compared against the citation.
+**Completeness is defined by the evidence obtained, not by a set of operations the
+implementation nominates as required.** That distinction is load-bearing, and two
+separate defects came from getting it wrong:
+
+- an implementation that obtains the kind and skips or short-circuits the body has
+  succeeded at every operation *it* considered required, while the bytes are
+  absent. Quantifying over an implementation-selected set lets it satisfy the
+  clause by choosing a smaller set;
+- an operation can exit **zero** while reporting the object unavailable. **Git
+  offers lookup forms that report absence through a zero exit status** —
+  `cat-file --batch` and `--batch-check` answer `<oid> missing` and exit `0`
+  (evidence E-8.2).
+
+So neither command success nor the implementation's own notion of "required" can
+establish completeness. Success is a property of a command; availability is a
+property of the answer; this clause requires the answer.
+
+**The output of a failed command is debris, never evidence** — it is never hashed,
+never parsed, and never compared against the citation.
 
 A partial response is not a weak observation. It is **no observation**. Neither is
 an absent one.
@@ -89,48 +94,35 @@ This is the **only** statement of the state partition in this document. There is
 no second table, and no alternative vocabulary that re-expresses it.
 
 ```text
-any prerequisite of §2 absent
-    -> LOOKUP_UNOBTAINABLE
-
-§2 holds
-  AND kind and bytes obtained by fully successful operations
-  AND oid(kind, bytes) == requested oid
+§2 holds  AND  oid(kind, bytes) == requested oid
     -> RESOLVED(kind, bytes)
 
-§2 holds
-  AND kind and bytes obtained by fully successful operations
-  AND oid(kind, bytes) != requested oid
+§2 holds  AND  oid(kind, bytes) != requested oid
     -> IDENTITY_VIOLATION
+
+ANYTHING ELSE
+    -> LOOKUP_UNOBTAINABLE
 ```
 
-**The three cases are exhaustive and mutually exclusive, and the argument is
-this** — stated rather than asserted, because an earlier revision claimed
-exhaustiveness while leaving the commonest input of all unassigned:
+**Exhaustiveness is STRUCTURAL here, not argued.** The third case is the
+complement of the first two: any input that does not satisfy one of the two
+positive conditions falls to `LOOKUP_UNOBTAINABLE` by construction. No input can
+escape the partition, and no future clause can open a gap in it.
 
-```text
-for any admissible input, either §2 holds or it does not
+This replaces an earlier form in which all three branches carried positive
+conditions and exhaustiveness had to be *demonstrated*. That form failed twice, in
+two different ways, and both failures were the same shape: an input that satisfied
+no branch, because the conditions did not quite tile the space. A partition whose
+completeness depends on an argument is only as sound as the argument, and this one
+was twice wrong.
 
-  §2 does not hold                    -> branch 1
-                                         (this includes EVERY failed required
-                                          operation, by §2.2 — notably a first
-                                          operation that fails producing nothing,
-                                          which is the ordinary "object is not
-                                          there" case)
-
-  §2 holds                            -> §2.2's SECOND condition means a usable
-                                         kind and the complete bytes were
-                                         actually obtained — not merely that the
-                                         commands exited zero; oid(kind, bytes)
-                                         is then DEFINED, because §3.1 requires a
-                                         total function; so exactly one of == or
-                                         != holds -> branch 2 or branch 3
-
-no fourth case remains
-```
-
-The argument leans on §3.1's totality requirement. That is not incidental: if the
-identity function could decline to produce a digest, the `§2 holds` case would
-split into a third outcome and this partition would stop being exhaustive.
+The two positive branches remain mutually exclusive, since `==` and `!=` cannot
+both hold. They are also **jointly reachable** only when `oid(kind, bytes)` is
+defined — which §3.1 guarantees by requiring a total function. If that requirement
+were relaxed, `§2 holds` inputs could satisfy neither positive branch and would
+fall to `LOOKUP_UNOBTAINABLE`; the partition would stay exhaustive, but a genuine
+identity result would be silently reported as unobtainable. §3.1 is what keeps
+that from happening.
 
 **A missing prerequisite outranks both byte-derived states.** If §2 does not hold,
 the outcome is `LOOKUP_UNOBTAINABLE` **even when a mismatch was observed** — an
@@ -146,16 +138,22 @@ by a program the repository could choose is not a check; it is a second thing to
 trust.
 
 **Plain SHA-1 is REQUIRED, not defaulted, and the reason is totality.** Plain SHA-1
-yields a digest for every input. So the comparison in §3 is defined for every
-admissible input, and §3's three cases stay exhaustive.
+yields a digest for every input, so the comparison in §3 is defined whenever §2
+holds, and a lookup that genuinely succeeded is reported as such.
 
 **A collision-*detecting* variant is therefore NOT permitted here.** It is a
 *partial* function: on input exhibiting a known collision pattern it may refuse to
-produce a digest at all, which is an outcome §3 assigns to nothing. Adopting one
-would require amending §3 to assign that outcome a state — a different contract,
-out of scope for this document, and never a per-implementation choice. Two
-resolvers conforming to this contract must not be able to emit different states for
-the same input.
+produce a digest at all. Since §3's third case is a structural default, such an
+input would **not** go unassigned — it would fall to `LOOKUP_UNOBTAINABLE`. That is
+the precise harm: a lookup that satisfied every prerequisite and returned complete
+bytes would be reported as *unobtainable*, which §6 says means the layer did not
+obtain a response. It did. The report would be false, and it would be false in the
+direction that hides a successful acquisition rather than inventing one.
+
+Two resolvers conforming to this contract must not be able to emit different states
+for the same input, so the choice is fixed here rather than left per
+implementation. Adopting a partial variant would require amending §3 to give that
+outcome its own state — a different contract, out of scope for this document.
 
 **This document does not establish which variant any particular git build uses.**
 That is a fact about a build, not about this contract, and no observation here
