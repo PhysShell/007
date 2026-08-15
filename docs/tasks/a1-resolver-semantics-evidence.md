@@ -149,22 +149,51 @@ environment built with `env -i` carrying only `PATH=/usr/bin`,
 `--textconv` is passed.
 
 ```console
-$ A=$(printf 'AUTHENTIC AUTHORITY' | git hash-object -w --stdin)   # 36ae691f…
-$ D=$(printf 'SUBSTITUTED CONTENT' | git hash-object -w --stdin)   # 7feb0785…
-$ cp .git/objects/7f/eb07…  .git/objects/36/ae69…
+# --- construction, from an empty repository ---
+$ git init -q r4 && cd r4
+$ A=$(printf 'AUTHENTIC AUTHORITY' | git hash-object -w --stdin); echo $A
+36ae691f4261ce7008c7bfc827233e74dc3fc96e
+$ D=$(printf 'SUBSTITUTED CONTENT' | git hash-object -w --stdin); echo $D
+7feb07853362884e770de9cde3265336be1697fb
+$ cp ".git/objects/${D:0:2}/${D:2}" ".git/objects/${A:0:2}/${A:2}"
 
-$ /usr/bin/git -c safe.directory=<repo> -C . cat-file -t $A
+# --- the lookup: the env -i prefix is ON each command, not a separate step ---
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file -t $A
 blob                         # exit 0   <-- kind operation succeeds
 
-$ /usr/bin/git -c safe.directory=<repo> -C . cat-file blob $A
-SUBSTITUTED CONTENT          # exit 0   <-- body operation succeeds: COMPLETE
-                             #              response, so §2.2 holds too
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob $A > body.out
+                             # exit 0   <-- body succeeds: COMPLETE response,
+$ cat body.out               #              so §2.2 holds too
+SUBSTITUTED CONTENT
 
-$ sha1("blob 19\0" + returned)
+$ git hash-object --stdin < body.out
 7feb07853362884e770de9cde3265336be1697fb     # != the requested 36ae691f…
 
 $ git fsck
 error: 7feb0785…: hash-path mismatch, found at: .git/objects/36/ae691f…
+```
+
+**The prefix constrains the child, and that is shown rather than assumed.** With a
+variable deliberately present in the parent shell, the same prefix yields a child
+that cannot see it:
+
+```console
+$ export SNEAKY=leaked
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/env | sort
+GIT_CONFIG_GLOBAL=/dev/null
+GIT_CONFIG_NOSYSTEM=1
+GIT_NO_LAZY_FETCH=1
+GIT_NO_REPLACE_OBJECTS=1
+GIT_TERMINAL_PROMPT=0
+PATH=/usr/bin
+$ echo $SNEAKY               # still set in the PARENT
+leaked
 ```
 
 **Observed:** under that invocation both operations exit 0, the lookup returns
@@ -240,6 +269,22 @@ object?
 truncated from 23 to 11 bytes.
 
 ```console
+# --- construction, from an empty repository ---
+$ git init -q r6 && cd r6
+$ B=$(python3 -c "print('X'*400)" | git hash-object -w --stdin); echo $B
+5106a63ecf7df82b1b45855bf64ba14d90f978ca
+$ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
+23
+
+$ python3 -c "
+import sys
+p = sys.argv[1]
+d = open(p,'rb').read()
+open(p,'wb').write(d[:11])" "$p"
+$ stat -c%s "$p"
+11
+
+# --- the lookup ---
 $ git cat-file -t $B
 error: header for 5106a63e… too long, exceeds 32 bytes
 fatal: git cat-file: could not get object info      # exit 128
@@ -251,6 +296,10 @@ $ stat -c%s body.out
 $ sha1sum body.out
 da39a3ee5e6b4b0d3255bfef95601890afd80709            # SHA-1 of the empty input
 ```
+
+This entry cites **no witness**, so it is not run under the §2.1 controls: its
+point is what a returncode-ignoring resolver concludes, which does not depend on
+provenance. E-7 is the entry that carries the W3 claim, and it is controlled.
 
 **Observed:** both commands fail with exit 128; the failed body command emitted
 **zero** bytes; hashing that empty output yields an id unequal to the requested
@@ -284,28 +333,47 @@ built with `env -i` rather than inherited. The environment below is the complete
 set of names the child received:
 
 ```console
-$ /usr/bin/env                          # everything the child sees
-GIT_CONFIG_GLOBAL=/dev/null
-GIT_CONFIG_NOSYSTEM=1
-GIT_NO_LAZY_FETCH=1
-GIT_NO_REPLACE_OBJECTS=1
-GIT_TERMINAL_PROMPT=0
-PATH=/usr/bin
+# --- construction, from an empty repository ---
+$ git init -q r7 && cd r7
+$ python3 -c "import sys; sys.stdout.write('COMPRESSIBLE PAYLOAD LINE\n'*400000)" > big.txt
+$ stat -c%s big.txt
+10400000
+$ B=$(git hash-object -w big.txt); echo $B
+a394ec43d91e167d3dae803e62e1049e0b642694
+$ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
+60565
 
-$ /usr/bin/git -c safe.directory=<repo> -C . cat-file -t $B
+# --- truncate the loose object to 60% of its length ---
+$ python3 -c "
+import sys
+p = sys.argv[1]
+d = open(p,'rb').read()
+open(p,'wb').write(d[:36339])" "$p"
+$ stat -c%s "$p"
+36339
+
+# --- the lookup: the env -i prefix is ON each command, not a separate step ---
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file -t $B
 blob                                    # exit 0   <-- the kind operation SUCCEEDS
 
-$ /usr/bin/git -c safe.directory=<repo> -C . cat-file blob $B > body.out
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob $B > body.out
 fatal: unable to stream a394ec43… to stdout
                                         # exit 128 <-- the body operation FAILS
 $ stat -c%s body.out
 6225920                                 # 6.2 MB of stdout from the FAILED command
 
-$ sha1("blob 6225920\0" + body.out)
+$ git hash-object --stdin < body.out    # the id of the debris, as a real command
 4ba9f2dda3a7db27a6ab082e60c2aeee535d5681
-$ requested
+$ echo $B                               # what was requested
 a394ec43d91e167d3dae803e62e1049e0b642694
 ```
+
+The `env -i` prefix is demonstrated to constrain the child in E-4, using a variable
+deliberately left set in the parent; the same prefix is used here.
 
 **Observed:** with that environment and that executable, the kind operation exits 0
 and reports `blob`; the body operation emits 6,225,920 bytes and then exits 128;
