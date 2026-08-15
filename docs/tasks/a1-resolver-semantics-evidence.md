@@ -950,24 +950,40 @@ this record's own subject and not for its cross-artifact citation.
 
 ---
 
-## E-9 — Cryptographic caveats (literature, not observation)
+## E-9 — The contract asserts NO cryptographic status
 
 **Question:** does the contract depend on SHA-1 properties?
 
-**Observed:** nothing. No cryptographic experiment was run.
+**Observed:** nothing. No cryptographic experiment was run, and none is needed.
 
-**Inference:** SHA-1 collision resistance is broken in practice — identical-prefix
-(2017) and chosen-prefix (2020) attacks are published. Second-preimage resistance
-has no published practical attack. These are statements from the literature, and
-this record cites no source for them.
+**Inference:** none is drawn. **This entry makes no claim about the status of
+SHA-1 collision resistance or second-preimage resistance**, because no clause of
+the contract depends on either. §4 was written that way deliberately: `RESOLVED`
+claims only that an admissible local acquisition occurred and that the returned
+bytes hash to the requested id. Both remain true observations whatever any hash
+property turns out to be.
 
-**Normative clause supported:** none. §4 was written so that no state depends on
-either property: `RESOLVED` claims only local acquisition and id equality, both of
-which remain true observations regardless.
+**Normative clause supported:** none. The entry exists to record the *absence* of
+a dependency, which is a property of this contract and is checkable by reading §4.
 
-**Does NOT establish:** the current status of either property. This entry exists to
-record that the contract deliberately does **not** rest on it, not to assert
-cryptographic facts on this document's authority.
+**Does NOT establish:** anything about SHA-1, in either direction.
+
+**Provenance — why the claims were removed rather than sourced.** An earlier
+revision stated that identical-prefix (2017) and chosen-prefix (2020) attacks are
+published and that second-preimage resistance has no published practical attack —
+and in the same paragraph admitted *"this record cites no source for them."* That
+is an assertion outrunning its evidence, stated in the file whose header forbids
+exactly that, and it was flagged by a reviewer.
+
+Citing papers would have fixed only two thirds of it. **The third claim is an
+assertion of ABSENCE** — that no practical attack is known — and no citation can
+establish it. It is a statement about the entire literature at one moment, it
+decays silently as that literature grows, and a reader in a year cannot tell
+whether it was ever checked or has merely gone stale.
+
+So the claims are gone rather than sourced. The entry loses nothing the contract
+needed: an argument that a clause does not depend on a property never has to say
+what that property's status is. Stating the status is what created the debt.
 
 ---
 
@@ -986,7 +1002,7 @@ leaves without a defined state and downstream action.*
 | `refs/replace` yielding a different id | core — §3 `IDENTITY_VIOLATION`, W4 |
 | `refs/replace` composed to yield a matching id | core — §5; **W8 OUTSTANDING** |
 | prepared collision | core — §5 `RESOLVED` + §4 non-claim; **W8 OUTSTANDING — never exercised** |
-| hash-strength premises (collision / second preimage) | core — §4 removes the dependency entirely; the caveats are evidence-only |
+| hash-strength premises (collision / second preimage) | core — §4 removes the dependency entirely; E-9 asserts no cryptographic status at all |
 | mechanism-vs-effect misclassification | core — §3 partitions by outcome; no mechanism vocabulary exists here to misclassify with |
 | over-strong claims about git internals | evidence appendix only, under its mandatory *Observed / Inference* split |
 | `git --show-scope` naming error | evidence appendix, corrected to `git config --show-scope` |
