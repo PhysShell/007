@@ -9,9 +9,27 @@
 # review_progress, commit_status, and fail_commit_status are all disabled:
 # no status surface exists for branch protection to accidentally adopt.
 #
-# Reviews are label-gated: apply the `review-ready` label to request a review
-# of the assembled head. Incremental re-review on every push is off; request
-# follow-up rounds explicitly with `@coderabbitai review`.
+# Reviews are FULLY MANUAL. Automatic review is off, and every automatic
+# trigger is explicitly neutralised — `enabled: false` alone is not sufficient,
+# because a configured label or description keyword can still start a review.
+#
+# The reviewer's role here is INDEPENDENT FALSIFICATION of a frozen candidate,
+# not accompaniment of a patch as it evolves. An automatic reviewer that
+# comments on every intermediate state becomes a participant in development:
+# it reports a finding, the author fixes it, it sees the fix, it reports the
+# next one. That is useful for drafting and weak as final evidence, because the
+# artifact under review was shaped by the reviewer that then attests to it.
+#
+# So the sequence is:
+#
+#     freeze candidate SHA -> CI + local witnesses
+#                          -> @codex review
+#                          -> @coderabbitai full review
+#                          -> CLEAN, or a finding that unfreezes the head
+#
+# `full review` rather than `review`, because the question asked at a frozen
+# head is "can you refute this entire artifact state?", not "what changed since
+# we last spoke?".
 
 language: en-US
 
@@ -77,15 +95,18 @@ reviews:
     enabled: true
 
   auto_review:
-    enabled: true
+    # OFF. Reviews are requested by hand at a frozen head.
+    enabled: false
     drafts: false
 
-    # Review only when explicitly requested via label, on the assembled head.
-    labels:
-      - "review-ready"
+    # Both of these can START a review even while `enabled: false`, so neither
+    # may be left populated. Emptying them is what actually makes the mode
+    # manual; `enabled: false` on its own does not.
+    labels: []
+    description_keyword: ""
 
-    # No automatic re-review on every push; corrective rounds are requested
-    # explicitly with `@coderabbitai review`.
+    # Redundant while auto review is off, kept pinned so that re-enabling
+    # `enabled` alone cannot silently restore per-push re-review.
     auto_incremental_review: false
     auto_pause_after_reviewed_commits: 0
 
