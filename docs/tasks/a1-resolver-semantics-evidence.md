@@ -18,8 +18,8 @@ Unless stated otherwise, every reproduction below was executed in a fresh
 `git init` scratch repository, and the outputs shown are from that execution.
 
 **Every git invocation in this file runs under the §2.1 control set.** It is
-defined once, here, in full, and used as `CTRL` in every block below — so no
-command's provenance depends on the shell that happened to run it:
+defined once, here, in full, and used as `CTRL` in every block below, so that no
+command's provenance depends on the **environment** it inherited:
 
 ```console
 CTRL() {
@@ -28,6 +28,23 @@ CTRL() {
          GIT_CONFIG_GLOBAL=/dev/null "$@"
 }
 ```
+
+**What `CTRL` does NOT control, stated because this record has been caught by it
+twice.** `env -i` replaces the **environment**. It does not touch **inherited
+process state**, which crosses `exec` regardless: the **umask**, the **uid**, the
+working directory, and resource limits. Two recorded observations have already
+turned out to rest on process state rather than on anything `CTRL` fixes:
+
+| Inherited property | What it silently changed | Found by |
+|---|---|---|
+| uid — this environment runs as **root** | a bare `cp` over a write-protected loose object succeeded | reviewer, E-4/E-5 |
+| **umask** | the recorded loose-object mode: `022` gives `444`, `027` gives `440`, `077` gives `400` | reviewer, E-6/E-7 |
+
+Neither announces itself in a transcript, and both produce commands that run
+correctly for the recorder. Where such a property affects a recorded value, the
+entry states the **invariant** rather than the value this machine happened to
+produce — see the mode claims in E-4, E-6 and E-7, which assert *no write
+permission for anyone* rather than a specific octal number.
 
 This is uniform on purpose. Three separate findings on this PR were "that
 particular command was not controlled", each about a different command, because
@@ -249,11 +266,13 @@ $ A=$(printf 'AUTHENTIC AUTHORITY' | CTRL /usr/bin/git hash-object -w --stdin); 
 36ae691f4261ce7008c7bfc827233e74dc3fc96e
 $ D=$(printf 'SUBSTITUTED CONTENT' | CTRL /usr/bin/git hash-object -w --stdin); echo $D
 7feb07853362884e770de9cde3265336be1697fb
-$ stat -c%a ".git/objects/${A:0:2}/${A:2}"   # loose objects are READ-ONLY
+$ umask                                      # this run; see below — it matters
+0022
+$ stat -c%a ".git/objects/${A:0:2}/${A:2}"   # loose objects carry NO write bit
 444
 $ rm -f ".git/objects/${A:0:2}/${A:2}"       # required: cp alone cannot
 $ cp  ".git/objects/${D:0:2}/${D:2}" \
-      ".git/objects/${A:0:2}/${A:2}"         # overwrite a 0444 file
+      ".git/objects/${A:0:2}/${A:2}"         # overwrite a write-protected file
 
 # --- the lookup: the env -i prefix is ON each command, not a separate step ---
 $ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
@@ -313,9 +332,38 @@ bytes whose recomputed id differs from the requested one, and a separate command
 
 **Provenance of the `rm` step, and why it was missing.** Earlier revisions of this
 entry and of E-5 recorded a bare `cp` over the object file. Git writes loose
-objects mode `0444`, so that command **fails with `Permission denied` for an
-ordinary user**. It succeeded when recorded only because this environment runs as
-**root**, and root ignores the write bit.
+objects **with no write bit for anyone**, so that command **fails with
+`Permission denied` for an ordinary user**. It succeeded when recorded only
+because this environment runs as **root**, and root ignores the write bit.
+
+**The exact octal is umask-dependent; the invariant is not.** Git creates the file
+`0444 & ~umask`, so a reader may observe `444`, `440` or `400`:
+
+```console
+$ for U in 000 022 027 077; do
+    ( umask $U; CTRL /usr/bin/git init -q "u$U" && cd "u$U" \
+      && B=$(printf 'X' | CTRL /usr/bin/git hash-object -w --stdin) \
+      && echo "umask $U -> $(stat -c%a ".git/objects/${B:0:2}/${B:2}")" )
+  done
+umask 000 -> 444
+umask 022 -> 444
+umask 027 -> 440
+umask 077 -> 400
+```
+
+**Observed:** the mode varies with the umask, and **no umask produces a write
+bit** — `000`, the most permissive possible, still yields `444`. **Inference:** git
+masks write off unconditionally, so *"an ordinary user cannot overwrite this file
+in place"* holds in every case, which is the only property the `rm` step needs.
+The specific `444` recorded elsewhere in this file is this machine's `umask 0022`,
+not a general fact.
+
+**`CTRL` does not fix this, and that is the wider point.** `env -i` replaces the
+environment; the umask is inherited **process state** and crosses `exec`
+untouched — verified: `CTRL /bin/sh -c 'umask'` reports the caller's value. So a
+recorded number can still depend on the shell that ran it even under the full
+control set. That is the second such premise in this record after root privilege,
+and the header now names the class rather than these two instances.
 
 That is a reproducibility defect of a kind the earlier mechanical sweep could not
 see: the command was syntactically complete, used the absolute executable, carried
@@ -328,14 +376,15 @@ was in the instructions, never in the result.
 **The first repair of this fixed the instance and not the class.** The rule adopted
 then was "every `cp` must be preceded by `rm -f`" — which names the *command that
 was reported*, not the *property that fails*. E-6 and E-7 truncate a loose object
-with `open(p,'wb')` in python3, which is the same write to the same `0444` file and
+with `open(p,'wb')` in python3, which is the same write to the same write-protected file and
 was left untouched by that rule; both were unrunnable outside a root environment
 until a later reviewer named them. The rule is therefore stated by property now:
 
 > **Any write to a path under `.git/objects` must remove the target first** —
 > `rm -f` before `cp`, `os.remove(p)` before `open(p,'wb')`, and equally for any
-> other write introduced later. Git creates loose objects `0444`; nothing that
-> overwrites one in place is runnable by an ordinary user.
+> other write introduced later. Git creates loose objects with **no write bit for
+> anyone** (`0444 & ~umask`); nothing that overwrites one in place is runnable by
+> an ordinary user.
 
 Both truncations were re-executed in that form. E-6 still reports `23 -> 11` with
 both operations exiting 128 and an empty `body.out`; E-7 still reports
@@ -381,7 +430,7 @@ bf637ab698f8fbfd8346edb378c904d2bb6f4064
 7eef2c30522157ac6ca7771c2f0172a42cbd57f4
 
 $ CTRL /usr/bin/git replace "$A" "$C"                     # exit 0 — hop 1: A -> C
-$ rm -f ".git/objects/${C:0:2}/${C:2}"               # loose objects are 0444;
+$ rm -f ".git/objects/${C:0:2}/${C:2}"               # no write bit (E-4);
 $ cp  ".git/objects/${D:0:2}/${D:2}" \
       ".git/objects/${C:0:2}/${C:2}"                 # hop 2: C's path holds D
 
@@ -437,12 +486,13 @@ $ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
 23
 
 $ stat -c%a "$p"
-444                                     # loose objects are 0444 — see below
+444                                     # no write bit; exact octal is umask-
+                                        # dependent — see E-4
 $ python3 -c "
 import sys, os
 p = sys.argv[1]
 d = open(p,'rb').read()
-os.remove(p)                            # required: 0444 blocks open(p,'wb')
+os.remove(p)                            # required: no write bit on the target
 open(p,'wb').write(d[:11])" "$p"
 $ stat -c%s "$p"
 11
@@ -515,12 +565,13 @@ $ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
 
 # --- truncate the loose object to 60% of its length ---
 $ stat -c%a "$p"
-444                                     # loose objects are 0444 — see E-4
+444                                     # no write bit; exact octal is umask-
+                                        # dependent — see E-4
 $ python3 -c "
 import sys, os
 p = sys.argv[1]
 d = open(p,'rb').read()
-os.remove(p)                            # required: 0444 blocks open(p,'wb')
+os.remove(p)                            # required: no write bit on the target
 open(p,'wb').write(d[:36339])" "$p"
 $ stat -c%s "$p"
 36339
