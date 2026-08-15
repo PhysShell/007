@@ -325,6 +325,24 @@ sort of premise that never gets written down, because it never announces itself.
 The re-run with `rm -f` reproduces every recorded value unchanged, so the defect
 was in the instructions, never in the result.
 
+**The first repair of this fixed the instance and not the class.** The rule adopted
+then was "every `cp` must be preceded by `rm -f`" — which names the *command that
+was reported*, not the *property that fails*. E-6 and E-7 truncate a loose object
+with `open(p,'wb')` in python3, which is the same write to the same `0444` file and
+was left untouched by that rule; both were unrunnable outside a root environment
+until a later reviewer named them. The rule is therefore stated by property now:
+
+> **Any write to a path under `.git/objects` must remove the target first** —
+> `rm -f` before `cp`, `os.remove(p)` before `open(p,'wb')`, and equally for any
+> other write introduced later. Git creates loose objects `0444`; nothing that
+> overwrites one in place is runnable by an ordinary user.
+
+Both truncations were re-executed in that form. E-6 still reports `23 -> 11` with
+both operations exiting 128 and an empty `body.out`; E-7 still reports
+`10,400,000 -> 60,565 -> 36,339`, kind `blob` at exit 0, body exit 128, **6,225,920
+bytes** of stdout, and digest `4ba9f2dda3a7db27a6ab082e60c2aeee535d5681`. As
+before, the defect was in the instructions and never in the result.
+
 **Provenance of these controls:** as with E-7, the first revision of this entry ran
 plain `git` from `PATH` with an inherited environment while citing witness W4 —
 which requires `§2 holds`. That gap was **not reported by any reviewer**; it was
@@ -418,10 +436,13 @@ $ B=$(python3 -c "print('X'*400)" | CTRL /usr/bin/git hash-object -w --stdin); e
 $ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
 23
 
+$ stat -c%a "$p"
+444                                     # loose objects are 0444 — see below
 $ python3 -c "
-import sys
+import sys, os
 p = sys.argv[1]
 d = open(p,'rb').read()
+os.remove(p)                            # required: 0444 blocks open(p,'wb')
 open(p,'wb').write(d[:11])" "$p"
 $ stat -c%s "$p"
 11
@@ -493,10 +514,13 @@ $ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
 60565
 
 # --- truncate the loose object to 60% of its length ---
+$ stat -c%a "$p"
+444                                     # loose objects are 0444 — see E-4
 $ python3 -c "
-import sys
+import sys, os
 p = sys.argv[1]
 d = open(p,'rb').read()
+os.remove(p)                            # required: 0444 blocks open(p,'wb')
 open(p,'wb').write(d[:36339])" "$p"
 $ stat -c%s "$p"
 36339
