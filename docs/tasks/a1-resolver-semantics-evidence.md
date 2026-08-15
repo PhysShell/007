@@ -23,21 +23,49 @@ Unless stated otherwise, every reproduction below was executed in a fresh
 
 **Question:** which git is every other entry talking about?
 
-**Exact environment / tool version:**
+**Exact environment / tool version.** The version is taken from the **absolute
+executable the controlled entries invoke**, not from `PATH` resolution, and the two
+are then shown to be the same file:
 
 ```console
-$ git --version
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git --version
+git version 2.43.0
+
+$ command -v git                        # what bare `git` resolves to here
+/usr/bin/git
+
+$ stat -c '%d:%i  %n' "$(command -v git)" /usr/bin/git
+65024:122579  /usr/bin/git
+65024:122579  /usr/bin/git             # same device:inode — one file, not two
+
+$ git --version                         # therefore necessarily the same build
 git version 2.43.0
 ```
 
-**Observed:** the version string above.
+**Observed:** `/usr/bin/git` reports `2.43.0` when invoked under the controls;
+bare `git` resolves to `/usr/bin/git`; both names have identical device and inode
+numbers, so they are the same file.
 
-**Inference:** none.
+**Inference:** entries that invoke bare `git` and entries that invoke
+`/usr/bin/git` are exercising the same executable **in this environment**, so the
+`2.43.0` anchor covers all of them. This is established by the inode identity
+above, not assumed from the coincidence of two version strings.
 
 **Normative clause supported:** none directly; scopes every other entry.
 
-**Does NOT establish:** anything about other git versions. Every entry below is a
-statement about 2.43.0 and carries no claim of stability across releases.
+**Does NOT establish:** anything about other git versions, or that `PATH` resolves
+to this file in any other environment — the inode check is a fact about *this*
+environment at the time of running. An entry that must not depend on `PATH`
+resolution invokes the absolute path itself rather than relying on this equality;
+that is why the §2.1-controlled entries name `/usr/bin/git` directly.
+
+**Provenance of this entry:** an earlier revision recorded only `git --version`
+through `PATH` while the controlled entries invoked `/usr/bin/git`, so the version
+anchor did not establish the version of the executable actually under test. Had
+`PATH` resolved elsewhere, every "2.43.0" claim in this file would have been
+unsupported.
 
 ---
 
@@ -150,10 +178,10 @@ environment built with `env -i` carrying only `PATH=/usr/bin`,
 
 ```console
 # --- construction, from an empty repository ---
-$ git init -q r4 && cd r4
-$ A=$(printf 'AUTHENTIC AUTHORITY' | git hash-object -w --stdin); echo $A
+$ /usr/bin/git init -q r4 && cd r4
+$ A=$(printf 'AUTHENTIC AUTHORITY' | /usr/bin/git hash-object -w --stdin); echo $A
 36ae691f4261ce7008c7bfc827233e74dc3fc96e
-$ D=$(printf 'SUBSTITUTED CONTENT' | git hash-object -w --stdin); echo $D
+$ D=$(printf 'SUBSTITUTED CONTENT' | /usr/bin/git hash-object -w --stdin); echo $D
 7feb07853362884e770de9cde3265336be1697fb
 $ cp ".git/objects/${D:0:2}/${D:2}" ".git/objects/${A:0:2}/${A:2}"
 
@@ -181,7 +209,7 @@ b = open('body.out','rb').read()
 print(hashlib.sha1(b'blob %d\\0' % len(b) + b).hexdigest())"
 7feb07853362884e770de9cde3265336be1697fb     # agrees
 
-$ git fsck
+$ /usr/bin/git fsck
 error: 7feb0785…: hash-path mismatch, found at: .git/objects/36/ae691f…
 ```
 
@@ -342,11 +370,11 @@ set of names the child received:
 
 ```console
 # --- construction, from an empty repository ---
-$ git init -q r7 && cd r7
+$ /usr/bin/git init -q r7 && cd r7
 $ python3 -c "import sys; sys.stdout.write('COMPRESSIBLE PAYLOAD LINE\n'*400000)" > big.txt
 $ stat -c%s big.txt
 10400000
-$ B=$(git hash-object -w big.txt); echo $B
+$ B=$(/usr/bin/git hash-object -w big.txt); echo $B
 a394ec43d91e167d3dae803e62e1049e0b642694
 $ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
 60565
