@@ -419,9 +419,12 @@ $ sha1sum body.out
 da39a3ee5e6b4b0d3255bfef95601890afd80709            # SHA-1 of the empty input
 ```
 
-This entry cites **no witness**, so it is not run under the §2.1 controls: its
-point is what a returncode-ignoring resolver concludes, which does not depend on
-provenance. E-7 is the entry that carries the W3 claim, and it is controlled.
+This entry cites **no witness**, so its conclusion does not *depend* on the §2.1
+controls — what a returncode-ignoring resolver concludes is independent of
+provenance. It is nonetheless run under them, like every other entry, because the
+file-wide rule removes exactly the per-entry judgement that produced three
+separate "that command was not controlled" findings. E-7 is the entry that carries
+the W3 claim.
 
 **Observed:** both commands fail with exit 128; the failed body command emitted
 **zero** bytes; hashing that empty output yields an id unequal to the requested
