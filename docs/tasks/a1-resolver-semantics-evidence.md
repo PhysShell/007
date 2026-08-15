@@ -170,8 +170,16 @@ $ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
 $ cat body.out               #              so §2.2 holds too
 SUBSTITUTED CONTENT
 
-$ git hash-object --stdin < body.out
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git hash-object --stdin < body.out
 7feb07853362884e770de9cde3265336be1697fb     # != the requested 36ae691f…
+
+$ python3 -c "                               # SECOND, INDEPENDENT implementation
+import hashlib, sys                          # — no git involved at all
+b = open('body.out','rb').read()
+print(hashlib.sha1(b'blob %d\\0' % len(b) + b).hexdigest())"
+7feb07853362884e770de9cde3265336be1697fb     # agrees
 
 $ git fsck
 error: 7feb0785…: hash-path mismatch, found at: .git/objects/36/ae691f…
@@ -366,8 +374,16 @@ fatal: unable to stream a394ec43… to stdout
 $ stat -c%s body.out
 6225920                                 # 6.2 MB of stdout from the FAILED command
 
-$ git hash-object --stdin < body.out    # the id of the debris, as a real command
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git hash-object --stdin < body.out      # id of the debris
 4ba9f2dda3a7db27a6ab082e60c2aeee535d5681
+
+$ python3 -c "                               # SECOND, INDEPENDENT implementation
+import hashlib, sys
+b = open('body.out','rb').read()
+print(hashlib.sha1(b'blob %d\\0' % len(b) + b).hexdigest())"
+4ba9f2dda3a7db27a6ab082e60c2aeee535d5681     # agrees
 $ echo $B                               # what was requested
 a394ec43d91e167d3dae803e62e1049e0b642694
 ```

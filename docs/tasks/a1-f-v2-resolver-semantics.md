@@ -91,6 +91,27 @@ the outcome is `LOOKUP_UNOBTAINABLE` **even when a mismatch was observed** — a
 untrustworthy channel cannot support a report about the object store, in either
 direction.
 
+### 3.1 What `oid(kind, bytes)` denotes
+
+`oid(kind, bytes)` is the **plain SHA-1** of the git object encoding — the header
+`"<kind> <length>\0"` followed by the bytes — computed by this layer, under the
+same §2.1 provenance requirements as the lookup itself. A recomputation performed
+by a program the repository could choose is not a check; it is a second thing to
+trust.
+
+**This is stated because §5's outcome depends on it.** A collision-*detecting*
+SHA-1 variant does not compute the same total function: on input exhibiting a known
+collision pattern it may refuse to produce a digest at all. An implementation using
+such a variant would reach `LOOKUP_UNOBTAINABLE` on precisely the input §5 freezes
+as `RESOLVED`. Both behaviours are defensible; what is not defensible is leaving
+the choice implicit, so that the frozen outcome of §5 depends on an unstated
+property of whichever hash implementation an author happened to reach for.
+
+**This document does not establish which variant any particular git build uses.**
+That is a fact about a build, not about this contract, and no observation here
+speaks to it. What the contract requires is that the implementation **declare**
+which function it computes and satisfy §2.1 while computing it.
+
 ---
 
 ## 4. Exact claims per state
@@ -135,6 +156,14 @@ This is **not** an exception, a degraded `RESOLVED`, or grounds for
 **identity equality**, not citer intent; a colliding alternate satisfies identity
 equality, and §4 already declines to claim intent. No implementation may read this
 case as anything other than `RESOLVED`.
+
+**Under §3.1's function.** If an implementation declares a collision-detecting
+variant instead, it will reach `LOOKUP_UNOBTAINABLE` here — that is a permitted
+declaration with a different frozen outcome, not a violation of this clause, and it
+must be declared rather than discovered. What no implementation may do is decide
+this case by inspecting the *content* of the bytes: recognising a pattern and
+selecting a state from it is classification by mechanism, which §3 does not
+authorise and which W8 exists to catch.
 
 ---
 
@@ -233,9 +262,16 @@ W7  a §2.1 provenance prerequisite is ABSENT
         -> LOOKUP_UNOBTAINABLE for BOTH the hash-matching and the
            hash-mismatching case
 
-W8  §2 holds; a prepared collision, or an equivalent model of one: a
-    complete successful response whose bytes recompute to the requested id
+W8  §2 holds; a PREPARED COLLISION: a complete successful response whose
+    bytes are NOT the artifact the citer meant, and which recompute to the
+    requested id
         -> RESOLVED, with no citer-intent claim attached
+
+        REQUIRES GENUINE COLLISION MATERIAL. There is no weaker model: any
+        input that is merely a healthy matching response is W1, and cannot
+        falsify §5.
+
+        UNTIL EXERCISED, W8 IS OWED — NEVER RECORDED AS PASSED.
 ```
 
 W4, W5 and W8 are conditioned on `§2 holds` because a complete successful response
