@@ -318,9 +318,11 @@ trust boundary   GIT_CONFIG_NOSYSTEM=1, GIT_CONFIG_GLOBAL=/dev/null
                  -c safe.directory=<the repository being read>
                      cdaed35  "narrow the grant to its witness"
 
-guard (not a    GIT_NO_REPLACE_OBJECTS=1, whose failure the identity
- prerequisite)   postcondition detects — see §4.3.1
-                     2d372a7  guard and postcondition added together
+route closure   GIT_NO_REPLACE_OBJECTS=1 — closes the refs/replace ROUTE,
+ (not a          which can produce either a detectable or an undetectable
+ prerequisite)   effect depending on composition (§4.3.1). Not a guarantee
+                 of detection.
+                     2d372a7  route closure and postcondition added together
 ```
 
 The raw form is the oldest of these and the only one never introduced by a
@@ -347,9 +349,9 @@ not reading that configuration but letting it **choose what runs**.
 The trust-boundary clause is narrow on purpose, and the first version of it was
 not. It said *nothing the repository controls may execute or transform anything*
 — which swallows `refs/replace`, since a replace ref is repository-controlled
-and does substitute the bytes returned for a name. This section designates exactly that
-case a **guard** failure, classified by the identity postcondition, and §7's
-witness 4 requires it to yield `IDENTITY_VIOLATION`. A blanket clause made those
+and does substitute the bytes returned for a name. Where such a substitution
+yields a **different** object id, the rows below place it in the guard case and
+§7's witness 4 requires `IDENTITY_VIOLATION`. A blanket clause made those
 unsatisfiable — the same contradiction as finding 4, reintroduced by a broader
 rule while repairing something else.
 
@@ -543,11 +545,13 @@ was obtained, and reporting one would blame the target for a defect of the
 machinery. This is the verdict algebra already frozen in the envelope document,
 applied one floor down.
 
-`IDENTITY_VIOLATION` preserves the existing family-level postcondition
-(recompute the object id; whatever substitutes the bytes, the substitute does
-not hash to the name). This state rests on the postcondition's SOUNDNESS and
-carries no hash premise at all — §4.3.2.
-This preregistration does not weaken it and does not propose to.
+`IDENTITY_VIOLATION` preserves the existing postcondition — recompute the
+object id and compare — and states exactly what that establishes: **the bytes
+returned recomputed to a different object id.** It does NOT establish that every
+substitution is detectable; §4.3.1 records a composition that is not. The state
+rests on the postcondition's SOUNDNESS and carries no hash premise at all
+(§4.3.2). This preregistration does not weaken the postcondition and does not
+propose to; it narrows the claim made *from* it.
 
 **`MALFORMED_LOCATOR` stays one floor up.** A resolver that successfully
 supplies a *commit* where a blob was cited has done its job perfectly: it
