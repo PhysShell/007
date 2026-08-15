@@ -99,18 +99,23 @@ same §2.1 provenance requirements as the lookup itself. A recomputation perform
 by a program the repository could choose is not a check; it is a second thing to
 trust.
 
-**This is stated because §5's outcome depends on it.** A collision-*detecting*
-SHA-1 variant does not compute the same total function: on input exhibiting a known
-collision pattern it may refuse to produce a digest at all. An implementation using
-such a variant would reach `LOOKUP_UNOBTAINABLE` on precisely the input §5 freezes
-as `RESOLVED`. Both behaviours are defensible; what is not defensible is leaving
-the choice implicit, so that the frozen outcome of §5 depends on an unstated
-property of whichever hash implementation an author happened to reach for.
+**Plain SHA-1 is REQUIRED, not defaulted, and the reason is totality.** Plain SHA-1
+yields a digest for every input. So the comparison in §3 is defined for every
+admissible input, and §3's three cases stay exhaustive.
+
+**A collision-*detecting* variant is therefore NOT permitted here.** It is a
+*partial* function: on input exhibiting a known collision pattern it may refuse to
+produce a digest at all, which is an outcome §3 assigns to nothing. Adopting one
+would require amending §3 to assign that outcome a state — a different contract,
+out of scope for this document, and never a per-implementation choice. Two
+resolvers conforming to this contract must not be able to emit different states for
+the same input.
 
 **This document does not establish which variant any particular git build uses.**
 That is a fact about a build, not about this contract, and no observation here
-speaks to it. What the contract requires is that the implementation **declare**
-which function it computes and satisfy §2.1 while computing it.
+speaks to it. That ignorance is precisely why the function is **named here** rather
+than inherited from whichever tool an implementation happens to call: an
+implementation must compute this function, not adopt one by accident.
 
 ---
 
@@ -157,13 +162,12 @@ This is **not** an exception, a degraded `RESOLVED`, or grounds for
 equality, and §4 already declines to claim intent. No implementation may read this
 case as anything other than `RESOLVED`.
 
-**Under §3.1's function.** If an implementation declares a collision-detecting
-variant instead, it will reach `LOOKUP_UNOBTAINABLE` here — that is a permitted
-declaration with a different frozen outcome, not a violation of this clause, and it
-must be declared rather than discovered. What no implementation may do is decide
-this case by inspecting the *content* of the bytes: recognising a pattern and
-selecting a state from it is classification by mechanism, which §3 does not
-authorise and which W8 exists to catch.
+**`RESOLVED` here is unconditional.** §3.1 requires plain SHA-1 precisely so that
+this case has exactly one outcome; there is no conforming implementation that emits
+anything else for it. No implementation may decide this case by inspecting the
+*content* of the bytes — recognising a pattern and selecting a state from it is
+classification by mechanism, which §3 does not authorise and which W8 exists to
+catch.
 
 ---
 
