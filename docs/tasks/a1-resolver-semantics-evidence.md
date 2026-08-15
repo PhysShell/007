@@ -13,23 +13,72 @@ inconvenient: this file and the contract are added in the SAME commit, so
 any revision naming the contract would have to be a commit that did not
 yet exist when this line was written.
 
-That impossibility does NOT establish that the pairing holds. It makes
-co-versioning an OBLIGATION ON FUTURE COMMITS, and the reader is not asked
-to take it on trust:
+That impossibility does NOT establish that the pairing holds. Co-versioning
+is an OBLIGATION, and the reader tests it by ENUMERATING every commit that
+changed the contract alone -- not by comparing two last-touch commits:
 
-    git log -1 --format=%H -- docs/tasks/a1-f-v2-resolver-semantics.md
-    git log -1 --format=%H -- docs/tasks/a1-resolver-semantics-evidence.md
+    git log --format=%H e70d019923a958bb18d8dbb266da007c6e93a88c..HEAD \
+        -- docs/tasks/a1-f-v2-resolver-semantics.md |
+    while read -r c; do
+      git diff-tree --no-commit-id --name-only -r "$c" |
+        grep -qx docs/tasks/a1-resolver-semantics-evidence.md ||
+        printf 'contract changed alone at %s\n' "$c"
+    done
 
-If those differ and the CONTRACT's is the later, the pairing is BROKEN: the
-contract moved without this record being re-verified against it, and
-NOTHING BELOW IS KNOWN TO SUPPORT THE CONTRACT AS IT THEN STANDS. A commit
-that changes the contract without re-verifying this record in the same
-commit is a defect IN THAT COMMIT.
+Every commit that prints must appear in the ledger below, naming what was
+re-checked and what was found. One that appears in neither is a GAP: the
+contract moved and nothing here records whether these observations still
+support it.
 
-An earlier revision of this block instead said the governing contract "is
-always the revision at which this file is read". That sentence asserted the
-pairing rather than exposing it, and in the drift case it told the reader
-to accept a contract these observations were never made against.
+RE-VERIFICATION LEDGER -- contract revisions changed without this record.
+A re-verification that finds nothing to change produces NO DIFF, so without
+this ledger there is no way to tell "checked, nothing needed changing" from
+"never checked", and that ambiguity resolves toward the flattering reading.
+
+  260c3f03c1c62939dca87b00accbb400ce6bc79a
+      §2.2 defines `usable kind`, excluding suitability.
+      Checked E-8.2, whose inference speaks of "a usable kind and the
+      complete bytes" and never appeals to suitability.   -> UNCHANGED
+
+  f164924100bda43e03400b58eae61e722ab14fae
+      §2.2 completeness defined by the evidence obtained; §3's third case
+      made structural.  Checked E-8.2.                    -> UNCHANGED
+
+  6114102b8058cb452c68a648b9830e6301c2a78a
+      §2.2 covers a required operation that fails producing nothing.
+      Checked E-8.2.                                      -> UNCHANGED
+
+  02fd180e3311b4750040cb5b9706ee049fce23f9
+      §3.1 requires plain SHA-1; the permitted-variant escape removed.
+      Checked that no entry cites a per-implementation declared variant.
+      E-8.3's "declared format" is the REPOSITORY's object format, which
+      is what §3.1 requires.                              -> UNCHANGED
+
+  f748f66c8b7deca55f66227d4b211c19d668b5ba
+      §2.3 states its routing rule before its counterfactual.
+      Checked E-4, which performs the format read itself (exit 0, `sha1`),
+      exercising the prerequisite rather than the counterfactual.
+                                                          -> UNCHANGED
+
+UNCHANGED means the re-check found no claim here made stale. It does NOT
+mean the contract change was immaterial, and it is not a witness for
+anything owed.
+
+Two earlier revisions of this block are withdrawn, both quoted so the
+claims are on the record rather than edited away:
+
+  1. "the governing revision of the contract is always the revision at
+     which this file is read" -- asserted the pairing instead of exposing
+     it, and in the drift case told the reader to accept a contract these
+     observations were never made against.
+
+  2. comparing the two files' last-touch commits and calling the pairing
+     BROKEN only when the contract's was the later -- a ONE-SAMPLE test in
+     ONE direction. It cannot see a contract-only commit followed by any
+     evidence-only commit, and FIVE such commits exist in this branch's
+     own history. It reported a healthy pairing over the history it was
+     written to police. A reviewer found it, one commit after it was
+     written.
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
