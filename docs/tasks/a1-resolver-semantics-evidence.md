@@ -18,6 +18,15 @@ Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-7 and E-8.3. The distinction is co-versioning, not convenience.
 ```
 
+**`Normative clause supported` never names a witness.** A witness id appears only
+in a separate **`Related required witness`** field, always carrying its status. The
+two were previously merged, and a reader scanning the support field could count an
+owed witness as evidence-backed without reading the prose that owed it — E-8.3 said
+`witness W9` in its support field and `W9 is OWED on both arms` a few lines below,
+in the same entry. Support and debt must not be left for the reader to reconcile,
+because that reconciliation reliably resolves toward PASS. The separation is
+mechanically checked (property G).
+
 Every entry uses the same fixed shape. The **Observed** and **Inference** fields
 are separated by rule: a statement may appear under *Observed* only if it is a
 property of a recorded command's output, exit status or files. Statements about
@@ -474,7 +483,10 @@ entry's conclusion stands and only its standing as a W4 witness was ever in doub
 **Inference:** the mismatch is detectable by recomputation at the call site, and
 this is the channel the identity postcondition exists for.
 
-**Normative clause supported:** §3 `IDENTITY_VIOLATION`; witness W4.
+**Normative clause supported:** §3 `IDENTITY_VIOLATION`.
+
+**Related required witness:** **W4 — OWED.** §2.1's no-network clause is
+unwitnessed here, so this entry does not complete W4's `§2 holds` condition.
 
 **Does NOT establish:** *that git performs no internal validation.* The experiment
 observes only that the lookup **did not reject** the object. `fsck` computing the
@@ -718,7 +730,11 @@ and expect the property to be **gone** at later revisions — its removal is the
 point of the work this contract precedes, so finding it absent on a current branch
 confirms the record rather than contradicting it.
 
-**Normative clause supported:** §2.2; §3 (`LOOKUP_UNOBTAINABLE`); witness W3.
+**Normative clause supported:** §2.2; §3 (`LOOKUP_UNOBTAINABLE`).
+
+**Related required witness:** **W3 — OWED.** W3 begins with `§2.1 holds`, and
+§2.1's no-network clause is unwitnessed here; this entry supplies the
+partial-output arm only.
 
 **Does NOT establish:** that this is the only route to partial output, or anything
 about how git buffers its output. The observation is the byte count and the exit
@@ -976,7 +992,11 @@ in the `sha1` repository `extensions.objectFormat` is unset while
 repository's declared format, which is what §3.1 requires.
 
 **Normative clause supported:** §3.1, algorithm selection; §2.3, the availability
-prerequisite; witness W9.
+prerequisite.
+
+**Related required witness:** **W9 — OWED ON BOTH ARMS.** This entry records only
+the two SUCCEEDING format reads; neither a failed read nor an out-of-set value is
+reproduced anywhere in this record.
 
 **Does NOT establish:** that these are the only formats git will ever support, nor
 that reading the format is itself trustworthy in an adversarial repository. §3.1
