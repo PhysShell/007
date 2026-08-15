@@ -355,122 +355,47 @@ rule while repairing something else.
 
 The criterion that separates them is **what the postcondition can detect**:
 
-The classification is by **effect on the object id**, never by mechanism — one
-mechanism can land in more than one row, and `refs/replace` does:
+The classification is by **effect on the object id**, and by nothing else. The
+rows below are defined by what the postcondition observes; the mechanisms in
+them are **illustrations, not memberships**.
 
 ```text
 GUARD          the substitution yields a DIFFERENT object id, so recomputing
                it reveals the substitution
-               - refs/replace, in every reachable form (see below)
-               - an object file overwritten with a different valid object
 
 PREREQUISITE   the interference can leave the object id MATCHING, and the
                resolver can exclude it by construction
-               - counterfeit executable   (genuine bytes, correct hash)
-               - lazy fetch               (correct bytes, from the network)
-               - smudge/textconv filters  (pass-through leaves bytes identical)
+               e.g. counterfeit executable, lazy fetch, smudge/textconv
+               filters — each can return correct-hashing bytes
 
 NEITHER        the interference leaves the object id MATCHING and no
                construction at this layer excludes it
-               - an object file overwritten with a PREPARED COLLIDING blob
+               e.g. an object file overwritten with a PREPARED COLLIDING blob
                -> not detectable, not excludable, and therefore outside what
                   RESOLVED claims at all (§4.3.2)
 ```
 
-**`refs/replace` stays wholly in the guard row, and the reason is mechanical.**
-An earlier revision moved it to the third row on the theory that a replace ref
-could select a prepared colliding twin. It cannot: colliding blobs share an oid,
-so such a ref maps the oid to *itself*. Verified against git 2.43.0 —
+**No mechanism belongs categorically to a row, and this contract has now been
+wrong about that five times.** Revisions of this section successively asserted
+that `refs/replace` is always detectable, then never, then always again. All
+three were false, because a mechanism's effect depends on what it is composed
+with. Verified, with git validating at neither hop:
 
 ```text
-git replace <oid> <oid>            creates the ref
-git cat-file blob <oid>            fatal: replace depth too high  (exit 128)
+git replace <A> <C>                  replace ref, A -> a DIFFERENT oid C
+C's object file overwritten with D   cat-file does not validate C's path
+git cat-file blob <A>   ->  D's content
+
+If D is chosen to collide with A, the resolver recomputes A's oid, the
+postcondition sees a match, and a replace ref aimed at a different oid has
+produced an UNDETECTABLE substitution.
 ```
 
-which is `LOOKUP_UNOBTAINABLE`, not an undetectable match. A replace ref aimed
-at any *different* oid necessarily mismatches and is detected. So every
-reachable use of the mechanism lands in the guard row.
-
-The third row is still real, but its delivery is an **overwritten object file**,
-not a ref: `cat-file` performs no hash verification of the object at an oid's
-path (demonstrated in §4.3.2), so a colliding blob written there is returned
-with a matching id and nothing observes the swap.
-
-A prerequisite is required precisely where the postcondition is blind. Where the
-postcondition can see, a guard is defence in depth and its failure is a finding
-rather than a disqualification — which is what witness 4 exercises, and what
-corpus case 3t already asserts.
-
-This is not a new position, and the artifact is named so it can be re-checked
-rather than taken from this document's summary of it:
-
-```text
-artifact   tools/tests/test_a1_v2_ledger_gate.py, case 3t (~L880-L900)
-introduced 2d372a7  ("EB-R1 review fix 4 — check the bytes against the name
-                     asked for")
-asserts    with GIT_NO_REPLACE_OBJECTS deliberately removed from GIT_ENV,
-           a substituted object still raises OBJECT IDENTITY VIOLATED
-```
-
-What the witness **asserts** is that one abort still happens without that one
-guard. The guard/prerequisite distinction in this section is an **inference**
-drawn from it — the witness is evidence for the principle, not a statement of
-it, and a reader who disagrees with the inference should be able to go and read
-the assertion. The first draft of this contract contradicted the asserted
-behaviour outright, which had already shipped and been independently reviewed
-twice.
-
-These are already-merged properties, not new work. Naming them here binds this
-contract to them, so that a future implementation cannot satisfy the letter of
-§4.2 while answering a weaker question than §3 asks. **This does not choose the
-git command** — that stays out of scope per §10. It forbids the byte-derived
-states from floating free of the guarantees that make them mean anything.
-
-The merged implementation already holds every prerequisite, so the counterfeit
-scenario above is not reachable there today. The defect is in what this
-document would have *licensed*: an implementation could satisfy the frozen rule,
-drop a prerequisite, and issue the system's strongest accusation on the strength
-of output from an arbitrary program. A preregistration is judged by what it
-permits, not by what the current code happens to do.
-
-**The cause of a non-zero exit is not classified.** No branch of this rule reads
-`stderr`, matches on a message, or consults an exit code beyond
-"did we obtain a trustworthy kind and bytes". Enumerating known failure
-messages is the instance-by-instance repair this effort has spent six rounds
-declining, and a resolver that classifies by diagnostic string inherits every
-future change to git's wording as a silent semantic change.
-
-`RESOLVED` carries `kind` because the resolver observed it. It does **not**
-judge whether that kind is the one the citation required.
-
-
-**What this criterion does and does not need.** The rows above are a claim
-about *observation*, not about cryptography: a substitution either yields a
-different object id, in which case recomputing it reveals the substitution, or
-it does not. Neither branch needs a premise about the hash's strength —
-`IDENTITY_VIOLATION` fires on an observed mismatch, and `RESOLVED` reports
-observed equality (§4.3.2).
-
-Where hash strength enters is the *inference* a consumer draws from those
-observations, which §4.3.2 states and this criterion does not need.
-
-```text
-verified about this repository and toolchain:
-    object format          sha1        (git rev-parse --show-object-format)
-    postcondition digest   Python hashlib.sha1 — PLAIN SHA-1, no collision
-                           detection  (a1_v2_extract_graph.py:242)
-    git's own backend      not established here; git may hash with a
-                           collision-detecting variant, and if it does, the
-                           postcondition is strictly weaker than the tool it
-                           is checking
-```
-
-That asymmetry is recorded because it was found by checking rather than by
-assuming, and because it is the kind of thing that reads as settled once nobody
-writes it down. Whether the postcondition should hash the way git hashes belongs
-to the implementation branch; this document contains no code.
-
-
+So a replace ref lands in the guard row when its target resolves to bytes of a
+different id, and in the third row when composition makes those bytes collide
+with the citation. Same mechanism, different effect, different row. Findings 8,
+13, 16, 21, 22 and 27 were all this error in different clothes: a statement
+about a mechanism standing in for a statement about an effect.
 
 ### 4.3.2 What RESOLVED claims, and what the hash properties are for
 
@@ -506,7 +431,8 @@ resolver may report:
 ```text
 second-preimage resistance   what lets a consumer treat RESOLVED bytes as
                              THE object for an already-trusted citation
-                             -> SHA-1: no practical attack known
+                             -> SHA-1, as of 2026-08: no practical attack
+                                publicly known. SEE THE CAVEAT BELOW.
 
 collision resistance         what would let a consumer treat the citation as
                              denoting uniquely at all. Settled when the oid
@@ -520,6 +446,15 @@ collision resistance         what would let a consumer treat the citation as
 Both are risks the reader of a verdict carries. They are declared here so the
 reader knows what they are carrying, and neither is dischargeable at this layer.
 
+**The cryptographic status above is an as-of statement, and this document cites
+no authority for it.** It is the author's understanding at 2026-08, not a
+finding this contract establishes, and it is the kind of claim that changes
+without the document changing. A consumer relying on it must re-check it against
+current cryptanalytic literature rather than against this file. The *structure*
+— which property underwrites which inference — is what this document freezes;
+the *status* of each property is a fact about the world that this document only
+reports, and reports without a source.
+
 **The prepared-collision case, and why it is not a `refs/replace` case.** An
 adversary who authored an artifact before it was pinned can prepare a colliding
 pair and cause the locator to cite the shared oid. Delivery is by **overwriting
@@ -531,9 +466,10 @@ git replace <oid> <oid>     creates the ref
 git cat-file blob <oid>     fatal: replace depth too high   (exit 128)
 ```
 
-— which is `LOOKUP_UNOBTAINABLE`, and a replace ref aimed at any *different* oid
-necessarily mismatches and is detected. So `refs/replace` is wholly a guard
-mechanism, and the undetectable channel is the object file itself:
+— which is `LOOKUP_UNOBTAINABLE`. A replace ref aimed at a *different* oid
+usually mismatches and is detected, but not necessarily: §4.3.1 records the
+composition that makes it undetectable. The channel that carries the
+prepared-collision case in every form is the object file itself:
 
 ```text
 git cat-file DOES NOT VERIFY that the object stored at an oid's path hashes
@@ -638,10 +574,11 @@ Listed here so the implementation cannot choose the experiments that suit it.
 4. **Substituted bytes** (replace-style identity violation) →
    `IDENTITY_VIOLATION`, existing postcondition intact. The §4.3 prerequisites
    all hold throughout; only the §4.3.1 *guard* is removed, which is what makes
-   this witness reachable at all. The substitution is a `refs/replace` ref
-   pointing at a **different** object id, which is the only form that
-   mechanism can take (§4.3.2). A prepared-collision overwrite is §4.3.1's
-   third row and is not what this witness exercises.
+   this witness reachable at all. What the witness requires is the **observed
+   effect**, not a mechanism: the bytes returned must recompute to a
+   different object id. A substitution engineered to recompute to the cited
+   id — by whatever route — is §4.3.1's third row and is not what this
+   witness exercises.
 5. **A non-blob object that resolves** → `RESOLVED(kind, bytes)`; the *locator*
    layer, not the resolver, classifies the wrong type.
 6. **No witness may use `stderr` text as a semantic discriminator.** A witness
