@@ -276,22 +276,80 @@ status, nothing more.
 
 ---
 
-## E-8 — Prerequisites asserted here WITHOUT a reproduction in this record
+## E-8 — Repository configuration can transform the returned bytes, but only on request
 
-Recorded explicitly so the gap is visible rather than implied by silence. The
-following §2.1 prerequisites are **not** backed by an experiment in this file:
+**Question:** can a repository-configured program change the bytes a lookup
+returns, and if so, what selects that path?
+
+**Reproduction and observed result:** a repository whose `.gitattributes` binds
+`f.txt` to a filter and a textconv driver, both configured to rewrite the content.
+
+```console
+$ git config filter.evil.smudge 'sed s/ORIGINAL/SMUDGED/'
+$ git config diff.evil.textconv 'sed s/ORIGINAL/TEXTCONV/'
+$ cat .gitattributes
+f.txt filter=evil diff=evil
+
+$ git cat-file blob 700c458a…                       # the contract's invocation
+ORIGINAL CONTENT
+
+$ git cat-file --filters  --path=f.txt 700c458a…
+SMUDGED CONTENT
+
+$ git cat-file --textconv --path=f.txt 700c458a…
+SMUDGED CONTENT
+
+$ rm f.txt && git checkout -- f.txt && cat f.txt
+SMUDGED CONTENT
+
+$ git cat-file -h
+    --textconv            run textconv on object's content
+    --filters             run filters on object's content
+```
+
+**Observed:** the plain `cat-file blob` invocation returned the stored bytes
+unchanged. The same object returned rewritten bytes when `--filters` or
+`--textconv` was passed. A checkout of the same path also produced rewritten bytes.
+The two flags are documented in this version's own `-h` output.
+
+**Inference:** the repository can supply the *program*, but it cannot supply the
+*decision to run it* through this command — that decision is the caller's, made by
+passing a flag. §2.1's raw-read prerequisite is therefore an obligation on this
+layer's own invocation, not a property it must detect in the repository.
+
+**Normative clause supported:** §2.1, raw read.
+
+**Does NOT establish:** that these are the only transformation paths, or anything
+about invocations other than `cat-file`. The checkout line is included only to show
+the configured filter was genuinely active — a filter that never fired would make
+the plain-invocation result meaningless.
+
+---
+
+## E-8.1 — Prerequisites with no witness in this record
+
+Recorded so the remaining gap is visible rather than implied by silence.
 
 | Prerequisite | Status of evidence here |
 |---|---|
-| counterfeit executable selected via `PATH` | no reproduction recorded |
-| lazy / promisor fetch satisfying a lookup | no reproduction recorded |
-| smudge / textconv filter transforming returned bytes | no reproduction recorded |
+| counterfeit executable selected via `PATH` | **no reproduction recorded** |
+| lazy / promisor fetch satisfying a lookup | **no reproduction recorded** |
 
-Each is a documented git capability, and each would return bytes that hash
-correctly — which is why §2.1 excludes them by construction rather than trying to
-detect them. But *this record does not contain a witness for any of the three*, and
-no reader should treat their presence in the contract as evidence-backed by this
-file. Producing those three reproductions is outstanding work.
+Neither is demonstrated here, and no reader should treat its presence in §2.1 as
+evidence-backed by this file. Producing both reproductions is outstanding work.
+
+An earlier revision of this entry justified all three prerequisites as "documented
+git capabilities" without naming the documentation or its exact property. That was
+the same defect this record exists to prevent — an assertion outrunning its
+evidence — and it is withdrawn. What replaces it is narrower and does not depend on
+either mechanism being reachable:
+
+> §2.1 states **exclusions**. An exclusion is justified by the cost of being wrong,
+> not by a demonstration that the excluded thing is reachable. If a counterfeit
+> executable or a lazy fetch turns out to be unreachable in some environment, the
+> corresponding requirement is **redundant there** — never incorrect. The
+> reproductions are owed because a contract should know which of its clauses are
+> load-bearing, not because the clauses fail without them.
 
 ---
 
@@ -325,9 +383,9 @@ leaves without a defined state and downstream action.*
 | Finding family | Disposition |
 |---|---|
 | failed-body debris hashed as evidence | core — §2.2, W3 |
-| counterfeit executable | core — §2.1 provenance, W7 |
-| lazy / network acquisition | core — §2.1 provenance |
-| smudge / textconv / filter transformation | core — §2.1 raw read |
+| counterfeit executable | core — §2.1 provenance, W7; no witness (E-8.1) |
+| lazy / network acquisition | core — §2.1 provenance; no witness (E-8.1) |
+| smudge / textconv / filter transformation | core — §2.1 raw read; witness E-8 |
 | `refs/replace` yielding a different id | core — §3 `IDENTITY_VIOLATION`, W4 |
 | `refs/replace` composed to yield a matching id | core — §5, W8 |
 | prepared collision | core — §5 `RESOLVED` + §4 non-claim, W8 |

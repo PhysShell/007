@@ -48,7 +48,9 @@ admissible. They are checked in the order given.
   this layer grants explicitly;
 - **no lazy or network acquisition** may satisfy the lookup;
 - the read is **raw** — no filter, conversion or textual transformation is
-  applied to the returned bytes;
+  applied to the returned bytes. This is a requirement on **this layer's own
+  invocation**: the transformation path is opt-in, so the obligation is that the
+  resolver never requests it (evidence E-8);
 - the repository under inspection **cannot choose** which program runs or which
   transformation path is taken.
 
@@ -197,37 +199,49 @@ than the distinction the locator layer has to enforce.
 ## 9. Required implementation witnesses
 
 An implementation claiming this contract must be falsifiable by each of the
-following. Each names the state it requires.
+following.
+
+**These witnesses are instances of §3, never an independent source of states.**
+Each one fixes an input; the state beside it is the one §3 already assigns to that
+input, reproduced here only so the experiment is named in advance. If any witness
+below can be read as assigning a state §3 does not, that is a defect in the
+witness, and §3 governs.
 
 ```text
-W1  healthy blob, all prerequisites met
+W1  §2 holds; healthy blob
         -> RESOLVED
 
 W2  the object cannot be produced at all
         -> LOOKUP_UNOBTAINABLE
 
-W3  the kind operation succeeds, the body operation emits partial output
-    and then fails
+W3  §2.1 holds; the kind operation succeeds, the body operation emits
+    partial output and then fails
         -> LOOKUP_UNOBTAINABLE
         -> the partial output is never hashed
 
-W4  a complete successful response whose bytes recompute to a different id
+W4  §2 holds; a complete successful response whose bytes recompute to a
+    different id
         -> IDENTITY_VIOLATION
 
-W5  a successful resolution of a non-blob object
+W5  §2 holds; a successful resolution of a non-blob object
         -> RESOLVED, and the locator layer rejects it (§8)
 
 W6  the wording of any diagnostic text is varied
         -> the selected state does not change
 
-W7  a §2 provenance prerequisite is absent
+W7  a §2.1 provenance prerequisite is ABSENT
         -> LOOKUP_UNOBTAINABLE for BOTH the hash-matching and the
            hash-mismatching case
 
-W8  a prepared collision, or an equivalent model of one: a complete
-    successful response whose bytes recompute to the requested id
+W8  §2 holds; a prepared collision, or an equivalent model of one: a
+    complete successful response whose bytes recompute to the requested id
         -> RESOLVED, with no citer-intent claim attached
 ```
+
+W4, W5 and W8 are conditioned on `§2 holds` because a complete successful response
+establishes **§2.2 only**. Without that condition each of them would overlap W7 on
+the provenance-absent input and demand the opposite state — which is exactly how a
+witness list turns into a second, conflicting statement of the partition.
 
 W3 and W7 are the two that a plausible implementation is most likely to fail, and
 W7 must be exercised in **both** directions to be meaningful.
