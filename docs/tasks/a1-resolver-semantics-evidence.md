@@ -175,7 +175,11 @@ $ A=$(printf 'AUTHENTIC AUTHORITY' | /usr/bin/git hash-object -w --stdin); echo 
 36ae691f4261ce7008c7bfc827233e74dc3fc96e
 $ D=$(printf 'SUBSTITUTED CONTENT' | /usr/bin/git hash-object -w --stdin); echo $D
 7feb07853362884e770de9cde3265336be1697fb
-$ cp ".git/objects/${D:0:2}/${D:2}" ".git/objects/${A:0:2}/${A:2}"
+$ stat -c%a ".git/objects/${A:0:2}/${A:2}"   # loose objects are READ-ONLY
+444
+$ rm -f ".git/objects/${A:0:2}/${A:2}"       # required: cp alone cannot
+$ cp  ".git/objects/${D:0:2}/${D:2}" \
+      ".git/objects/${A:0:2}/${A:2}"         # overwrite a 0444 file
 
 # --- the lookup: the env -i prefix is ON each command, not a separate step ---
 $ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
@@ -228,6 +232,20 @@ leaked
 bytes whose recomputed id differs from the requested one, and a separate command,
 `fsck`, reports the mismatch.
 
+**Provenance of the `rm` step, and why it was missing.** Earlier revisions of this
+entry and of E-5 recorded a bare `cp` over the object file. Git writes loose
+objects mode `0444`, so that command **fails with `Permission denied` for an
+ordinary user**. It succeeded when recorded only because this environment runs as
+**root**, and root ignores the write bit.
+
+That is a reproducibility defect of a kind the earlier mechanical sweep could not
+see: the command was syntactically complete, used the absolute executable, carried
+no placeholder, and *worked when run* — it simply worked for a reason that does not
+generalise to the reader. A privilege the recorder happens to hold is exactly the
+sort of premise that never gets written down, because it never announces itself.
+The re-run with `rm -f` reproduces every recorded value unchanged, so the defect
+was in the instructions, never in the result.
+
 **Provenance of these controls:** as with E-7, the first revision of this entry ran
 plain `git` from `PATH` with an inherited environment while citing witness W4 —
 which requires `§2 holds`. That gap was **not reported by any reviewer**; it was
@@ -266,8 +284,9 @@ bf637ab698f8fbfd8346edb378c904d2bb6f4064
 7eef2c30522157ac6ca7771c2f0172a42cbd57f4
 
 $ /usr/bin/git replace "$A" "$C"                     # exit 0 — hop 1: A -> C
-$ cp ".git/objects/${D:0:2}/${D:2}" \
-     ".git/objects/${C:0:2}/${C:2}"                  # hop 2: C's path holds D
+$ rm -f ".git/objects/${C:0:2}/${C:2}"               # loose objects are 0444;
+$ cp  ".git/objects/${D:0:2}/${D:2}" \
+      ".git/objects/${C:0:2}/${C:2}"                 # hop 2: C's path holds D
 
 # --- route OPEN: every control EXCEPT GIT_NO_REPLACE_OBJECTS ---
 $ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
