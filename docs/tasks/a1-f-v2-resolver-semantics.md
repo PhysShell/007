@@ -476,6 +476,13 @@ W9  §2.1 holds; the kind and the complete bytes ARE obtained, but the
         the other to sha1.
 ```
 
+**W1, W4, W5 and W8 are all OWED on §2.1's no-network clause.** They are
+conditioned on `§2 holds`, which is three prerequisites; the evidence record can
+witness the executable, environment, raw-read, completeness and identity-function
+clauses, but not the absence of network access — that is a claim about what did
+not happen on a socket. Until an egress-denying or egress-observing witness
+exists, no exercise of these four is complete, however healthy the lookup looks.
+
 W4, W5 and W8 are conditioned on `§2 holds` because a complete successful response
 establishes **§2.2 only**. Without that condition each of them would overlap W7 on
 the provenance-absent input and demand the opposite state — which is exactly how a

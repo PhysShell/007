@@ -287,12 +287,17 @@ one self-terminates.
 **Question:** if an object file is overwritten with a *different* valid object,
 does the lookup refuse it?
 
-**Reproduction and observed result:** W4 requires **`§2 holds`**, so this is run
-under the same §2.1 controls as E-7 — absolute executable path, and a child
-environment built with `env -i` carrying only `PATH=/usr/bin`,
-`GIT_TERMINAL_PROMPT=0`, `GIT_NO_LAZY_FETCH=1`, `GIT_NO_REPLACE_OBJECTS=1`,
-`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`. Neither `--filters` nor
-`--textconv` is passed.
+**Reproduction and observed result:** W4 requires **`§2 holds`**, which is THREE
+prerequisites, not one. This entry exercises what it can: the §2.1 controls as in
+E-7 — absolute executable path, and a child environment built with `env -i`
+carrying only `PATH=/usr/bin`, `GIT_TERMINAL_PROMPT=0`, `GIT_NO_LAZY_FETCH=1`,
+`GIT_NO_REPLACE_OBJECTS=1`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`,
+with neither `--filters` nor `--textconv` passed; §2.2, by obtaining both the kind
+and the complete bytes through operations that succeed; and **§2.3, by performing
+the object-format read the contract requires** — added below after a reviewer
+observed that an earlier revision claimed `§2 holds` while never reading the
+format at all. See *"What this record cannot witness"* at the end of this entry
+for what remains owed.
 
 ```console
 # --- construction, from an empty repository ---
@@ -310,6 +315,10 @@ $ cp  ".git/objects/${D:0:2}/${D:2}" \
       ".git/objects/${A:0:2}/${A:2}"         # overwrite a write-protected file
 
 # --- the lookup: the env -i prefix is ON each command, not a separate step ---
+# --- §2.3: the identity function must be OBTAINED, not assumed ---
+$ CTRL /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" rev-parse --show-object-format
+sha1                         # exit 0   <-- §2.3 holds: a recognised format
+
 $ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file -t $A
@@ -365,6 +374,33 @@ record.
 **Observed:** under that invocation both operations exit 0, the lookup returns
 bytes whose recomputed id differs from the requested one, and a separate command,
 `fsck`, reports the mismatch.
+
+**What this record cannot witness — `§2 holds` is THREE prerequisites.**
+
+| Prerequisite | Witnessed by this entry? |
+|---|---|
+| §2.1 executable, environment, raw read, repository cannot choose | **yes** |
+| §2.1 **no network access during the operation** | **NO — unwitnessable here** |
+| §2.2 kind and complete bytes, each via a succeeding operation | **yes** |
+| §2.3 identity function obtained, value in the enumerated set | **yes**, since this revision |
+
+**No entry in this file establishes the complete `§2 holds` condition, and none
+ever can under the present controls**, because §2.1's network clause is a claim
+about what did *not* happen on a socket and nothing here observes it. Therefore
+**every §2-conditioned witness — W1, W4, W5 and W8 — is OWED on that clause**, not
+only W8, whose debt was already recorded for a different reason (collision
+material).
+
+This is the second time the same property has failed. §2.3 was ADDED at `6d02367`
+and §2.1 was WIDENED at `4eb074c`; on both occasions the clause was changed and
+the entries *claiming `§2 holds`* were not re-checked. E-4 went on citing W4 while
+never reading the object format at all — an implementation that defaults to SHA-1
+when that read fails would reproduce every value in this entry and still be wrong,
+emitting `IDENTITY_VIOLATION` where the contract requires `LOOKUP_UNOBTAINABLE`.
+
+**The rule, stated so it does not have to be rediscovered a third time: changing
+any §2 prerequisite obliges a sweep of every site that asserts §2 — or any part of
+§2 — is satisfied.** Widening the ledger row is not the fix; it is one third of it.
 
 **Provenance of the `rm` step, and why it was missing.** Earlier revisions of this
 entry and of E-5 recorded a bare `cp` over the object file. Git writes loose
