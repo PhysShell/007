@@ -82,6 +82,12 @@ admissible. They are checked in the order given.
   has not named is still forbidden by the clause; discovering one is a §10 change
   to the table, never a licence to permit it.
 
+  **The evidence record's control set implements only the first row.** Evidence
+  E-5.1 demonstrates that under those exact controls a repository-supplied
+  `objects/info/alternates` file still redirects a lookup — kind and bytes, both
+  at exit 0, for an object absent from the repository. The clause is normative
+  regardless; what is owed is a witness that the alternates half can be closed.
+
   Without this clause an implementation could satisfy every other §2.1
   requirement — chosen executable, constructed environment, no network, raw read —
   and still return the bytes of a different object because a ref in the repository
@@ -476,6 +482,11 @@ W7  a §2.1 provenance prerequisite is ABSENT
         -> LOOKUP_UNOBTAINABLE for BOTH the hash-matching and the
            hash-mismatching case
 
+        REQUIRES AN ARM PER PREREQUISITE. The indirection clause has two
+        halves and they are separate arms: `refs/replace`, and repository
+        -supplied alternates. E-5.1 shows the control set closes only the
+        first, so the ALTERNATES ARM OF W7 IS OWED.
+
 W8  §2 holds; a PREPARED COLLISION: a complete successful response whose
     bytes are NOT the artifact the citer meant, and which recompute to the
     requested id
@@ -510,11 +521,17 @@ W8  §2 holds     -> OWED
 W9  §2.1 holds   -> OWED
 ```
 
-The evidence record can witness the executable, environment, raw-read,
-completeness, indirection and identity-function clauses, but **not** the absence
-of network access — that is a claim about what did not happen on a socket. Until
-an egress-denying or egress-observing witness exists, no exercise of those six is
-complete, however healthy the lookup looks.
+Those six are owed on **two** clauses, not one:
+
+- **no network access** — a claim about what did not happen on a socket, which
+  nothing in the evidence record observes;
+- **no repository-controlled indirection, alternates half** — E-5.1 demonstrates
+  the route is **open** under the control set every reproduction here runs under.
+  This one is worse than unwitnessed: it is witnessed to be *unclosed*.
+
+Until an egress-denying or egress-observing witness exists, and until a control
+set that closes alternates is exercised, no exercise of those six is complete,
+however healthy the lookup looks.
 
 An earlier revision listed only W1, W4, W5 and W8, having enumerated the
 `§2 holds` witnesses and overlooked the two conditioned on `§2.1 holds` directly.

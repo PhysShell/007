@@ -560,6 +560,64 @@ collide, and the substitution above **is** detectable by recomputation.
 
 ---
 
+## E-5.1 — The control set does NOT close the alternates route
+
+**Question:** §2.1 forbids repository-controlled indirection. Does the control set
+used by every entry in this file actually close it?
+
+**Reproduction and observed result:**
+
+```console
+$ rm -rf /tmp/rs-alt-donor /tmp/rs-alt-main
+$ CTRL /usr/bin/git init -q /tmp/rs-alt-donor
+$ O=$(printf 'OBJECT ONLY IN THE ALTERNATE\n' \
+      | CTRL /usr/bin/git -C /tmp/rs-alt-donor hash-object -w --stdin); echo "$O"
+08cbb3149b7d9df0a0c1eda1155a9416b33b74a0
+
+$ CTRL /usr/bin/git init -q /tmp/rs-alt-main
+$ CTRL /usr/bin/git -C /tmp/rs-alt-main cat-file -t "$O"
+fatal: git cat-file: could not get object info
+
+# --- the repository supplies the redirection, as a FILE in its own object store ---
+$ printf '/tmp/rs-alt-donor/.git/objects\n' \
+      > /tmp/rs-alt-main/.git/objects/info/alternates
+
+$ CTRL /usr/bin/git -C /tmp/rs-alt-main cat-file -t "$O"
+blob
+$ CTRL /usr/bin/git -C /tmp/rs-alt-main cat-file blob "$O"
+OBJECT ONLY IN THE ALTERNATE
+```
+
+**Observed:** under the **full control set defined in this file's header**, an
+object absent from the repository became retrievable — kind and bytes, both at
+exit 0 — because a file inside the repository named another object directory.
+Nothing about the invocation changed between the two attempts.
+
+**Inference:** `GIT_NO_REPLACE_OBJECTS=1` closes the `refs/replace` route and
+**does not close the alternates route**. §2.1's indirection clause therefore has
+two halves, and this record's controls implement only one of them.
+
+**Normative clause supported:** §2.1's no-repository-controlled-indirection
+clause — this entry exhibits *why* the clause is needed for alternates, exactly as
+E-5 does for `refs/replace`.
+
+**Related required witness:** **W7 — OWED on an alternates arm.** W7 requires a
+§2.1 prerequisite to be ABSENT; the alternates arm of the indirection clause has
+no witness in this record.
+
+**Does NOT establish:** that `refs/replace` and alternates are the only such
+layers. §2.1 states the property and explicitly declines to claim its table is
+complete.
+
+**Why this entry exists.** §2.1's indirection clause was added at `2305127` after
+a reviewer observed that the contract never closed the replace-ref route. Adding
+the clause immediately made a second thing true, which this entry records rather
+than leaves implicit: **the control set every reproduction here runs under does
+not satisfy the clause it now cites.** A clause can be correct and still be
+unwitnessed by the very controls that were supposed to embody it.
+
+---
+
 ## E-6 — A damaged object misclassifies if the exit status is ignored
 
 **Question:** what does a returncode-ignoring resolver conclude about a corrupt
@@ -856,6 +914,7 @@ Recorded so the remaining gap is visible rather than implied by silence.
 |---|---|
 | counterfeit executable selected via `PATH` | **no reproduction recorded** |
 | any network access during the operation (lazy/promisor fetch, reachability probe, authentication, metadata) | **no reproduction recorded** |
+| repository-controlled indirection — the **alternates** half of §2.1's clause | **route demonstrated OPEN under the control set (E-5.1); no closing witness** |
 
 Neither is demonstrated here, and no reader should treat its presence in §2.1 as
 evidence-backed by this file. Producing both reproductions is outstanding work.
@@ -1092,8 +1151,8 @@ leaves without a defined state and downstream action.*
 | counterfeit executable | core — §2.1 provenance, W7; no witness (E-8.1) |
 | lazy / network acquisition | core — §2.1 provenance, now stated as NO network access at all; no witness (E-8.1) |
 | smudge / textconv / filter transformation | core — §2.1 raw read; witness E-8, both arms now discriminating |
-| `refs/replace` yielding a different id | core — §3 `IDENTITY_VIOLATION`, W4 |
-| `refs/replace` composed to yield a matching id | core — §5; **W8 OUTSTANDING** |
+| `refs/replace` yielding a different id | core — §2.1 indirection clause FAILS, so §3's `ANYTHING ELSE` -> `LOOKUP_UNOBTAINABLE`, W7 |
+| `refs/replace` composed to yield a matching id | core — §2.1 indirection clause FAILS first, so `LOOKUP_UNOBTAINABLE`, W7. §5 governs only prepared collisions reached WITHOUT indirection |
 | prepared collision | core — §5 `RESOLVED` + §4 non-claim; **W8 OUTSTANDING — never exercised** |
 | hash-strength premises (collision / second preimage) | core — §4 removes the dependency entirely; E-9 asserts no cryptographic status at all |
 | mechanism-vs-effect misclassification | core — §3 partitions by outcome; no mechanism vocabulary exists here to misclassify with |
