@@ -361,7 +361,7 @@ mechanism can land in more than one row, and `refs/replace` does:
 ```text
 GUARD          the substitution yields a DIFFERENT object id, so recomputing
                it reveals the substitution
-               - refs/replace pointing at unrelated bytes
+               - refs/replace, in every reachable form (see below)
                - an object file overwritten with a different valid object
 
 PREREQUISITE   the interference can leave the object id MATCHING, and the
@@ -372,16 +372,29 @@ PREREQUISITE   the interference can leave the object id MATCHING, and the
 
 NEITHER        the interference leaves the object id MATCHING and no
                construction at this layer excludes it
-               - refs/replace pointing at a PREPARED COLLIDING blob
+               - an object file overwritten with a PREPARED COLLIDING blob
                -> not detectable, not excludable, and therefore outside what
                   RESOLVED claims at all (§4.3.2)
 ```
 
-An earlier revision had only the first two rows and put `refs/replace` in the
-guard row unconditionally. That is false for the third case: a replace ref aimed
-at a colliding blob produces a matching id, so the postcondition sees nothing
-and no prerequisite removes it. The mechanism is the same; the effect on the id
-is what differs, and the effect is what classifies.
+**`refs/replace` stays wholly in the guard row, and the reason is mechanical.**
+An earlier revision moved it to the third row on the theory that a replace ref
+could select a prepared colliding twin. It cannot: colliding blobs share an oid,
+so such a ref maps the oid to *itself*. Verified against git 2.43.0 —
+
+```text
+git replace <oid> <oid>            creates the ref
+git cat-file blob <oid>            fatal: replace depth too high  (exit 128)
+```
+
+which is `LOOKUP_UNOBTAINABLE`, not an undetectable match. A replace ref aimed
+at any *different* oid necessarily mismatches and is detected. So every
+reachable use of the mechanism lands in the guard row.
+
+The third row is still real, but its delivery is an **overwritten object file**,
+not a ref: `cat-file` performs no hash verification of the object at an oid's
+path (demonstrated in §4.3.2), so a colliding blob written there is returned
+with a matching id and nothing observes the swap.
 
 A prerequisite is required precisely where the postcondition is blind. Where the
 postcondition can see, a guard is defence in depth and its failure is a finding
@@ -548,20 +561,33 @@ exact bytes for a cited oid can be obtained here without network access; it does
 not ask the resolver to audit the citation's authorship, which the resolver has
 no means to do.
 
-The two hash properties then land where they belong, and neither is a premise
-this layer can discharge:
+**Neither hash property is a prerequisite for `RESOLVED`**, and an earlier
+revision was wrong to call second-preimage resistance one. Both of `RESOLVED`'s
+claims — obtained locally under §4.3, object id equals the cited oid — remain
+true observations even if practical second preimages existed. Making hash
+strength gate the state would leave an implementation with only two options,
+silently assume it or never report `RESOLVED`, which is precisely the bind
+§4.3's prerequisites exist to avoid.
+
+The hash properties bear on **what a consumer may infer** from `RESOLVED`, not
+on whether the resolver may report it:
 
 ```text
-second-preimage resistance   makes RESOLVED useful for a citation already
-                             trusted — no practical attack against SHA-1
+second-preimage resistance   what lets a consumer treat RESOLVED bytes as
+                             THE object for an already-trusted citation.
+                             No practical attack against SHA-1.
 
-collision resistance         determines whether the CITATION denotes
-                             uniquely at all. Settled when the oid was
-                             chosen, and SHA-1 does not provide it.
+collision resistance         what would let a consumer treat the citation
+                             as denoting uniquely at all. Settled when the
+                             oid was chosen; SHA-1 does not provide it.
                              Inherited by every consumer of the pin,
-                             including PINNED_BLOB, and not observable
-                             from inside a resolver.
+                             PINNED_BLOB included.
 ```
+
+Both are risks carried by the reader of a verdict, declared here so the reader
+knows what they are carrying. Neither is dischargeable at this layer, and
+neither needs to be, because the state no longer claims what they would
+underwrite.
 
 **What §2.5.1 says, and what this document infers, kept apart:**
 
