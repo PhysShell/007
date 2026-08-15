@@ -63,6 +63,30 @@ The response is complete **when, and only when, BOTH of these were obtained**:
 
 each through an operation that **succeeded**.
 
+**`usable kind` is defined here, in resolver-only terms**, because leaving it to
+be read naturally makes the emitted state ambiguous:
+
+```text
+a usable kind is a value obtained from a successful operation that names
+one of the git object types
+
+    blob    tree    commit    tag
+
+USABILITY IS NOT SUITABILITY. Whether the kind is the one some other layer
+wanted has no bearing on this clause.
+```
+
+Read as "usable *for the caller's purpose*", a `commit` obtained where the locator
+expected a `blob` would fail §2.2, so §2 would fail and §3 would emit
+`LOOKUP_UNOBTAINABLE` — while §8 and W5 require `RESOLVED` for exactly that input.
+The same input would carry two states. §8 already says a resolver result is never
+about suitability; the undefined word had quietly readmitted suitability into §2,
+which is the one place it must not appear.
+
+The four types are enumerated for the same reason §3.1 enumerates the object
+formats: an unenumerated "recognised kind" leaves the same gap one level down.
+Widening the set is a change to this contract under §10.
+
 **Completeness is defined by the evidence obtained, not by a set of operations the
 implementation nominates as required.** That distinction is load-bearing, and two
 separate defects came from getting it wrong:
