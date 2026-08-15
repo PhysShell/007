@@ -537,8 +537,10 @@ the mismatch, so something in git can compute it — what cat-file does not do
 is refuse to serve it.)
 ```
 
-The identity postcondition is therefore not defence in depth over a check git
-already performs — it **is** the check. Against a *colliding* overwrite it sees
+The identity postcondition is therefore not defence in depth over any rejection
+git performs on this path — whatever git computes internally, it serves the
+bytes, so the postcondition **is** what stands between the object database and
+the caller. Against a *colliding* overwrite it sees
 nothing, which is §4.3.1's third row and precisely what `RESOLVED` declines to
 claim.
 
@@ -647,9 +649,9 @@ Listed here so the implementation cannot choose the experiments that suit it.
 
 7ter. **Object-database substitution that the postcondition CAN see** — an
    object file overwritten by a different valid object → `IDENTITY_VIOLATION`,
-   since `cat-file` performs no hash verification of its own. This is the
-   channel the postcondition exists for, and it is independent of
-   `refs/replace`.
+   since `cat-file` **does not reject** an object whose stored path does not
+   match its id. This is the channel the postcondition exists for, and it is
+   independent of `refs/replace`.
 
 7bis. **A lookup that engages filter or conversion machinery must not report
    `RESOLVED`** — a repository-defined smudge filter that passes bytes through
