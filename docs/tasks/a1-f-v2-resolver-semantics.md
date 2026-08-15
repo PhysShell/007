@@ -227,13 +227,16 @@ boundary, obtain exact bytes corresponding to the cited OID?* Each clause of
 that sentence carries a requirement.
 
 **Each requirement below is scoped by §4.3.1's criterion**, and the scoping is
-not decoration: three separate findings — 8, 13 and 16 — were the same defect,
-a prerequisite phrased broadly enough to swallow `refs/replace`, which §4.3.1
-classifies as a *detectable* guard. Broad phrasing of a requirement is how that
-keeps happening, so a requirement may exclude only interference the
-postcondition cannot see. Anything it can see belongs to §4.3.1 as a guard, and
-saying so inside each clause is what stops the next rewrite from reintroducing
-it.
+not decoration: several findings against this document were one defect — a
+requirement phrased broadly enough to exclude interference the postcondition can
+already see. A requirement may exclude only interference that can leave the
+object id **matching**. Interference whose *effect* is a different object id is
+§4.3.1's guard case, and saying so inside each clause is what stops the next
+rewrite from reintroducing the error.
+
+Note that this is a statement about **effects, never about mechanisms**: the
+same mechanism can produce either effect depending on composition, which
+§4.3.1 demonstrates.
 
 ```text
 "I"                      the program that produced the answer is chosen by
@@ -357,9 +360,18 @@ rule while repairing something else.
 
 The criterion that separates them is **what the postcondition can detect**:
 
-The classification is by **effect on the object id**, and by nothing else. The
-rows below are defined by what the postcondition observes; the mechanisms in
-them are **illustrations, not memberships**.
+**The rows below operate inside §4.3's gate, not instead of it.** Where a
+provenance prerequisite is absent there is no observation to classify at all,
+and the outcome is `LOOKUP_UNOBTAINABLE` — including when a mismatch was
+*observed*. A counterfeit executable returning bytes that recompute to a
+different id shows the difficulty plainly: the effect matches the guard row, but
+nothing establishes that any object store was consulted, so there is no
+substitution to report. **A missing prerequisite overrides both byte-derived
+states.**
+
+Within that gate, classification is by **effect on the object id** and by
+nothing else. The rows are defined by what the postcondition observes; the
+mechanisms in them are **illustrations, not memberships**.
 
 ```text
 GUARD          the substitution yields a DIFFERENT object id, so recomputing
