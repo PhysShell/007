@@ -694,7 +694,7 @@ $ printf 'ORIGINAL CONTENT\n'              > f.txt
 $ printf 'f.txt filter=evil diff=evil\n'   > .gitattributes
 $ CTRL /usr/bin/git config filter.evil.smudge 'sed s/ORIGINAL/SMUDGED/'
 $ CTRL /usr/bin/git config filter.evil.clean  'cat'
-$ CTRL /usr/bin/git config diff.evil.textconv 'sed s/ORIGINAL/TEXTCONV/'
+$ CTRL /usr/bin/git config diff.evil.textconv 'sed s/SMUDGED/TEXTCONV/'
 $ CTRL /usr/bin/git add f.txt
 $ O=$(CTRL /usr/bin/git rev-parse :f.txt); echo "$O"
 700c458a4944f938d69a631d20ba0ba0b44c9563
@@ -708,7 +708,7 @@ $ CTRL /usr/bin/git cat-file --filters  --path=f.txt "$O"
 SMUDGED CONTENT
 
 $ CTRL /usr/bin/git cat-file --textconv --path=f.txt "$O"
-SMUDGED CONTENT
+TEXTCONV CONTENT
 
 # --- checkout, to show the configured filter was genuinely live ---
 $ rm f.txt && CTRL /usr/bin/git checkout -- f.txt && cat f.txt
@@ -735,6 +735,32 @@ layer's own invocation, not a property it must detect in the repository.
 about invocations other than `cat-file`. The checkout line is included only to show
 the configured filter was genuinely active — a filter that never fired would make
 the plain-invocation result meaningless.
+
+**Provenance of the textconv expression, and why it changed.** An earlier revision
+configured `diff.evil.textconv` as `sed s/ORIGINAL/TEXTCONV/`. Under that fixture
+the recorded output was:
+
+```text
+--filters   -> SMUDGED CONTENT
+--textconv  -> SMUDGED CONTENT      <- IDENTICAL
+```
+
+The value was correct — git really does print that — and it was still worthless as
+a textconv witness. The smudge filter rewrites `ORIGINAL` before the textconv
+program runs, so that program's `sed` matched nothing and the arm returned the
+*filter's* result. The entry therefore demonstrated the filter twice and the
+textconv driver **not at all**, while E-10 credited E-8 with closing the whole
+smudge/textconv/filter family.
+
+The expression now matches `SMUDGED`, which the smudge stage actually produces, so
+the two arms return **different** strings and each names its own mechanism.
+
+The general rule this is an instance of: **an observation must discriminate the
+thing it is cited for.** An arm whose output coincides with another arm's is
+consistent with the mechanism being absent, so it cannot witness that mechanism —
+regardless of whether the recorded value is accurate. Accuracy of a transcript and
+discriminating power are independent properties, and only the second one makes an
+entry evidence.
 
 ---
 
@@ -956,7 +982,7 @@ leaves without a defined state and downstream action.*
 | failed-body debris hashed as evidence | core — §2.2, W3 |
 | counterfeit executable | core — §2.1 provenance, W7; no witness (E-8.1) |
 | lazy / network acquisition | core — §2.1 provenance, now stated as NO network access at all; no witness (E-8.1) |
-| smudge / textconv / filter transformation | core — §2.1 raw read; witness E-8 |
+| smudge / textconv / filter transformation | core — §2.1 raw read; witness E-8, both arms now discriminating |
 | `refs/replace` yielding a different id | core — §3 `IDENTITY_VIOLATION`, W4 |
 | `refs/replace` composed to yield a matching id | core — §5; **W8 OUTSTANDING** |
 | prepared collision | core — §5 `RESOLVED` + §4 non-claim; **W8 OUTSTANDING — never exercised** |
