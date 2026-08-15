@@ -279,15 +279,39 @@ the contract's own prerequisites. The mechanism is still worth characterising �
 which is why the variant is used deliberately and named — but the contract-relevant
 fact is the second arm.
 
-**Inference:** the prepared-collision case cannot be delivered through a replace
-ref, because the mapping would have to be oid→itself. Its delivery channel is the
-object file.
+**Inference:** an oid→itself replace ref self-terminates, so **that shape** is not
+a delivery route. **Nothing wider follows.** In particular this does not establish
+that a prepared collision cannot be delivered through a replace ref — **E-5, two
+entries below, exhibits the composition that does exactly that**: a map `A -> C`
+whose target path holds bytes `D`, served because a hash-path mismatch is not
+refused (E-4). Were `D` chosen to collide with `A`, the recomputed id would match.
+The self-map fails for a reason — replace depth — that no other shape shares.
 
-**Normative clause supported:** §5 — the prepared-collision case is reasoned about
-as an object-store substitution, not a ref substitution.
+**Normative clause supported:** §2.1's **no-repository-controlled-indirection**
+clause. A lookup that consults a replace ref fails §2.1, so §3's `ANYTHING ELSE`
+branch requires `LOOKUP_UNOBTAINABLE` and **no other state is available**. §5 is
+**not** the operative clause here: it governs prepared collisions reached WITHOUT
+indirection, which is what E-10's replace-ref rows already say.
 
-**Does NOT establish:** that no other ref-based composition exists; only that this
-one self-terminates.
+**Related required witness:** none is discharged here. The `refs/replace` arm of
+the indirection clause is exhibited by E-5; **W7 remains OWED on the alternates
+arm** (E-5.1).
+
+**Does NOT establish:** that no other ref-based composition exists — one is
+recorded two entries below; that a prepared collision is undeliverable through a
+ref; or anything about routes of more than one hop.
+
+**Provenance of this entry's scope.** Until this revision the inference read *"the
+prepared-collision case cannot be delivered through a replace ref, because the
+mapping would have to be oid→itself"* — a universal claim resting on a false
+premise, contradicted by E-5 **in this same file**. A reviewer asked for it to be
+narrowed to self-maps at `bcc7518`; **that request was declined, and the decline
+was wrong.** The decline reasoned that this entry's title and its *Does NOT
+establish* line already said "self-map" — both true — and never checked the
+*Inference* line, which did not. A hedge in one field does not narrow an
+unconditional sentence in another. The misrouting to §5 is a second and later
+defect: §2.1's indirection clause did not exist at `bcc7518`, having been added at
+`2305127`.
 
 ---
 
@@ -545,8 +569,11 @@ requires SHA-1 collision material that was not available here; it is arithmetic
 over the observed route, not an observation.
 
 **Normative clause supported:** §2.1's **no-repository-controlled-indirection**
-clause — the requirement this entry exhibits the need for; §5 (why composition does
-not create a fourth state).
+clause — the requirement this entry exhibits the need for. The composed route
+fails §2.1, so §3's `ANYTHING ELSE` branch requires `LOOKUP_UNOBTAINABLE`; the
+composition creates no fourth state because §3 is the only partition, not because
+§5 absorbs it. §5 governs the same object-store substitution reached WITHOUT
+indirection.
 
 **Provenance of this citation.** Until `d993e48` this line read *"§2.1 (route
 closure)"* while §2.1 contained **no such clause** — the evidence cited a
@@ -932,7 +959,10 @@ either mechanism being reachable:
 > reproductions are owed because a contract should know which of its clauses are
 > load-bearing, not because the clauses fail without them.
 
-**The network prerequisite was WIDENED at `260c3f0`'s successor**, and the gap
+**The network prerequisite was WIDENED at `4eb074c6df30a1cc954f73ddfa1552bf6dccc026`** —
+the revision at which §2.1 stopped forbidding only network acquisition that
+*satisfies* the lookup and began forbidding contact with a remote **at all** during
+the operation — and the gap
 widened with it. **Every entry that CLAIMS §2.1 is satisfied was widened too**,
 which is the step that was missed the first time: E-7 went on asserting that its
 invocation "meets every §2.1 clause" while E-8.1 conceded that nothing here
