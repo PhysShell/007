@@ -411,17 +411,32 @@ NEITHER        the interference leaves the object id MATCHING and no
 wrong about that five times.** Revisions of this section successively asserted
 that `refs/replace` is always detectable, then never, then always again. All
 three were false, because a mechanism's effect depends on what it is composed
-with. Verified, with git validating at neither hop:
+with.
+
+**What was OBSERVED** — git 2.43.0, in a scratch repository, three distinct
+non-colliding blobs:
 
 ```text
-git replace <A> <C>                  replace ref, A -> a DIFFERENT oid C
-C's object file overwritten with D   cat-file does not validate C's path
-git cat-file blob <A>   ->  D's content
+A = d1006e4be4c5fb8a694105ed74c3167fbe7f094c   "AUTHENTIC AUTHORITY"
+C = 261426e18e847c2fa3ed25516a8477926c793e91   "DECOY OBJECT"
+D = d97e4ba5af8bc5436bddc013b4733eeed1c1a2e7   "ATTACKER CONTENT VIA TWO HOPS"
 
-If D is chosen to collide with A, the resolver recomputes A's oid, the
-postcondition sees a match, and a replace ref aimed at a different oid has
-produced an UNDETECTABLE substitution.
+git replace <A> <C>                          replace ref: A -> a DIFFERENT oid
+cp <D's object file> <C's object file path>  C's path now holds D's object
+git cat-file blob <A>
+  -> "ATTACKER CONTENT VIA TWO HOPS"
 ```
+
+So git followed the replace ref to `C` and returned the bytes found at `C`'s
+path **without validating them against `C`** — no validation at either hop.
+
+**What is INFERRED, and was NOT executed:** that if `D` were chosen to collide
+with `A`, the resolver would recompute `A`'s oid and the postcondition would see
+a match. That half requires SHA-1 collision material, which was not available in
+this environment; the observation above establishes only that the *route*
+delivers unvalidated bytes of the attacker's choosing. The inference from there
+is arithmetic, not an experiment, and it is labelled so rather than folded into
+the word "verified".
 
 So a replace ref lands in the guard row when its target resolves to bytes of a
 different id, and in the third row when composition makes those bytes collide
