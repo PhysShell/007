@@ -37,7 +37,7 @@ other layers' questions (§8).
 
 ## 2. Observation prerequisites
 
-Two independent conditions must hold before any byte-derived conclusion is
+Three independent conditions must hold before any byte-derived conclusion is
 admissible. They are checked in the order given.
 
 ### 2.1 PROVENANCE admissible
@@ -86,6 +86,36 @@ never parsed, and never compared against the citation.
 A partial response is not a weak observation. It is **no observation**. Neither is
 an absent one.
 
+### 2.3 IDENTITY FUNCTION available
+
+The digest function `oid(kind, bytes)` of §3.1 was **obtained**: the repository's
+object format was read through an operation that **succeeded**, and the value it
+returned names a format in the enumerated set §3.1 permits.
+
+This is a prerequisite rather than a step inside §3, for a structural reason. Both
+of §3's positive branches compare `oid(kind, bytes)` against the requested id, so
+both are meaningless unless that function exists. Establishing its existence
+downstream — "the format read failed, therefore the lookup failed too" — requires
+an argument that must hold for **every** input, and it does not hold for two:
+
+- the format read is a **separate operation** from the lookup. The kind and the
+  bytes can be obtained successfully while `rev-parse --show-object-format` fails;
+  §2.2 quantifies over the kind and the bytes only, so §2 would still hold;
+- **"unsupported by git" and "unrecognised by this layer" are different
+  conditions.** A format that git implements and this layer does not leaves every
+  lookup operation succeeding, with `oid` still having no algorithm.
+
+In either case §2 would hold with `oid` undefined: §3 would point at its two
+positive branches while §3.1 demanded `LOOKUP_UNOBTAINABLE`, and the same input
+would carry two states. Making availability a prerequisite closes that by
+construction — the input fails §2, falls to §3's `ANYTHING ELSE` branch, and
+`LOOKUP_UNOBTAINABLE` is the only state it can carry.
+
+**Totality is not availability.** §3.1 requires the chosen function to be total,
+so the comparison is defined for every `(kind, bytes)`. §2.3 requires that there
+be a chosen function at all. The first is a property of an algorithm; the second
+is a precondition for having one. Conflating the two is what left the gap.
+
 ---
 
 ## 3. Normative state table
@@ -118,11 +148,14 @@ was twice wrong.
 
 The two positive branches remain mutually exclusive, since `==` and `!=` cannot
 both hold. They are also **jointly reachable** only when `oid(kind, bytes)` is
-defined — which §3.1 guarantees by requiring a total function. If that requirement
-were relaxed, `§2 holds` inputs could satisfy neither positive branch and would
-fall to `LOOKUP_UNOBTAINABLE`; the partition would stay exhaustive, but a genuine
-identity result would be silently reported as unobtainable. §3.1 is what keeps
-that from happening.
+defined, and that takes **both** prerequisites: §2.3 establishes that a digest
+function was obtained at all, and §3.1 requires the obtained function to be
+**total**. Either alone is insufficient. If totality were relaxed, `§2 holds`
+inputs could satisfy neither positive branch and a genuine identity result would
+be silently reported as unobtainable. If availability were merely argued rather
+than required, `§2 holds` inputs could arrive with no function to apply — which
+is the defect §2.3 was added to close, after this paragraph cited totality alone
+as if it settled the question.
 
 **A missing prerequisite outranks both byte-derived states.** If §2 does not hold,
 the outcome is `LOOKUP_UNOBTAINABLE` **even when a mismatch was observed** — an
@@ -139,9 +172,20 @@ trust.
 
 **The algorithm is the REPOSITORY'S OBJECT FORMAT, not a fixed choice.** A git
 repository declares its object format in the `extensions.objectFormat`
-configuration variable, and the object ids it issues are digests under that format
-— 40 hex characters for `sha1`, 64 for `sha256`. This layer must compute the same
-function the repository used.
+configuration variable, and the object ids it issues are digests under that
+format. This layer must compute the same function the repository used.
+
+**The enumerated set is exactly these two:**
+
+```text
+sha1     -> SHA-1,   object ids 40 hex characters
+sha256   -> SHA-256, object ids 64 hex characters
+```
+
+Any other returned value is **outside the set**, whatever git may do with it.
+Widening this set is a change to this contract under §10, not an implementation
+decision — which is the point of enumerating it here rather than deferring to
+whatever the installed git happens to accept.
 
 **The read is fixed, and it is not the configuration variable.** The resolver
 obtains the format from `rev-parse --show-object-format`, invoked under the same
@@ -153,13 +197,24 @@ the property; the command is how the property is read.
 
 **Absent and unsupported values.** An absent value is not an error — it is the
 `sha1` default, and `--show-object-format` reports it as such, so the resolver
-simply uses what it is told. An **unsupported** value is not this layer's problem
-to interpret: git itself refuses to operate in such a repository, so the lookup
-operations fail, §2.2 is unsatisfied, and §3's default branch yields
-`LOOKUP_UNOBTAINABLE`. The resolver must **never** guess a format when the read
-fails or returns something it does not recognise — guessing reintroduces exactly
-the mismatch this clause exists to prevent, and `LOOKUP_UNOBTAINABLE` is the
-honest answer for a repository whose identity function is unknown.
+simply uses what it is told. A read that **fails**, or that returns a format
+outside the enumerated set, means no identity function was obtained: **§2.3 does
+not hold, so §2 does not hold**, and §3's default branch yields
+`LOOKUP_UNOBTAINABLE`.
+
+That routing is **structural — it does not depend on how git behaves in such a
+repository.** Git is expected to refuse to operate on an object format it does not
+implement, which would make the lookup operations fail as well; this contract does
+not rely on it. An earlier form of this paragraph made exactly that behavioural
+claim load-bearing, and it is both unversioned and too narrow: it says nothing
+about the case where the lookup operations succeed and only the format read fails,
+nor about a format git implements and this layer does not recognise. §2.3 covers
+all of them without asserting anything about a program's behaviour.
+
+The resolver must **never** guess a format when the read fails or returns
+something it does not recognise — guessing reintroduces exactly the mismatch this
+clause exists to prevent, and `LOOKUP_UNOBTAINABLE` is the honest answer for a
+repository whose identity function is unknown.
 
 Fixing the algorithm at SHA-1 would be wrong rather than merely narrow: in a
 `sha256` repository, a SHA-1 recomputation cannot equal the requested 64-character
@@ -361,6 +416,16 @@ W8  §2 holds; a PREPARED COLLISION: a complete successful response whose
         falsify §5.
 
         UNTIL EXERCISED, W8 IS OWED — NEVER RECORDED AS PASSED.
+
+W9  §2.1 holds; the kind and the complete bytes ARE obtained, but the
+    object-format read FAILS or returns a format outside the enumerated set
+        -> LOOKUP_UNOBTAINABLE
+        -> the bytes are never hashed under a guessed or defaulted format
+
+        This is the §2.3 witness. It must be exercised in BOTH arms — read
+        failure, and unrecognised value — because they are different
+        conditions and an implementation can handle one while defaulting
+        the other to sha1.
 ```
 
 W4, W5 and W8 are conditioned on `§2 holds` because a complete successful response
@@ -368,8 +433,13 @@ establishes **§2.2 only**. Without that condition each of them would overlap W7
 the provenance-absent input and demand the opposite state — which is exactly how a
 witness list turns into a second, conflicting statement of the partition.
 
-W3 and W7 are the two that a plausible implementation is most likely to fail, and
-W7 must be exercised in **both** directions to be meaningful.
+W9 is conditioned on `§2.1 holds` rather than `§2 holds` for the same reason in
+the other direction: its whole point is an input where §2.1 and §2.2 are satisfied
+and §2.3 is not. Conditioning it on `§2 holds` would make it unreachable.
+
+W3, W7 and W9 are the three that a plausible implementation is most likely to
+fail, and W7 and W9 must each be exercised in **both** of their arms to be
+meaningful.
 
 ---
 

@@ -767,13 +767,23 @@ in the `sha1` repository `extensions.objectFormat` is unset while
 `IDENTITY_VIOLATION`. The digest function must therefore be derived from the
 repository's declared format, which is what §3.1 requires.
 
-**Normative clause supported:** §3.1, algorithm selection.
+**Normative clause supported:** §3.1, algorithm selection; §2.3, the availability
+prerequisite; witness W9.
 
 **Does NOT establish:** that these are the only formats git will ever support, nor
 that reading the format is itself trustworthy in an adversarial repository. §3.1
 addresses the latter directly: a repository that misreports its format yields ids
 that do not match its own objects, which is exactly what the §3 comparison
 detects.
+
+**This entry witnesses only the two SUCCEEDING reads.** Both commands above
+answered, and both answers were inside the enumerated set. The two arms of W9 —
+a format read that **fails**, and one that returns a value **outside the set** —
+are **not reproduced here**, and W9 is therefore **OWED** on both arms. The first
+"does NOT establish" clause above is exactly why §2.3 states availability as a
+prerequisite rather than deriving it from git's behaviour: this record cannot
+establish what git does with a format it does not implement, so the contract must
+not depend on it.
 
 **Provenance of these controls.** The first revision of this entry ran the two
 `hash-object` commands with an inherited environment while using their output to
@@ -840,6 +850,15 @@ colliding `D` was ever produced, and the contract states that W8 is OWED until
 genuine collision material exists. A disposition row citing W8 without that mark
 would let a reader treat the witness as evidence-backed, which is the precise
 failure the OWED rule exists to prevent.
+
+**W9 is also OUTSTANDING, on both arms**, and it is deliberately absent from the
+table above. The table's scope is the terminated attempt's corpus; W9 comes from a
+finding raised against *this* attempt at head `6e830c8` — that §2 could hold while
+`oid` had no algorithm, leaving the same input pointed at two states. It is
+recorded here so that a reader scanning this file for `OUTSTANDING` finds every
+owed witness in one place, without widening a table that answers a different
+question. E-8.3 witnesses only the two succeeding format reads; neither the
+failed-read arm nor the outside-the-set arm is reproduced anywhere in this record.
 
 This table is a coverage argument, like everything else in this file. An error in
 it is an error about the previous attempt or about coverage — never a change to
