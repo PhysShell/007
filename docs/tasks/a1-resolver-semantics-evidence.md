@@ -717,7 +717,7 @@ Recorded so the remaining gap is visible rather than implied by silence.
 | Prerequisite | Status of evidence here |
 |---|---|
 | counterfeit executable selected via `PATH` | **no reproduction recorded** |
-| lazy / promisor fetch satisfying a lookup | **no reproduction recorded** |
+| any network access during the operation (lazy/promisor fetch, reachability probe, authentication, metadata) | **no reproduction recorded** |
 
 Neither is demonstrated here, and no reader should treat its presence in §2.1 as
 evidence-backed by this file. Producing both reproductions is outstanding work.
@@ -734,6 +734,19 @@ either mechanism being reachable:
 > corresponding requirement is **redundant there** — never incorrect. The
 > reproductions are owed because a contract should know which of its clauses are
 > load-bearing, not because the clauses fail without them.
+
+**The network prerequisite was WIDENED at `260c3f0`'s successor**, and the gap
+widened with it. §2.1 previously forbade only network acquisition *satisfying the
+lookup*; it now forbids **contacting a remote at all** during the operation. The
+old wording let an implementation probe a remote for reachability or
+authentication and then serve the object locally — no network-delivered byte
+satisfies the lookup, so §2.1 held — while §1 asks whether this layer can answer
+**without network access** and §4 has `RESOLVED` claim a **local** acquisition.
+
+This record witnesses **neither** form. `GIT_NO_LAZY_FETCH=1` appears in every
+control set here, but no entry demonstrates that it closes anything, and nothing
+here observes the wider property at all. The row above is widened to match the
+clause so the debt is not understated by describing a narrower one.
 
 ---
 
@@ -914,7 +927,7 @@ leaves without a defined state and downstream action.*
 |---|---|
 | failed-body debris hashed as evidence | core — §2.2, W3 |
 | counterfeit executable | core — §2.1 provenance, W7; no witness (E-8.1) |
-| lazy / network acquisition | core — §2.1 provenance; no witness (E-8.1) |
+| lazy / network acquisition | core — §2.1 provenance, now stated as NO network access at all; no witness (E-8.1) |
 | smudge / textconv / filter transformation | core — §2.1 raw read; witness E-8 |
 | `refs/replace` yielding a different id | core — §3 `IDENTITY_VIOLATION`, W4 |
 | `refs/replace` composed to yield a matching id | core — §5; **W8 OUTSTANDING** |

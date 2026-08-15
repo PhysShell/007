@@ -46,7 +46,20 @@ admissible. They are checked in the order given.
   paths — never resolved through `PATH` and never named by the repository;
 - the child environment is **constructed**, not inherited: it carries only names
   this layer grants explicitly;
-- **no lazy or network acquisition** may satisfy the lookup;
+- **the operation performs NO NETWORK ACCESS AT ALL** — not merely that no
+  network-delivered bytes satisfy the lookup. The prohibition is on *contacting a
+  remote during the operation*, for any purpose: reachability probe,
+  authentication, metadata, negotiation, or lazy/promisor fetch.
+
+  The weaker form — "no lazy or network acquisition may **satisfy the lookup**" —
+  was insufficient, and this is why: an implementation could contact a remote for
+  a reachability or authentication check, then serve the object from the local
+  store. No network-delivered byte would satisfy the lookup, §2.1 would hold, and
+  §3 would emit `RESOLVED` — while §1 asks whether this layer can answer **without
+  network access**, and §4 has `RESOLVED` claim that an admissible **local**
+  acquisition occurred. The prerequisite was weaker than the question the whole
+  document answers, so a conforming implementation could perform network I/O
+  during resolution and still be conforming;
 - the read is **raw** — no filter, conversion or textual transformation is
   applied to the returned bytes. This is a requirement on **this layer's own
   invocation**: the transformation path is opt-in, so the obligation is that the
