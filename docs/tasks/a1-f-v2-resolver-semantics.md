@@ -131,15 +131,35 @@ direction.
 
 ### 3.1 What `oid(kind, bytes)` denotes
 
-`oid(kind, bytes)` is the **plain SHA-1** of the git object encoding — the header
+`oid(kind, bytes)` is the digest of the git object encoding — the header
 `"<kind> <length>\0"` followed by the bytes — computed by this layer, under the
 same §2.1 provenance requirements as the lookup itself. A recomputation performed
 by a program the repository could choose is not a check; it is a second thing to
 trust.
 
-**Plain SHA-1 is REQUIRED, not defaulted, and the reason is totality.** Plain SHA-1
-yields a digest for every input, so the comparison in §3 is defined whenever §2
-holds, and a lookup that genuinely succeeded is reported as such.
+**The algorithm is the REPOSITORY'S OBJECT FORMAT, not a fixed choice.** A git
+repository declares its object format, and the object ids it issues are digests
+under that format — 40 hex characters for `sha1`, 64 for `sha256`. This layer must
+compute the same function the repository used.
+
+Fixing the algorithm at SHA-1 would be wrong rather than merely narrow: in a
+`sha256` repository, a SHA-1 recomputation cannot equal the requested 64-character
+oid for **any** input, so §3 would report `IDENTITY_VIOLATION` for every authentic
+object and the consumer would return `ERROR` on a lookup that fully succeeded.
+This also contradicts the frozen scalar definition in
+`docs/q-deck/a1-authority-contracts.md`, which defines a full object id as *"the
+repository's object-format width"*.
+
+**Whatever the format, the chosen function must be TOTAL and must not be
+collision-detecting.** Totality is what keeps the comparison defined whenever §2
+holds, so a lookup that genuinely succeeded is reported as such.
+
+**Reading the object format is not a repository-controlled program choice.** §2.1
+forbids the repository selecting *what runs*; the format selects only among a
+fixed, enumerated set of digest functions this contract already permits. A
+repository that misreports its format produces ids that do not match its own
+objects, which is precisely what the §3 comparison detects — so the failure mode
+is caught rather than trusted.
 
 **A collision-*detecting* variant is therefore NOT permitted here.** It is a
 *partial* function: on input exhibiting a known collision pattern it may refuse to
@@ -151,9 +171,11 @@ obtain a response. It did. The report would be false, and it would be false in t
 direction that hides a successful acquisition rather than inventing one.
 
 Two resolvers conforming to this contract must not be able to emit different states
-for the same input, so the choice is fixed here rather than left per
-implementation. Adopting a partial variant would require amending §3 to give that
-outcome its own state — a different contract, out of scope for this document.
+for the same input. That is why the algorithm is **determined by the repository's
+declared format** rather than left to the implementation: both resolvers read the
+same format and therefore compute the same function. Adopting a partial variant
+would require amending §3 to give its refusal outcome a state — a different
+contract, out of scope for this document.
 
 **This document does not establish which variant any particular git build uses.**
 That is a fact about a build, not about this contract, and no observation here
@@ -206,9 +228,9 @@ This is **not** an exception, a degraded `RESOLVED`, or grounds for
 equality, and §4 already declines to claim intent. No implementation may read this
 case as anything other than `RESOLVED`.
 
-**`RESOLVED` here is unconditional.** §3.1 requires plain SHA-1 precisely so that
-this case has exactly one outcome; there is no conforming implementation that emits
-anything else for it. No implementation may decide this case by inspecting the
+**`RESOLVED` here is unconditional.** §3.1 requires a total, non-collision-detecting
+digest precisely so that this case has exactly one outcome; there is no conforming
+implementation that emits anything else for it. No implementation may decide this case by inspecting the
 *content* of the bytes — recognising a pattern and selecting a state from it is
 classification by mechanism, which §3 does not authorise and which W8 exists to
 catch.

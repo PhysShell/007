@@ -638,6 +638,61 @@ supported usage rather than an exotic edge.
 
 ---
 
+## E-8.3 — The object format is declared per repository, and changes the digest
+
+**Question:** is a git object id always a SHA-1 digest?
+
+**Reproduction and observed result:**
+
+```console
+$ /usr/bin/git init -q of1
+$ /usr/bin/git init -q --object-format=sha256 of256
+
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd)/of1 -C of1 rev-parse --show-object-format
+sha1                                    # exit 0
+
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd)/of256 -C of256 rev-parse --show-object-format
+sha256                                  # exit 0
+
+# --- the SAME content, stored in each ---
+$ printf 'AUTHENTIC AUTHORITY' | /usr/bin/git -C of1   hash-object -w --stdin
+36ae691f4261ce7008c7bfc827233e74dc3fc96e                           # 40 chars
+
+$ printf 'AUTHENTIC AUTHORITY' | /usr/bin/git -C of256 hash-object -w --stdin
+b959693d240b3325123359c1907748c20df3be759f79d5525f2bf64416ca055a   # 64 chars
+```
+
+**Observed:** the two repositories report different object formats; the identical
+content receives a 40-character id in one and a 64-character id in the other. The
+format is reported successfully under the full §2.1 control set.
+
+**Inference:** a resolver that fixes its recomputation at SHA-1 would, in a
+`sha256` repository, produce a 40-character value that cannot equal the requested
+64-character oid **for any input** — so every authentic object would be reported
+`IDENTITY_VIOLATION`. The digest function must therefore be derived from the
+repository's declared format, which is what §3.1 requires.
+
+**Normative clause supported:** §3.1, algorithm selection.
+
+**Does NOT establish:** that these are the only formats git will ever support, nor
+that reading the format is itself trustworthy in an adversarial repository. §3.1
+addresses the latter directly: a repository that misreports its format yields ids
+that do not match its own objects, which is exactly what the §3 comparison
+detects.
+
+**Why this entry exists.** §3.1 previously fixed the algorithm at plain SHA-1. That
+was introduced to guarantee totality, and it did — but it also silently narrowed
+the contract to one object format, contradicting the frozen scalar definition in
+`docs/q-deck/a1-authority-contracts.md`, which defines a full object id as "the
+repository's object-format width". Totality was the right requirement; naming a
+specific algorithm to obtain it was not.
+
+---
+
 ## E-9 — Cryptographic caveats (literature, not observation)
 
 **Question:** does the contract depend on SHA-1 properties?
