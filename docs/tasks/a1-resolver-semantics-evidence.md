@@ -60,14 +60,34 @@ local   core.filemode=true
 
 $ git config -h | grep show-scope
     --[no-]show-scope     show scope of config (worktree, local, global, system, command)
+
+$ git -c example.key=value config --show-scope --get example.key
+command value
+
+$ git config example.local fromrepo          # set IN the repository
+$ git config --show-scope --get example.local
+local   fromrepo
+
+$ git -c example.key=value config --show-scope --list | grep example
+local     example.local=fromrepo
+command   example.key=value
 ```
 
 **Observed:** `--show-scope` is rejected as a top-level git option; it is an option
-of `git config`; the scope vocabulary it documents includes `command`.
+of `git config`; a key passed with `-c` is reported under scope **`command`**,
+while a key written into the repository is reported under scope **`local`**, and
+the two appear as distinct scopes in the same listing.
 
 **Inference:** a `-c key=value` argument is therefore not "the repository's
 config", and a contract that grants one narrow `-c` key is not thereby reading
 repository-controlled configuration.
+
+**Provenance of this observation:** an earlier revision of this entry recorded only
+the `-h` line enumerating scope *names* and inferred the `-c` behaviour from it.
+Enumerating a scope in a help string is not a demonstration that `-c` produces it —
+the same gap this record's Observed/Inference rule exists to catch. The two
+commands above were added because that inference was not licensed by what had been
+run.
 
 **Normative clause supported:** §2.1 — "the repository cannot choose which program
 runs or which transformation path is taken" is compatible with this layer passing
@@ -265,8 +285,16 @@ differs from the requested id.
 **Inference:** this is the exact shape witness W3 names. A resolver that checks the
 first command's status but not the second's will hash 6.2 MB of debris and report
 `IDENTITY_VIOLATION` where the correct state is `LOOKUP_UNOBTAINABLE`. The failure
-is not hypothetical: the current `_local_object` in `tools/a1_v2_extract_graph.py`
-on `main` checks the kind command's returncode and does not check the body's.
+is not hypothetical. **Pinned to the reviewed base commit `e70d019`**, not to a
+mutable branch name: in `tools/a1_v2_extract_graph.py` at that revision,
+`_local_object` tests `kind.returncode != 0` and returns `None`, then runs the body
+command and passes `body.stdout` directly into `hashlib.sha1(...)` **without
+testing `body.returncode`**. That exact property is what E-7 exhibits.
+
+A reader checking this after the implementation lands should read it at `e70d019`
+and expect the property to be **gone** at later revisions — its removal is the
+point of the work this contract precedes, so finding it absent on a current branch
+confirms the record rather than contradicting it.
 
 **Normative clause supported:** §2.2; §3 (`LOOKUP_UNOBTAINABLE`); witness W3.
 
