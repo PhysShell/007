@@ -444,16 +444,15 @@ future change to git's wording as a silent semantic change.
 judge whether that kind is the one the citation required.
 
 
-**What this criterion does and does not need.** "The bytes change, so
-recomputing the object id reveals it" is not a mechanical fact — but the
-property it needs is **second-preimage resistance for the cited oid**, stated in
-§4.3.2, and not collision resistance. A substitution aimed at an oid that
-already exists must produce different bytes with that same id, which is the
-second-preimage problem.
+**What this criterion does and does not need.** The rows above are a claim
+about *observation*, not about cryptography: a substitution either yields a
+different object id, in which case recomputing it reveals the substitution, or
+it does not. Neither branch needs a premise about the hash's strength —
+`IDENTITY_VIOLATION` fires on an observed mismatch, and `RESOLVED` reports
+observed equality (§4.3.2).
 
-The premise therefore bears on `RESOLVED` only. `IDENTITY_VIOLATION` needs
-nothing here: it fires on an *observed* mismatch, and an observation does not
-depend on the strength of the hash.
+Where hash strength enters is the *inference* a consumer draws from those
+observations, which §4.3.2 states and this criterion does not need.
 
 ```text
 verified about this repository and toolchain:
@@ -473,74 +472,14 @@ to the implementation branch; this document contains no code.
 
 
 
-### 4.3.2 What RESOLVED actually rests on: second preimage, not collision
+### 4.3.2 What RESOLVED claims, and what the hash properties are for
 
-A declared premise is weaker than this repository's admissibility rule requires,
-which asks for an explicit **checked** one — and no cryptographic assumption is
-checkable inside a repository. `git rev-parse --show-object-format` identifies
-the algorithm; it establishes nothing about the algorithm's strength.
+No cryptographic assumption is checkable inside a repository, and this document
+went through several revisions trying to find one that was. The resolution is
+not a better premise but a narrower claim.
 
-Two byte-derived states lean on **different properties of the same check**, and
-only one of them needs a premise at all:
-
-```text
-SOUNDNESS      if the postcondition reports a mismatch, a mismatch is real.
-               Needs NO premise: a detection is a positive observation.
-               -> IDENTITY_VIOLATION rests on this
-
-COMPLETENESS   if the postcondition reports no mismatch, there is none.
-               Needs a premise about the hash.
-               -> RESOLVED rests on this
-```
-
-**The premise was misnamed for several revisions, and naming it correctly
-resolves the dilemma it created.** An earlier draft called it collision
-resistance, then tried to discharge it by observing that §2.5.1's citation
-scheme assumes the same thing. That is not a discharge — another scheme
-depending on an assumption does not make the assumption true — and it left this
-document recording both that the algorithm is SHA-1 and that SHA-1 has a known
-attack, so a healthy present blob either failed witness 1 for want of an unmet
-premise or passed by treating an unchecked premise as true.
-
-`RESOLVED` does not need collision resistance. It needs the weaker property:
-
-```text
-SECOND-PREIMAGE RESISTANCE, scoped to the cited oid
-    the attacker is given an EXISTING object and its id, and must produce
-    DIFFERENT bytes with that same id
-
-COLLISION RESISTANCE  (not what RESOLVED rests on)
-    the attacker chooses BOTH byte sequences freely, in advance
-```
-
-The distinction is decisive for SHA-1 in particular, because the two properties
-do not have the same status:
-
-```text
-collision resistance        BROKEN in practice
-                            identical-prefix (2017), chosen-prefix (2020)
-
-second-preimage resistance  no practical attack known against full SHA-1
-```
-
-A resolver is handed an oid that already exists and asked whether these bytes
-are that object. Forging that answer requires a **second preimage** — the
-property that still holds. Witness 1 is therefore satisfiable, and satisfiable
-on the property that is not broken rather than by quietly assuming the one that
-is.
-
-**Where collision resistance bites, and why relocating it is not enough.** An
-adversary who *authored* an artifact before it was pinned can prepare a colliding
-pair, cause the locator to cite the shared oid while the benign blob is present,
-and later swap in the malicious twin. Every §4.3 prerequisite holds, the lookup
-exits zero, the object id matches — and no second preimage was ever needed,
-because the collision was prepared before the citation existed.
-
-An earlier revision answered this by assigning the attack to Phase G. That was
-wrong as a *defence*: saying an attack belongs to another layer does not license
-a claim at this one. What it does establish is which claim this layer may make.
-
-**So `RESOLVED` is narrowed to what the resolver can observe:**
+**`RESOLVED` needs no hash premise at all.** It reports two things, both
+directly observed:
 
 ```text
 RESOLVED CLAIMS
@@ -549,45 +488,65 @@ RESOLVED CLAIMS
 
 RESOLVED DOES NOT CLAIM
     that these are the bytes the citer intended
-
-    whether the cited oid denotes a unique artifact is a property of the
-    CITATION, fixed when the oid was chosen. A resolver handed an oid
-    cannot recover the intent behind it, and no amount of care at this
-    boundary can.
 ```
 
-That narrowing costs the consumer nothing it actually had. §8.5 asks whether
-exact bytes for a cited oid can be obtained here without network access; it does
-not ask the resolver to audit the citation's authorship, which the resolver has
-no means to do.
+Both remain true observations even if practical second preimages existed, so
+neither hash property gates the state. Making one gate it would leave an
+implementation with two options — silently assume an undischargeable property,
+or never report `RESOLVED` — which is the bind §4.3's prerequisites exist to
+prevent, and which earlier revisions of this section walked into twice.
 
-**Neither hash property is a prerequisite for `RESOLVED`**, and an earlier
-revision was wrong to call second-preimage resistance one. Both of `RESOLVED`'s
-claims — obtained locally under §4.3, object id equals the cited oid — remain
-true observations even if practical second preimages existed. Making hash
-strength gate the state would leave an implementation with only two options,
-silently assume it or never report `RESOLVED`, which is precisely the bind
-§4.3's prerequisites exist to avoid.
+`IDENTITY_VIOLATION` needs no premise either, for a different reason: it fires
+on an **observed** mismatch, and the postcondition's *soundness* — a reported
+mismatch is a real one — does not depend on the hash's strength.
 
-The hash properties bear on **what a consumer may infer** from `RESOLVED`, not
-on whether the resolver may report it:
+**The hash properties bear on what a CONSUMER may infer**, not on what the
+resolver may report:
 
 ```text
 second-preimage resistance   what lets a consumer treat RESOLVED bytes as
-                             THE object for an already-trusted citation.
-                             No practical attack against SHA-1.
+                             THE object for an already-trusted citation
+                             -> SHA-1: no practical attack known
 
-collision resistance         what would let a consumer treat the citation
-                             as denoting uniquely at all. Settled when the
-                             oid was chosen; SHA-1 does not provide it.
+collision resistance         what would let a consumer treat the citation as
+                             denoting uniquely at all. Settled when the oid
+                             was chosen, not when it is resolved.
+                             -> SHA-1: broken in practice (identical-prefix
+                                2017, chosen-prefix 2020)
                              Inherited by every consumer of the pin,
                              PINNED_BLOB included.
 ```
 
-Both are risks carried by the reader of a verdict, declared here so the reader
-knows what they are carrying. Neither is dischargeable at this layer, and
-neither needs to be, because the state no longer claims what they would
-underwrite.
+Both are risks the reader of a verdict carries. They are declared here so the
+reader knows what they are carrying, and neither is dischargeable at this layer.
+
+**The prepared-collision case, and why it is not a `refs/replace` case.** An
+adversary who authored an artifact before it was pinned can prepare a colliding
+pair and cause the locator to cite the shared oid. Delivery is by **overwriting
+the object file**, not by a ref: colliding blobs share an oid, so a replace ref
+would map the oid to itself. Verified against git 2.43.0 —
+
+```text
+git replace <oid> <oid>     creates the ref
+git cat-file blob <oid>     fatal: replace depth too high   (exit 128)
+```
+
+— which is `LOOKUP_UNOBTAINABLE`, and a replace ref aimed at any *different* oid
+necessarily mismatches and is detected. So `refs/replace` is wholly a guard
+mechanism, and the undetectable channel is the object file itself:
+
+```text
+git cat-file DOES NOT VERIFY that the object stored at an oid's path hashes
+to that oid. With A's object file overwritten by a valid object for B:
+
+    cat-file blob <A>  ->  "SUBSTITUTED CONTENT ENTIRELY"
+    git fsck           ->  error: hash-path mismatch
+```
+
+The identity postcondition is therefore not defence in depth over a check git
+already performs — it **is** the check. Against a *colliding* overwrite it sees
+nothing, which is §4.3.1's third row and precisely what `RESOLVED` declines to
+claim.
 
 **What §2.5.1 says, and what this document infers, kept apart:**
 
@@ -598,47 +557,11 @@ WHAT THE SOURCE SAYS
   It does NOT mention any hash property, and says nothing about PINNED_BLOB.
 
 WHAT THIS DOCUMENT INFERS
-  identifying an existing artifact solely by its hash presupposes that a
-  second preimage cannot be produced for it. That inference is this
-  document's; it is not a ratification recorded anywhere else, and this is
-  the first place the premise is written down.
+  treating an oid as an artifact's identity presupposes hash properties the
+  citation scheme never stated. That inference is this document's; it is not
+  a ratification recorded anywhere else, and this is the first place the
+  reliance is written down — for consumers of the pin, not for this resolver.
 ```
-
-```text
-PREMISE for RESOLVED (named here, not ratified elsewhere, not
-                      dischargeable inside a repository)
-    SECOND-PREIMAGE resistance of the object-id algorithm for the cited oid
-    -> SHA-1: no practical attack known
-
-NOT the premise, deliberately
-    collision resistance   -> SHA-1: broken in practice
-    applies to AUTHORSHIP and PINNING (Phase G), where both sequences can
-    be chosen in advance — not to a resolver handed an existing oid
-
-  if the RESOLVED premise fails:  `blob` is not an identity for an existing
-                                  object, and this resolver cannot be
-                                  repaired into soundness
-```
-
-**The postcondition is the only verification in the path**, which is why its
-soundness carries so much and why its completeness is worth exactly what the
-hash is worth. Demonstrated, and not previously written down anywhere in this
-effort:
-
-```text
-git cat-file DOES NOT VERIFY that the object stored at an oid's path hashes
-to that oid. With A's object file overwritten by a valid object for B:
-
-    cat-file blob <A>  ->  "SUBSTITUTED CONTENT ENTIRELY"
-    git fsck           ->  error: hash-path mismatch
-```
-
-So the identity postcondition is not defence in depth over a check git already
-performs; it is the check. The replacement guard remains a **guard** under
-§4.3.1 for the substitutions the postcondition can see — those yielding a
-different object id. It is not a defence against a replace ref aimed at a
-prepared colliding blob, which yields a matching id; that case falls in
-§4.3.1's third row and outside what `RESOLVED` claims.
 
 ## 5. Explicit non-claims
 
@@ -715,9 +638,10 @@ Listed here so the implementation cannot choose the experiments that suit it.
 4. **Substituted bytes** (replace-style identity violation) →
    `IDENTITY_VIOLATION`, existing postcondition intact. The §4.3 prerequisites
    all hold throughout; only the §4.3.1 *guard* is removed, which is what makes
-   this witness reachable at all. The substitute must yield a **different**
-   object id — a prepared-collision substitution is §4.3.1's third row and is
-   not what this witness exercises.
+   this witness reachable at all. The substitution is a `refs/replace` ref
+   pointing at a **different** object id, which is the only form that
+   mechanism can take (§4.3.2). A prepared-collision overwrite is §4.3.1's
+   third row and is not what this witness exercises.
 5. **A non-blob object that resolves** → `RESOLVED(kind, bytes)`; the *locator*
    layer, not the resolver, classifies the wrong type.
 6. **No witness may use `stderr` text as a semantic discriminator.** A witness
