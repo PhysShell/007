@@ -17,6 +17,32 @@ what a program does internally belong under *Inference*, or nowhere.
 Unless stated otherwise, every reproduction below was executed in a fresh
 `git init` scratch repository, and the outputs shown are from that execution.
 
+**Every git invocation in this file runs under the §2.1 control set.** It is
+defined once, here, in full, and used as `CTRL` in every block below — so no
+command's provenance depends on the shell that happened to run it:
+
+```console
+CTRL() {
+  env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+         GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 \
+         GIT_CONFIG_GLOBAL=/dev/null "$@"
+}
+```
+
+This is uniform on purpose. Three separate findings on this PR were "that
+particular command was not controlled", each about a different command, because
+deciding case by case which invocations matter is a judgement that kept failing.
+An inherited variable can redirect *any* invocation — demonstrated, not assumed:
+
+```console
+$ GIT_DIR=<sha1-repo>/.git /usr/bin/git -C <sha256-repo> rev-parse --show-object-format
+sha1                          # -C names the sha256 repo; GIT_DIR wins
+```
+
+Two entries deliberately run a **variant** of the control set, to exhibit a route
+that the full set closes. Each defines its variant in full at the point of use and
+says why.
+
 ---
 
 ## E-1 — Environment anchor
@@ -69,26 +95,27 @@ what command shows scopes?
 **Reproduction and observed result:**
 
 ```console
-$ /usr/bin/git --show-scope
+$ CTRL /usr/bin/git --show-scope
 unknown option: --show-scope
 
-$ /usr/bin/git config --show-scope --list
-global  user.name=Claude
-global  user.email=noreply@anthropic.com
-local   core.repositoryformatversion=0
-local   core.filemode=true
+$ CTRL /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" config --show-scope --list
+local     core.repositoryformatversion=0
+local     core.filemode=true
+local     core.bare=false
+local     core.logallrefupdates=true
+command   safe.directory=/…/x2
 
-$ /usr/bin/git config -h | grep show-scope
+$ CTRL /usr/bin/git config -h | grep show-scope
     --[no-]show-scope     show scope of config (worktree, local, global, system, command)
 
-$ /usr/bin/git -c example.key=value config --show-scope --get example.key
+$ CTRL /usr/bin/git -c example.key=value config --show-scope --get example.key
 command value
 
-$ /usr/bin/git config example.local fromrepo          # set IN the repository
-$ /usr/bin/git config --show-scope --get example.local
+$ CTRL /usr/bin/git config example.local fromrepo          # set IN the repository
+$ CTRL /usr/bin/git config --show-scope --get example.local
 local   fromrepo
 
-$ /usr/bin/git -c example.key=value config --show-scope --list | grep example
+$ CTRL /usr/bin/git -c example.key=value config --show-scope --list | grep example
 local     example.local=fromrepo
 command   example.key=value
 ```
@@ -129,20 +156,48 @@ that colliding objects share an oid?
 
 **Reproduction and observed result:**
 
+This entry needs replace refs **active** to characterise the mechanism, so the
+lookup arm runs a named variant of the control set with `GIT_NO_REPLACE_OBJECTS`
+omitted. The variant is defined here in full:
+
 ```console
-$ O=$(printf 'SELF REPLACE TARGET' | /usr/bin/git hash-object -w --stdin)
+NOREPL() {
+  env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+         GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "$@"
+}
+```
+
+```console
+$ CTRL /usr/bin/git init -q y3 && cd y3
+$ O=$(printf 'SELF REPLACE TARGET' \
+      | CTRL /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" hash-object -w --stdin)
 $ echo $O
 5ff4ab6f610a2a1a97a21c7c8600348be921b48e
 
-$ /usr/bin/git replace $O $O          # exit 0 — the ref is created
+$ NOREPL /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" replace "$O" "$O"
+                             # exit 0 — the ref is created
 
-$ /usr/bin/git cat-file blob $O
+# --- replace ACTIVE: the self-map is what fails ---
+$ NOREPL /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob "$O"
 fatal: replace depth too high for object 5ff4ab6f610a2a1a97a21c7c8600348be921b48e
                              # exit 128
+
+# --- the FULL control set, for contrast: the route is closed outright ---
+$ CTRL /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob "$O"
+SELF REPLACE TARGET          # exit 0 — the replace ref is never consulted
 ```
 
-**Observed:** the ref is created successfully; the subsequent lookup fails with
-exit 128.
+**Observed:** the ref is created successfully. With replace refs active the lookup
+fails with exit 128. Under the **full** §2.1 control set the same lookup returns
+the original bytes at exit 0, because `GIT_NO_REPLACE_OBJECTS=1` stops the ref
+being consulted at all.
+
+**Why both arms are recorded.** An earlier revision showed only the first, run
+without the control set, while the entry sat in a file whose other reproductions
+were controlled. That is a reader trap: the recorded failure **cannot occur** under
+the contract's own prerequisites. The mechanism is still worth characterising —
+which is why the variant is used deliberately and named — but the contract-relevant
+fact is the second arm.
 
 **Inference:** the prepared-collision case cannot be delivered through a replace
 ref, because the mapping would have to be oid→itself. Its delivery channel is the
@@ -170,10 +225,10 @@ environment built with `env -i` carrying only `PATH=/usr/bin`,
 
 ```console
 # --- construction, from an empty repository ---
-$ /usr/bin/git init -q r4 && cd r4
-$ A=$(printf 'AUTHENTIC AUTHORITY' | /usr/bin/git hash-object -w --stdin); echo $A
+$ CTRL /usr/bin/git init -q r4 && cd r4
+$ A=$(printf 'AUTHENTIC AUTHORITY' | CTRL /usr/bin/git hash-object -w --stdin); echo $A
 36ae691f4261ce7008c7bfc827233e74dc3fc96e
-$ D=$(printf 'SUBSTITUTED CONTENT' | /usr/bin/git hash-object -w --stdin); echo $D
+$ D=$(printf 'SUBSTITUTED CONTENT' | CTRL /usr/bin/git hash-object -w --stdin); echo $D
 7feb07853362884e770de9cde3265336be1697fb
 $ stat -c%a ".git/objects/${A:0:2}/${A:2}"   # loose objects are READ-ONLY
 444
@@ -205,7 +260,7 @@ b = open('body.out','rb').read()
 print(hashlib.sha1(b'blob %d\\0' % len(b) + b).hexdigest())"
 7feb07853362884e770de9cde3265336be1697fb     # agrees
 
-$ /usr/bin/git fsck
+$ CTRL /usr/bin/git fsck
 error: 7feb0785…: hash-path mismatch, found at: .git/objects/36/ae691f…
 ```
 
@@ -274,16 +329,16 @@ the route-closure variable stop it?
 
 ```console
 # --- construction, from an empty repository ---
-$ /usr/bin/git init -q w5 && cd w5
-$ A=$(printf 'AUTHENTIC AUTHORITY'           | /usr/bin/git hash-object -w --stdin)
-$ C=$(printf 'DECOY OBJECT'                  | /usr/bin/git hash-object -w --stdin)
-$ D=$(printf 'ATTACKER CONTENT VIA TWO HOPS' | /usr/bin/git hash-object -w --stdin)
+$ CTRL /usr/bin/git init -q w5 && cd w5
+$ A=$(printf 'AUTHENTIC AUTHORITY'           | CTRL /usr/bin/git hash-object -w --stdin)
+$ C=$(printf 'DECOY OBJECT'                  | CTRL /usr/bin/git hash-object -w --stdin)
+$ D=$(printf 'ATTACKER CONTENT VIA TWO HOPS' | CTRL /usr/bin/git hash-object -w --stdin)
 $ printf '%s\n%s\n%s\n' "$A" "$C" "$D"
 36ae691f4261ce7008c7bfc827233e74dc3fc96e
 bf637ab698f8fbfd8346edb378c904d2bb6f4064
 7eef2c30522157ac6ca7771c2f0172a42cbd57f4
 
-$ /usr/bin/git replace "$A" "$C"                     # exit 0 — hop 1: A -> C
+$ CTRL /usr/bin/git replace "$A" "$C"                     # exit 0 — hop 1: A -> C
 $ rm -f ".git/objects/${C:0:2}/${C:2}"               # loose objects are 0444;
 $ cp  ".git/objects/${D:0:2}/${D:2}" \
       ".git/objects/${C:0:2}/${C:2}"                 # hop 2: C's path holds D
@@ -333,8 +388,8 @@ truncated from 23 to 11 bytes.
 
 ```console
 # --- construction, from an empty repository ---
-$ /usr/bin/git init -q r6 && cd r6
-$ B=$(python3 -c "print('X'*400)" | /usr/bin/git hash-object -w --stdin); echo $B
+$ CTRL /usr/bin/git init -q r6 && cd r6
+$ B=$(python3 -c "print('X'*400)" | CTRL /usr/bin/git hash-object -w --stdin); echo $B
 5106a63ecf7df82b1b45855bf64ba14d90f978ca
 $ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
 23
@@ -348,11 +403,11 @@ $ stat -c%s "$p"
 11
 
 # --- the lookup ---
-$ /usr/bin/git cat-file -t "$B"
+$ CTRL /usr/bin/git cat-file -t "$B"
 error: header for 5106a63ecf7df82b1b45855bf64ba14d90f978ca too long, exceeds 32 bytes
 fatal: git cat-file: could not get object info      # exit 128
 
-$ /usr/bin/git cat-file blob "$B" > body.out
+$ CTRL /usr/bin/git cat-file blob "$B" > body.out
 error: header for 5106a63ecf7df82b1b45855bf64ba14d90f978ca too long, exceeds 32 bytes
 fatal: loose object 5106a63ecf7df82b1b45855bf64ba14d90f978ca
        (stored in .git/objects/51/06a63ecf7df82b1b45855bf64ba14d90f978ca) is corrupt
@@ -401,11 +456,11 @@ set of names the child received:
 
 ```console
 # --- construction, from an empty repository ---
-$ /usr/bin/git init -q r7 && cd r7
+$ CTRL /usr/bin/git init -q r7 && cd r7
 $ python3 -c "import sys; sys.stdout.write('COMPRESSIBLE PAYLOAD LINE\n'*400000)" > big.txt
 $ stat -c%s big.txt
 10400000
-$ B=$(/usr/bin/git hash-object -w big.txt); echo $B
+$ B=$(CTRL /usr/bin/git hash-object -w big.txt); echo $B
 a394ec43d91e167d3dae803e62e1049e0b642694
 $ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
 60565
@@ -504,32 +559,32 @@ returns, and if so, what selects that path?
 
 ```console
 # --- construction, from an empty repository ---
-$ /usr/bin/git init -q w8 && cd w8
+$ CTRL /usr/bin/git init -q w8 && cd w8
 $ printf 'ORIGINAL CONTENT\n'              > f.txt
 $ printf 'f.txt filter=evil diff=evil\n'   > .gitattributes
-$ /usr/bin/git config filter.evil.smudge 'sed s/ORIGINAL/SMUDGED/'
-$ /usr/bin/git config filter.evil.clean  'cat'
-$ /usr/bin/git config diff.evil.textconv 'sed s/ORIGINAL/TEXTCONV/'
-$ /usr/bin/git add f.txt
-$ O=$(/usr/bin/git rev-parse :f.txt); echo "$O"
+$ CTRL /usr/bin/git config filter.evil.smudge 'sed s/ORIGINAL/SMUDGED/'
+$ CTRL /usr/bin/git config filter.evil.clean  'cat'
+$ CTRL /usr/bin/git config diff.evil.textconv 'sed s/ORIGINAL/TEXTCONV/'
+$ CTRL /usr/bin/git add f.txt
+$ O=$(CTRL /usr/bin/git rev-parse :f.txt); echo "$O"
 700c458a4944f938d69a631d20ba0ba0b44c9563
 
 # --- the contract's invocation: no transformation flag ---
-$ /usr/bin/git cat-file blob "$O"
+$ CTRL /usr/bin/git cat-file blob "$O"
 ORIGINAL CONTENT
 
 # --- the caller opts in ---
-$ /usr/bin/git cat-file --filters  --path=f.txt "$O"
+$ CTRL /usr/bin/git cat-file --filters  --path=f.txt "$O"
 SMUDGED CONTENT
 
-$ /usr/bin/git cat-file --textconv --path=f.txt "$O"
+$ CTRL /usr/bin/git cat-file --textconv --path=f.txt "$O"
 SMUDGED CONTENT
 
 # --- checkout, to show the configured filter was genuinely live ---
-$ rm f.txt && /usr/bin/git checkout -- f.txt && cat f.txt
+$ rm f.txt && CTRL /usr/bin/git checkout -- f.txt && cat f.txt
 SMUDGED CONTENT
 
-$ /usr/bin/git cat-file -h
+$ CTRL /usr/bin/git cat-file -h
     --textconv            run textconv on object's content
     --filters             run filters on object's content
 ```
@@ -588,7 +643,7 @@ either mechanism being reachable:
 certainly not in it.
 
 ```console
-$ /usr/bin/git init -q bc
+$ CTRL /usr/bin/git init -q bc
 $ MISSING=1111111111111111111111111111111111111111
 
 $ printf '%s\n' "$MISSING" | env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 \
@@ -645,24 +700,22 @@ supported usage rather than an exotic edge.
 **Reproduction and observed result:**
 
 ```console
-$ /usr/bin/git init -q of1
-$ /usr/bin/git init -q --object-format=sha256 of256
+$ CTRL /usr/bin/git init -q of1
+$ CTRL /usr/bin/git init -q --object-format=sha256 of256
 
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
-      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-      /usr/bin/git -c safe.directory=$(pwd)/of1 -C of1 rev-parse --show-object-format
+$ CTRL /usr/bin/git -c safe.directory=$(pwd)/of1 -C of1 rev-parse --show-object-format
 sha1                                    # exit 0
 
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
-      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-      /usr/bin/git -c safe.directory=$(pwd)/of256 -C of256 rev-parse --show-object-format
+$ CTRL /usr/bin/git -c safe.directory=$(pwd)/of256 -C of256 rev-parse --show-object-format
 sha256                                  # exit 0
 
 # --- the SAME content, stored in each ---
-$ printf 'AUTHENTIC AUTHORITY' | /usr/bin/git -C of1   hash-object -w --stdin
+$ printf 'AUTHENTIC AUTHORITY' \
+    | CTRL /usr/bin/git -c safe.directory=$(pwd)/of1 -C of1 hash-object -w --stdin
 36ae691f4261ce7008c7bfc827233e74dc3fc96e                           # 40 chars
 
-$ printf 'AUTHENTIC AUTHORITY' | /usr/bin/git -C of256 hash-object -w --stdin
+$ printf 'AUTHENTIC AUTHORITY' \
+    | CTRL /usr/bin/git -c safe.directory=$(pwd)/of256 -C of256 hash-object -w --stdin
 b959693d240b3325123359c1907748c20df3be759f79d5525f2bf64416ca055a   # 64 chars
 ```
 
@@ -683,6 +736,13 @@ that reading the format is itself trustworthy in an adversarial repository. §3.
 addresses the latter directly: a repository that misreports its format yields ids
 that do not match its own objects, which is exactly what the §3 comparison
 detects.
+
+**Provenance of these controls.** The first revision of this entry ran the two
+`hash-object` commands with an inherited environment while using their output to
+support the width claim. An inherited `GIT_DIR` overrides `-C` — shown in this
+file's header — so neither recorded digest was established to have come from the
+repository whose format had just been read. Both now run through `CTRL`, and both
+values are unchanged.
 
 **Why this entry exists.** §3.1 previously fixed the algorithm at plain SHA-1. That
 was introduced to guarantee totality, and it did — but it also silently narrowed
