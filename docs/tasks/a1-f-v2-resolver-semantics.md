@@ -427,8 +427,15 @@ git cat-file blob <A>
   -> "ATTACKER CONTENT VIA TWO HOPS"
 ```
 
-So git followed the replace ref to `C` and returned the bytes found at `C`'s
-path **without validating them against `C`** — no validation at either hop.
+So git followed the replace ref to `C` and **returned the bytes found at `C`'s
+path without rejecting them**, although their object id is not `C`.
+
+That is the observed property, and it is deliberately weaker than "git performs
+no validation": whether git validates internally without enforcing rejection is
+not established by an experiment that sees only the external result. The
+taxonomy needs only the observed property — bytes of the attacker's choosing
+reach the caller — and this document does not inspect git's source to claim
+more.
 
 **What is INFERRED, and was NOT executed:** that if `D` were chosen to collide
 with `A`, the resolver would recompute `A`'s oid and the postcondition would see
@@ -519,11 +526,15 @@ composition that makes it undetectable. The channel that carries the
 prepared-collision case in every form is the object file itself:
 
 ```text
-git cat-file DOES NOT VERIFY that the object stored at an oid's path hashes
-to that oid. With A's object file overwritten by a valid object for B:
+git cat-file DOES NOT REJECT an object stored at a path whose oid it does
+not hash to. With A's object file overwritten by a valid object for B:
 
     cat-file blob <A>  ->  "SUBSTITUTED CONTENT ENTIRELY"
     git fsck           ->  error: hash-path mismatch
+
+(Observed non-rejection, not an inspection of git's internals: fsck detects
+the mismatch, so something in git can compute it — what cat-file does not do
+is refuse to serve it.)
 ```
 
 The identity postcondition is therefore not defence in depth over a check git
