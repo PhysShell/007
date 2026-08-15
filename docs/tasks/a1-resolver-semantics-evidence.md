@@ -28,7 +28,15 @@ Unless stated otherwise, every reproduction below was executed in a fresh
 
 **Every git invocation in this file runs under the §2.1 control set.** It is
 defined once, here, in full, and used as `CTRL` in every block below, so that no
-command's provenance depends on the **environment** it inherited:
+command's provenance depends on the **environment** it inherited.
+
+**"The §2.1 control set" names the environment controls below, and only those.**
+It implements the §2.1 clauses that an environment can implement — the executable
+named by absolute path, and a constructed rather than inherited environment. It
+does **not** establish §2.1's **no-network-access** clause: `GIT_NO_LAZY_FETCH=1`
+is a setting, not an observation that no packet left the process. No entry in this
+file may be read as witnessing that clause, whatever control set it ran under; the
+debt is recorded in E-8.1 and is owed by every §2.1-conditioned witness here.
 
 ```console
 CTRL() {
@@ -576,7 +584,7 @@ that "hash whatever arrived" is not merely hashing an empty buffer?
 loose object file was truncated to 36,339 bytes.
 
 W3 requires **`§2.1 holds`**, so the reproduction is run under an invocation that
-satisfies each §2.1 clause — an absolute executable path, and a child environment
+satisfies each **observable** §2.1 clause — an absolute executable path, and a child environment
 built with `env -i` rather than inherited. The environment below is the complete
 set of names the child received:
 
@@ -640,11 +648,27 @@ and reports `blob`; the body operation emits 6,225,920 bytes and then exits 128;
 the recomputed id over that output differs from the requested id. Neither
 `--filters` nor `--textconv` was passed, and the repository has no remote.
 
-**Inference:** the invocation above meets every §2.1 clause — the executable is
-named by absolute path rather than found through `PATH` resolution, the environment
-is constructed rather than inherited, lazy fetch is disabled and unreachable, and
-the read is raw — so what is exhibited is the full **`§2.1 holds` + §2.2 fails**
-shape witness W3 names, not the §2.2 half alone. A resolver that checks the
+**Inference:** the invocation above meets the §2.1 clauses this record can
+observe, and **one clause it cannot**:
+
+| §2.1 clause | Status here |
+|---|---|
+| executable selected by this layer, by absolute path | **observed** — `/usr/bin/git`, never `PATH` |
+| child environment constructed, not inherited | **observed** — `env -i` with a named set |
+| **NO network access during the operation** | **NOT OBSERVED** — see below |
+| raw read, no transformation requested | **observed** — neither `--filters` nor `--textconv` passed |
+| repository cannot choose the program or the transformation path | **observed**, as a consequence of the two above |
+
+**The network clause is not witnessed here, and this entry does not claim it.**
+`GIT_NO_LAZY_FETCH=1` is a *setting*, and "the repository has no remote" is a
+*configuration fact*; neither is an observation that no packet left the process.
+An implementation that performed a reachability or metadata probe before emitting
+the same partial output would reproduce **every recorded value in this entry** and
+still violate §2.1. E-8.1 records that debt, and it is owed for this entry too.
+
+So what is exhibited is the `§2.2 fails` half plus the observable part of §2.1 —
+**not** the complete `§2.1 holds` condition W3 names. W3 remains owed on the
+network clause like every other §2.1-conditioned witness. A resolver that checks the
 first command's status but not the second's will hash 6.2 MB of debris and report
 `IDENTITY_VIOLATION` where the correct state is `LOOKUP_UNOBTAINABLE`. The failure
 is not hypothetical. **Pinned to the reviewed base commit `e70d019923a958bb18d8dbb266da007c6e93a88c`**, not to a
@@ -665,7 +689,8 @@ about how git buffers its output. The observation is the byte count and the exit
 status, nothing more.
 
 It also does not establish that §2.1 is *satisfiable in general* — only that **this
-invocation satisfies it**, which is what W3 needs. §2.1 is a requirement on how the
+invocation satisfies the observable clauses**, with the network clause owed as set
+out above. §2.1 is a requirement on how the
 resolver calls git, so a witness for it is an invocation exhibiting each clause,
 not a proof about environments the resolver does not control.
 
@@ -790,7 +815,12 @@ either mechanism being reachable:
 > load-bearing, not because the clauses fail without them.
 
 **The network prerequisite was WIDENED at `260c3f0`'s successor**, and the gap
-widened with it. §2.1 previously forbade only network acquisition *satisfying the
+widened with it. **Every entry that CLAIMS §2.1 is satisfied was widened too**,
+which is the step that was missed the first time: E-7 went on asserting that its
+invocation "meets every §2.1 clause" while E-8.1 conceded that nothing here
+observes the network property. Widening the ledger row is not enough — the sites
+that cite the clause as satisfied have to be swept as well, or the record
+contradicts itself in exactly the direction that flatters it. §2.1 previously forbade only network acquisition *satisfying the
 lookup*; it now forbids **contacting a remote at all** during the operation. The
 old wording let an implementation probe a remote for reachability or
 authentication and then serve the object locally — no network-delivered byte
