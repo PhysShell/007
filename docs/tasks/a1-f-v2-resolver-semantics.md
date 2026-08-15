@@ -56,11 +56,16 @@ admissible. They are checked in the order given.
 
 ### 2.2 RESPONSE complete
 
-- **every** operation that produces part of the answer must succeed;
+- **every operation the lookup REQUIRES must succeed.** A required operation that
+  fails leaves the response incomplete **whether or not it emitted anything** —
+  including the case where the very first operation fails and nothing at all is
+  produced. The condition is on the operation's success, not on whether it
+  managed to contribute output;
 - the output of a failed command is **debris, never evidence** — it is never
   hashed, never parsed, and never compared against the citation.
 
-A partial response is not a weak observation. It is **no observation**.
+A partial response is not a weak observation. It is **no observation**. Neither is
+an absent one.
 
 ---
 
@@ -84,7 +89,33 @@ any prerequisite of §2 absent
     -> IDENTITY_VIOLATION
 ```
 
-The three cases are exhaustive and mutually exclusive over the admissible inputs.
+**The three cases are exhaustive and mutually exclusive, and the argument is
+this** — stated rather than asserted, because an earlier revision claimed
+exhaustiveness while leaving the commonest input of all unassigned:
+
+```text
+for any admissible input, either §2 holds or it does not
+
+  §2 does not hold                    -> branch 1
+                                         (this includes EVERY failed required
+                                          operation, by §2.2 — notably a first
+                                          operation that fails producing nothing,
+                                          which is the ordinary "object is not
+                                          there" case)
+
+  §2 holds                            -> §2.2 means every required operation
+                                         succeeded, so kind and bytes were
+                                         obtained; oid(kind, bytes) is then
+                                         DEFINED, because §3.1 requires a total
+                                         function; so exactly one of == or !=
+                                         holds -> branch 2 or branch 3
+
+no fourth case remains
+```
+
+The argument leans on §3.1's totality requirement. That is not incidental: if the
+identity function could decline to produce a digest, the `§2 holds` case would
+split into a third outcome and this partition would stop being exhaustive.
 
 **A missing prerequisite outranks both byte-derived states.** If §2 does not hold,
 the outcome is `LOOKUP_UNOBTAINABLE` **even when a mismatch was observed** — an
