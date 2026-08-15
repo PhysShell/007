@@ -8,14 +8,31 @@ or consumer authority. If this file conflicts with the normative contract
 in docs/tasks/a1-f-v2-resolver-semantics.md, the normative contract wins
 and the discrepancy is a defect in this evidence record.
 
-The contract is cited by PATH, deliberately and not as an oversight: the
-two files are versioned TOGETHER in one commit, so the governing revision
-of the contract is always the revision at which this file is read. A pin
-here could only name a commit that did not exist when the pair was
-written, and would go stale on the next push to this branch.
+The contract is cited by PATH. A pin is IMPOSSIBLE here rather than merely
+inconvenient: this file and the contract are added in the SAME commit, so
+any revision naming the contract would have to be a commit that did not
+yet exist when this line was written.
+
+That impossibility does NOT establish that the pairing holds. It makes
+co-versioning an OBLIGATION ON FUTURE COMMITS, and the reader is not asked
+to take it on trust:
+
+    git log -1 --format=%H -- docs/tasks/a1-f-v2-resolver-semantics.md
+    git log -1 --format=%H -- docs/tasks/a1-resolver-semantics-evidence.md
+
+If those differ and the CONTRACT's is the later, the pairing is BROKEN: the
+contract moved without this record being re-verified against it, and
+NOTHING BELOW IS KNOWN TO SUPPORT THE CONTRACT AS IT THEN STANDS. A commit
+that changes the contract without re-verifying this record in the same
+commit is a defect IN THAT COMMIT.
+
+An earlier revision of this block instead said the governing contract "is
+always the revision at which this file is read". That sentence asserted the
+pairing rather than exposing it, and in the drift case it told the reader
+to accept a contract these observations were never made against.
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
-see E-7 and E-8.3. The distinction is co-versioning, not convenience.
+see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
 ```
 
 **`Normative clause supported` never names a witness.** A witness id appears only
@@ -394,9 +411,11 @@ $ [ -n "${SNEAKY-}" ] && echo parent_still_has_it=yes
 parent_still_has_it=yes
 ```
 
-**No environment is printed, by rule.** `AGENTS.md` forbids an environment dump
-entering the tree at all — it is listed under credential leakage, the repository's
-central claim — so this arm asserts the property as a **boolean** instead of
+**No environment is printed, by rule.** `AGENTS.md` at
+`e70d019923a958bb18d8dbb266da007c6e93a88c` forbids an environment dump entering
+the tree at all — its P0 list names an *environment dump* alongside
+OAuth/session-storage artifacts and tokens, under credential leakage, the
+repository's central claim — so this arm asserts the property as a **boolean** instead of
 displaying the child's variables. An earlier revision printed both the child
 environment and the parent value; that was a violation of the rule, in the file
 whose purpose is careful evidence, and it was introduced by me while demonstrating
