@@ -157,24 +157,45 @@ The digest function `oid(kind, bytes)` of §3.1 was **obtained**: the repository
 object format was read through an operation that **succeeded**, and the value it
 returned names a format in the enumerated set §3.1 permits.
 
+**What this contract requires when the format read fails, stated first so it
+cannot be reached by inference:**
+
+```text
+kind obtained   AND  bytes obtained   AND  format read FAILS or returns
+                                           a value outside the enumerated set
+
+    -> §2.1 holds, §2.2 holds, §2.3 FAILS
+    -> therefore §2 is FALSE
+    -> §3's ANYTHING ELSE branch
+    -> LOOKUP_UNOBTAINABLE, and no other state is available
+```
+
 This is a prerequisite rather than a step inside §3, for a structural reason. Both
 of §3's positive branches compare `oid(kind, bytes)` against the requested id, so
-both are meaningless unless that function exists. Establishing its existence
-downstream — "the format read failed, therefore the lookup failed too" — requires
-an argument that must hold for **every** input, and it does not hold for two:
+both are meaningless unless that function exists.
+
+**The rest of this subsection is COUNTERFACTUAL.** It describes what would follow
+if availability were argued downstream — *"the format read failed, therefore the
+lookup failed too"* — instead of being required here. It is the justification for
+the clause, **not a description of the contract as it stands**; under §2.3 both
+inputs below fail §2, exactly as the block above states.
+
+That downstream argument would have to hold for **every** input, and it fails for
+two:
 
 - the format read is a **separate operation** from the lookup. The kind and the
-  bytes can be obtained successfully while `rev-parse --show-object-format` fails;
-  §2.2 quantifies over the kind and the bytes only, so §2 would still hold;
+  bytes can be obtained successfully while `rev-parse --show-object-format` fails.
+  §2.2 quantifies over the kind and the bytes only, so **§2.2 alone would not
+  exclude this input** — something else has to, and §2.3 is that something;
 - **"unsupported by git" and "unrecognised by this layer" are different
   conditions.** A format that git implements and this layer does not leaves every
-  lookup operation succeeding, with `oid` still having no algorithm.
+  lookup operation succeeding, with `oid` still having no algorithm — so failure
+  of the *lookup* cannot be relied on to exclude it either.
 
-In either case §2 would hold with `oid` undefined: §3 would point at its two
-positive branches while §3.1 demanded `LOOKUP_UNOBTAINABLE`, and the same input
-would carry two states. Making availability a prerequisite closes that by
-construction — the input fails §2, falls to §3's `ANYTHING ELSE` branch, and
-`LOOKUP_UNOBTAINABLE` is the only state it can carry.
+Without §2.3, both inputs would reach §3 with `oid` undefined: §3 would point at
+its two positive branches while §3.1 demanded `LOOKUP_UNOBTAINABLE`, and the same
+input would carry two states. **With §2.3, neither reaches §3's positive branches
+at all.**
 
 **Totality is not availability.** §3.1 requires the chosen function to be total,
 so the comparison is defined for every `(kind, bytes)`. §2.3 requires that there
