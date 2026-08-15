@@ -23,49 +23,41 @@ Unless stated otherwise, every reproduction below was executed in a fresh
 
 **Question:** which git is every other entry talking about?
 
-**Exact environment / tool version.** The version is taken from the **absolute
-executable the controlled entries invoke**, not from `PATH` resolution, and the two
-are then shown to be the same file:
+**Exact environment / tool version:**
 
 ```console
 $ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git --version
 git version 2.43.0
-
-$ command -v git                        # what bare `git` resolves to here
-/usr/bin/git
-
-$ stat -c '%d:%i  %n' "$(command -v git)" /usr/bin/git
-65024:122579  /usr/bin/git
-65024:122579  /usr/bin/git             # same device:inode — one file, not two
-
-$ git --version                         # therefore necessarily the same build
-git version 2.43.0
 ```
 
-**Observed:** `/usr/bin/git` reports `2.43.0` when invoked under the controls;
-bare `git` resolves to `/usr/bin/git`; both names have identical device and inode
-numbers, so they are the same file.
+**Observed:** the executable at the absolute path `/usr/bin/git` reports `2.43.0`.
 
-**Inference:** entries that invoke bare `git` and entries that invoke
-`/usr/bin/git` are exercising the same executable **in this environment**, so the
-`2.43.0` anchor covers all of them. This is established by the inode identity
-above, not assumed from the coincidence of two version strings.
+**Inference:** none is required. **Every reproduction in this file invokes
+`/usr/bin/git` by absolute path** — no entry resolves `git` through `PATH` — so
+this anchor applies to each of them directly, by naming the same file, rather than
+through any argument about what `PATH` resolves to.
 
 **Normative clause supported:** none directly; scopes every other entry.
 
-**Does NOT establish:** anything about other git versions, or that `PATH` resolves
-to this file in any other environment — the inode check is a fact about *this*
-environment at the time of running. An entry that must not depend on `PATH`
-resolution invokes the absolute path itself rather than relying on this equality;
-that is why the §2.1-controlled entries name `/usr/bin/git` directly.
+**Does NOT establish:** anything about other git versions, or about any executable
+other than the one at that path at the time of running.
 
-**Provenance of this entry:** an earlier revision recorded only `git --version`
-through `PATH` while the controlled entries invoked `/usr/bin/git`, so the version
-anchor did not establish the version of the executable actually under test. Had
-`PATH` resolved elsewhere, every "2.43.0" claim in this file would have been
-unsupported.
+**Provenance of this entry.** It has been wrong twice, in instructive ways.
+
+1. The first revision recorded `git --version` through `PATH` while the controlled
+   entries invoked `/usr/bin/git` — so the anchor did not describe the executable
+   under test at all.
+2. The repair recorded a `command -v` and device:inode comparison and concluded the
+   anchor therefore covered the entries that still used bare `git`. **That was
+   overreach**: the inode check is a fact about the shell E-1 ran in, and says
+   nothing about the shell E-2, E-3, E-5, E-6 or E-8 ran in. Those entries could
+   have resolved `git` elsewhere with every recorded observation still true.
+
+The second repair failed because it made the anchor's reach an *argument* instead
+of removing the dependency. This revision removes it: every entry names the
+absolute path, so there is no resolution step left to reason about.
 
 ---
 
@@ -77,26 +69,26 @@ what command shows scopes?
 **Reproduction and observed result:**
 
 ```console
-$ git --show-scope
+$ /usr/bin/git --show-scope
 unknown option: --show-scope
 
-$ git config --show-scope --list
+$ /usr/bin/git config --show-scope --list
 global  user.name=Claude
 global  user.email=noreply@anthropic.com
 local   core.repositoryformatversion=0
 local   core.filemode=true
 
-$ git config -h | grep show-scope
+$ /usr/bin/git config -h | grep show-scope
     --[no-]show-scope     show scope of config (worktree, local, global, system, command)
 
-$ git -c example.key=value config --show-scope --get example.key
+$ /usr/bin/git -c example.key=value config --show-scope --get example.key
 command value
 
-$ git config example.local fromrepo          # set IN the repository
-$ git config --show-scope --get example.local
+$ /usr/bin/git config example.local fromrepo          # set IN the repository
+$ /usr/bin/git config --show-scope --get example.local
 local   fromrepo
 
-$ git -c example.key=value config --show-scope --list | grep example
+$ /usr/bin/git -c example.key=value config --show-scope --list | grep example
 local     example.local=fromrepo
 command   example.key=value
 ```
@@ -138,13 +130,13 @@ that colliding objects share an oid?
 **Reproduction and observed result:**
 
 ```console
-$ O=$(printf 'SELF REPLACE TARGET' | git hash-object -w --stdin)
+$ O=$(printf 'SELF REPLACE TARGET' | /usr/bin/git hash-object -w --stdin)
 $ echo $O
 5ff4ab6f610a2a1a97a21c7c8600348be921b48e
 
-$ git replace $O $O          # exit 0 — the ref is created
+$ /usr/bin/git replace $O $O          # exit 0 — the ref is created
 
-$ git cat-file blob $O
+$ /usr/bin/git cat-file blob $O
 fatal: replace depth too high for object 5ff4ab6f610a2a1a97a21c7c8600348be921b48e
                              # exit 128
 ```
@@ -263,19 +255,35 @@ the route-closure variable stop it?
 **Reproduction and observed result:**
 
 ```console
-$ A=36ae691f…  "AUTHENTIC AUTHORITY"
-$ C=bf637ab6…  "DECOY OBJECT"
-$ D=7eef2c30…  "ATTACKER CONTENT VIA TWO HOPS"
+# --- construction, from an empty repository ---
+$ /usr/bin/git init -q w5 && cd w5
+$ A=$(printf 'AUTHENTIC AUTHORITY'           | /usr/bin/git hash-object -w --stdin)
+$ C=$(printf 'DECOY OBJECT'                  | /usr/bin/git hash-object -w --stdin)
+$ D=$(printf 'ATTACKER CONTENT VIA TWO HOPS' | /usr/bin/git hash-object -w --stdin)
+$ printf '%s\n%s\n%s\n' "$A" "$C" "$D"
+36ae691f4261ce7008c7bfc827233e74dc3fc96e
+bf637ab698f8fbfd8346edb378c904d2bb6f4064
+7eef2c30522157ac6ca7771c2f0172a42cbd57f4
 
-$ git replace $A $C
-$ cp <D's object file> <C's object file path>
+$ /usr/bin/git replace "$A" "$C"                     # exit 0 — hop 1: A -> C
+$ cp ".git/objects/${D:0:2}/${D:2}" \
+     ".git/objects/${C:0:2}/${C:2}"                  # hop 2: C's path holds D
 
-$ git cat-file blob $A
-ATTACKER CONTENT VIA TWO HOPS                       # exit 0
+# --- route OPEN: every control EXCEPT GIT_NO_REPLACE_OBJECTS ---
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob "$A"
+ATTACKER CONTENT VIA TWO HOPS                        # exit 0
 
-$ GIT_NO_REPLACE_OBJECTS=1 git cat-file blob $A
-AUTHENTIC AUTHORITY                                 # exit 0
+# --- route CLOSED: the same command with the full §2.1 control set ---
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob "$A"
+AUTHENTIC AUTHORITY                                  # exit 0
 ```
+
+The two lookups differ in **exactly one** environment name, which is what makes
+this a controlled comparison rather than two separate observations.
 
 **Observed:** with the replace ref active, the lookup returns the attacker's bytes
 and exits 0. With `GIT_NO_REPLACE_OBJECTS=1`, the same lookup returns the authentic
@@ -306,8 +314,8 @@ truncated from 23 to 11 bytes.
 
 ```console
 # --- construction, from an empty repository ---
-$ git init -q r6 && cd r6
-$ B=$(python3 -c "print('X'*400)" | git hash-object -w --stdin); echo $B
+$ /usr/bin/git init -q r6 && cd r6
+$ B=$(python3 -c "print('X'*400)" | /usr/bin/git hash-object -w --stdin); echo $B
 5106a63ecf7df82b1b45855bf64ba14d90f978ca
 $ p=".git/objects/${B:0:2}/${B:2}"; stat -c%s "$p"
 23
@@ -321,11 +329,15 @@ $ stat -c%s "$p"
 11
 
 # --- the lookup ---
-$ git cat-file -t $B
-error: header for 5106a63e… too long, exceeds 32 bytes
+$ /usr/bin/git cat-file -t "$B"
+error: header for 5106a63ecf7df82b1b45855bf64ba14d90f978ca too long, exceeds 32 bytes
 fatal: git cat-file: could not get object info      # exit 128
 
-$ git cat-file blob $B > body.out                   # exit 128
+$ /usr/bin/git cat-file blob "$B" > body.out
+error: header for 5106a63ecf7df82b1b45855bf64ba14d90f978ca too long, exceeds 32 bytes
+fatal: loose object 5106a63ecf7df82b1b45855bf64ba14d90f978ca
+       (stored in .git/objects/51/06a63ecf7df82b1b45855bf64ba14d90f978ca) is corrupt
+                                                    # exit 128
 $ stat -c%s body.out
 0
 
@@ -472,24 +484,33 @@ returns, and if so, what selects that path?
 `f.txt` to a filter and a textconv driver, both configured to rewrite the content.
 
 ```console
-$ git config filter.evil.smudge 'sed s/ORIGINAL/SMUDGED/'
-$ git config diff.evil.textconv 'sed s/ORIGINAL/TEXTCONV/'
-$ cat .gitattributes
-f.txt filter=evil diff=evil
+# --- construction, from an empty repository ---
+$ /usr/bin/git init -q w8 && cd w8
+$ printf 'ORIGINAL CONTENT\n'              > f.txt
+$ printf 'f.txt filter=evil diff=evil\n'   > .gitattributes
+$ /usr/bin/git config filter.evil.smudge 'sed s/ORIGINAL/SMUDGED/'
+$ /usr/bin/git config filter.evil.clean  'cat'
+$ /usr/bin/git config diff.evil.textconv 'sed s/ORIGINAL/TEXTCONV/'
+$ /usr/bin/git add f.txt
+$ O=$(/usr/bin/git rev-parse :f.txt); echo "$O"
+700c458a4944f938d69a631d20ba0ba0b44c9563
 
-$ git cat-file blob 700c458a…                       # the contract's invocation
+# --- the contract's invocation: no transformation flag ---
+$ /usr/bin/git cat-file blob "$O"
 ORIGINAL CONTENT
 
-$ git cat-file --filters  --path=f.txt 700c458a…
+# --- the caller opts in ---
+$ /usr/bin/git cat-file --filters  --path=f.txt "$O"
 SMUDGED CONTENT
 
-$ git cat-file --textconv --path=f.txt 700c458a…
+$ /usr/bin/git cat-file --textconv --path=f.txt "$O"
 SMUDGED CONTENT
 
-$ rm f.txt && git checkout -- f.txt && cat f.txt
+# --- checkout, to show the configured filter was genuinely live ---
+$ rm f.txt && /usr/bin/git checkout -- f.txt && cat f.txt
 SMUDGED CONTENT
 
-$ git cat-file -h
+$ /usr/bin/git cat-file -h
     --textconv            run textconv on object's content
     --filters             run filters on object's content
 ```
