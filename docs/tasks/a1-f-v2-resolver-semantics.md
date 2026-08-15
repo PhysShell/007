@@ -221,8 +221,19 @@ Fixing the algorithm at SHA-1 would be wrong rather than merely narrow: in a
 oid for **any** input, so §3 would report `IDENTITY_VIOLATION` for every authentic
 object and the consumer would return `ERROR` on a lookup that fully succeeded.
 This also contradicts the frozen scalar definition in
-`docs/q-deck/a1-authority-contracts.md`, which defines a full object id as *"the
-repository's object-format width"*.
+`docs/q-deck/a1-authority-contracts.md`, **pinned to the reviewed base commit
+`e70d019`** — line 1216 at that revision, blob `e22539ddf4f7c9ab260e16835eef8ef18abbe726`:
+
+```text
+| `CommitId` | full object id, the repository's object-format width | never abbreviated … |
+```
+
+The pin is the point, not decoration. Cited against the mutable path alone, this
+paragraph would go on asserting a contradiction after the q-deck had changed, and
+a reader could not re-check the premise that justified the requirement. If a later
+revision of that document alters the definition, this clause does not silently
+follow it: the disagreement becomes a **contract question under §10**, to be
+settled deliberately rather than by whichever file was edited last.
 
 **Whatever the format, the chosen function must be TOTAL and must not be
 collision-detecting.** Totality is what keeps the comparison defined whenever §2

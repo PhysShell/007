@@ -870,9 +870,16 @@ values are unchanged.
 **Why this entry exists.** §3.1 previously fixed the algorithm at plain SHA-1. That
 was introduced to guarantee totality, and it did — but it also silently narrowed
 the contract to one object format, contradicting the frozen scalar definition in
-`docs/q-deck/a1-authority-contracts.md`, which defines a full object id as "the
-repository's object-format width". Totality was the right requirement; naming a
-specific algorithm to obtain it was not.
+`docs/q-deck/a1-authority-contracts.md` at the reviewed base commit **`e70d019`**,
+line 1216, blob `e22539ddf4f7c9ab260e16835eef8ef18abbe726`, which defines a full object id as "the repository's
+object-format width". Totality was the right requirement; naming a specific
+algorithm to obtain it was not.
+
+**Both citations of that document are pinned**, here and in §3.1 of the contract.
+An earlier revision named only the path. That was the same defect this record had
+already corrected for `_local_object` — a claim about another artifact bound to a
+mutable name — applied inconsistently, since the standard had been adopted for
+this record's own subject and not for its cross-artifact citation.
 
 ---
 
