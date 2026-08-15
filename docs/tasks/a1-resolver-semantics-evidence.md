@@ -13,31 +13,56 @@ inconvenient: this file and the contract are added in the SAME commit, so
 any revision naming the contract would have to be a commit that did not
 yet exist when this line was written.
 
-That impossibility does NOT establish that the pairing holds. Co-versioning
-is an OBLIGATION, and the reader tests it by ENUMERATING every commit that
-changed the contract alone -- not by comparing two last-touch commits:
+That impossibility does NOT establish that the pairing holds, and neither
+does co-versioning by itself: **SIMULTANEITY IS NOT RE-VERIFICATION.** A
+commit may touch both files while moving the contract for a reason these
+observations were never re-checked against. So TWO things are tested -- has
+the contract moved since the last re-check, and did any commit move it
+without this record at all:
 
     set -eu
+    root=$(/usr/bin/git rev-parse --show-toplevel) ||
+      { echo 'CANNOT CHECK: not inside a work tree'; exit 2; }
+    G() { env -i PATH=/usr/bin GIT_CONFIG_NOSYSTEM=1 \
+          GIT_CONFIG_GLOBAL=/dev/null /usr/bin/git -C "$root" "$@"; }
+
     base=e70d019923a958bb18d8dbb266da007c6e93a88c
     contract=docs/tasks/a1-f-v2-resolver-semantics.md
     record=docs/tasks/a1-resolver-semantics-evidence.md
+    verified_against=f748f66c8b7deca55f66227d4b211c19d668b5ba
 
-    git rev-parse --verify --quiet "$base^{commit}" >/dev/null ||
+    G rev-parse --verify --quiet "$base^{commit}" >/dev/null ||
       { echo 'CANNOT CHECK: base commit absent'; exit 2; }
 
-    commits=$(git log --format=%H "$base"..HEAD -- "$contract") ||
+    now=$(G log -1 --format=%H -- "$contract") ||
+      { echo 'CANNOT CHECK: contract history unreadable'; exit 2; }
+    [ "$now" = "$verified_against" ] ||
+      printf 'RE-VERIFICATION OWED: contract at %s, verified against %s\n' \
+             "$now" "$verified_against"
+
+    commits=$(G log --format=%H "$base"..HEAD -- "$contract") ||
       { echo 'CANNOT CHECK: history enumeration failed'; exit 2; }
 
     for c in $commits; do
-      git diff-tree --no-commit-id --name-only -r "$c" | grep -qx "$record" ||
+      names=$(G diff-tree --no-commit-id --name-only -r "$c") ||
+        { echo 'CANNOT CHECK: diff-tree failed'; exit 2; }
+      printf '%s\n' "$names" | grep -Fqx -- "$record" ||
         printf 'contract changed alone at %s\n' "$c"
     done
 
-THREE outcomes, and they must not be collapsed:
+`verified_against` names the contract's last-touching commit as of the
+re-check recorded below. It is nameable precisely because it already exists:
+the self-reference that blocks pinning the contract in the SAME commit does
+not block naming a commit that is already in history. Moving the contract
+therefore obliges an edit here, which is the diff a silent re-verification
+otherwise fails to produce.
 
-    exit 2            CANNOT CHECK -- says NOTHING about the pairing
-    commits printed   GAPS         -- each must appear in the ledger below
-    exit 0, no output NONE FOUND   -- examined, and the obligation held
+FOUR outcomes, and they must not be collapsed:
+
+    exit 2                  CANNOT CHECK -- says NOTHING about the pairing
+    RE-VERIFICATION OWED    the contract moved since the last re-check
+    commits printed         GAPS -- each must appear in the ledger below
+    exit 0, no output       NONE FOUND -- examined, and the obligation held
 
 Every commit that prints must appear in the ledger, naming what was
 re-checked and what was found. One in neither is a GAP: the contract moved
@@ -105,6 +130,28 @@ claims are on the record rather than edited away:
      own history. It reported a healthy pairing over the history it was
      written to police. A reviewer found it, one commit after it was
      written.
+
+  3. running the enumeration with an INHERITED environment and RELATIVE
+     pathspecs, and matching the record path with `grep -qx`. Three
+     defects, two of them reproduced:
+
+       - run from any subdirectory, the pathspec matches nothing, so the
+         check printed NOTHING and exited 0 -- NONE FOUND again. Verified
+         from `docs/`: zero candidates where five exist. It then caught
+         the author's own verification command by the same route, which
+         is how thoroughly it was not theoretical;
+       - `grep -qx "$record"` is a BRE, so `.` is a wildcard and a decoy
+         path `a1-resolver-semantics-evidenceXmd` satisfies the check.
+         Verified; `grep -Fqx --` refuses it;
+       - `diff-tree | grep` reports only grep's status. This one was NOT
+         reproduced as a fail-open: a diff-tree that fails producing no
+         output makes grep fail, which PRINTS a gap. The status is now
+         captured anyway, because relying on that is relying on an
+         accident of which command's status survives.
+
+     The record's own header requires every git invocation here to run
+     under a constructed environment and an absolute executable. The check
+     policing that record did neither.
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
