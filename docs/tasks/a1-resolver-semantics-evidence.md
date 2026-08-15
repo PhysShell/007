@@ -262,11 +262,24 @@ that "hash whatever arrived" is not merely hashing an empty buffer?
 **Reproduction and observed result:** a 10,400,000-byte blob whose 60,565-byte
 loose object file was truncated to 36,339 bytes.
 
+W3 requires **`§2.1 holds`**, so the reproduction is run under an invocation that
+satisfies each §2.1 clause — an absolute executable path, and a child environment
+built with `env -i` rather than inherited. The environment below is the complete
+set of names the child received:
+
 ```console
-$ git cat-file -t $B
+$ /usr/bin/env                          # everything the child sees
+GIT_CONFIG_GLOBAL=/dev/null
+GIT_CONFIG_NOSYSTEM=1
+GIT_NO_LAZY_FETCH=1
+GIT_NO_REPLACE_OBJECTS=1
+GIT_TERMINAL_PROMPT=0
+PATH=/usr/bin
+
+$ /usr/bin/git -c safe.directory=<repo> -C . cat-file -t $B
 blob                                    # exit 0   <-- the kind operation SUCCEEDS
 
-$ git cat-file blob $B > body.out
+$ /usr/bin/git -c safe.directory=<repo> -C . cat-file blob $B > body.out
 fatal: unable to stream a394ec43… to stdout
                                         # exit 128 <-- the body operation FAILS
 $ stat -c%s body.out
@@ -278,11 +291,16 @@ $ requested
 a394ec43d91e167d3dae803e62e1049e0b642694
 ```
 
-**Observed:** the kind operation exits 0 and reports `blob`; the body operation
-emits 6,225,920 bytes and then exits 128; the recomputed id over that output
-differs from the requested id.
+**Observed:** with that environment and that executable, the kind operation exits 0
+and reports `blob`; the body operation emits 6,225,920 bytes and then exits 128;
+the recomputed id over that output differs from the requested id. Neither
+`--filters` nor `--textconv` was passed, and the repository has no remote.
 
-**Inference:** this is the exact shape witness W3 names. A resolver that checks the
+**Inference:** the invocation above meets every §2.1 clause — the executable is
+named by absolute path rather than found through `PATH` resolution, the environment
+is constructed rather than inherited, lazy fetch is disabled and unreachable, and
+the read is raw — so what is exhibited is the full **`§2.1 holds` + §2.2 fails**
+shape witness W3 names, not the §2.2 half alone. A resolver that checks the
 first command's status but not the second's will hash 6.2 MB of debris and report
 `IDENTITY_VIOLATION` where the correct state is `LOOKUP_UNOBTAINABLE`. The failure
 is not hypothetical. **Pinned to the reviewed base commit `e70d019`**, not to a
@@ -301,6 +319,19 @@ confirms the record rather than contradicting it.
 **Does NOT establish:** that this is the only route to partial output, or anything
 about how git buffers its output. The observation is the byte count and the exit
 status, nothing more.
+
+It also does not establish that §2.1 is *satisfiable in general* — only that **this
+invocation satisfies it**, which is what W3 needs. §2.1 is a requirement on how the
+resolver calls git, so a witness for it is an invocation exhibiting each clause,
+not a proof about environments the resolver does not control.
+
+**Provenance of these controls:** the first revision of this entry ran plain `git`
+from `PATH` with an inherited environment, and still called the result "the exact
+shape witness W3 names". It was not: absent the §2.1 controls it exhibited only the
+§2.2 half, and an implementation could have passed an E-7-derived test while using
+a repository-selected executable — a case that must yield `LOOKUP_UNOBTAINABLE` for
+a different reason. The controls were added rather than the claim narrowed, because
+the stronger statement is the one W3 actually needs.
 
 ---
 
