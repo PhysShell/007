@@ -141,26 +141,42 @@ one self-terminates.
 **Question:** if an object file is overwritten with a *different* valid object,
 does the lookup refuse it?
 
-**Reproduction and observed result:**
+**Reproduction and observed result:** W4 requires **`§2 holds`**, so this is run
+under the same §2.1 controls as E-7 — absolute executable path, and a child
+environment built with `env -i` carrying only `PATH=/usr/bin`,
+`GIT_TERMINAL_PROMPT=0`, `GIT_NO_LAZY_FETCH=1`, `GIT_NO_REPLACE_OBJECTS=1`,
+`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`. Neither `--filters` nor
+`--textconv` is passed.
 
 ```console
 $ A=$(printf 'AUTHENTIC AUTHORITY' | git hash-object -w --stdin)   # 36ae691f…
 $ D=$(printf 'SUBSTITUTED CONTENT' | git hash-object -w --stdin)   # 7feb0785…
 $ cp .git/objects/7f/eb07…  .git/objects/36/ae69…
 
-$ git cat-file blob $A
-SUBSTITUTED CONTENT          # exit 0
+$ /usr/bin/git -c safe.directory=<repo> -C . cat-file -t $A
+blob                         # exit 0   <-- kind operation succeeds
 
-$ git cat-file blob $A | git hash-object --stdin
+$ /usr/bin/git -c safe.directory=<repo> -C . cat-file blob $A
+SUBSTITUTED CONTENT          # exit 0   <-- body operation succeeds: COMPLETE
+                             #              response, so §2.2 holds too
+
+$ sha1("blob 19\0" + returned)
 7feb07853362884e770de9cde3265336be1697fb     # != the requested 36ae691f…
 
 $ git fsck
 error: 7feb0785…: hash-path mismatch, found at: .git/objects/36/ae691f…
 ```
 
-**Observed:** the lookup completes with exit 0 and returns bytes whose recomputed
-id differs from the requested one. A separate command, `fsck`, reports the
-mismatch.
+**Observed:** under that invocation both operations exit 0, the lookup returns
+bytes whose recomputed id differs from the requested one, and a separate command,
+`fsck`, reports the mismatch.
+
+**Provenance of these controls:** as with E-7, the first revision of this entry ran
+plain `git` from `PATH` with an inherited environment while citing witness W4 —
+which requires `§2 holds`. That gap was **not reported by any reviewer**; it was
+found by sweeping every entry citing a witness after the same defect was reported
+against E-7. Re-running under the controls reproduces the result unchanged, so the
+entry's conclusion stands and only its standing as a W4 witness was ever in doubt.
 
 **Inference:** the mismatch is detectable by recomputation at the call site, and
 this is the channel the identity postcondition exists for.
