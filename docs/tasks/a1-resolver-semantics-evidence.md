@@ -580,6 +580,64 @@ either mechanism being reachable:
 
 ---
 
+## E-8.2 — Absence can be reported with a ZERO exit status
+
+**Question:** does a successful lookup command imply the object was available?
+
+**Reproduction and observed result:** a fresh empty repository and an oid that is
+certainly not in it.
+
+```console
+$ /usr/bin/git init -q bc
+$ MISSING=1111111111111111111111111111111111111111
+
+$ printf '%s\n' "$MISSING" | env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 \
+      GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 \
+      GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd)/bc -C bc \
+        cat-file --batch-check='%(objecttype)'
+1111111111111111111111111111111111111111 missing
+                                        # exit 0
+
+$ printf '%s\n' "$MISSING" | env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 \
+      GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 \
+      GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd)/bc -C bc cat-file --batch
+1111111111111111111111111111111111111111 missing
+                                        # exit 0
+
+$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      /usr/bin/git -c safe.directory=$(pwd)/bc -C bc cat-file -t "$MISSING"
+fatal: git cat-file: could not get object info
+                                        # exit 128
+```
+
+**Observed:** for the same absent oid under the same controls, the two batch forms
+exit `0` and print `missing`; the non-batch form exits `128`. Exit status alone
+does not distinguish "the object was produced" from "the object is absent".
+
+**Inference:** a resolver cannot treat command success as evidence of
+availability. §2.2 therefore carries a second, independent condition — that the
+required operations actually yield a usable kind and the complete bytes — rather
+than inferring that from their exit statuses.
+
+**Normative clause supported:** §2.2, second condition; §3's exhaustiveness
+argument, which reads availability off §2.2 rather than off exit status.
+
+**Does NOT establish:** that these are the only zero-exit absence reports, or
+anything about which lookup form an implementation ought to use. The contract does
+not mandate a form; it requires that whichever form is used be judged on the
+answer it produced.
+
+**Why this entry exists.** §2.2 previously said only that every required operation
+must succeed. That was written to close a case where an operation FAILED producing
+nothing, and it silently assumed the converse — that a succeeding operation had
+produced something. These commands are the counterexample, and they are ordinary
+supported usage rather than an exotic edge.
+
+---
+
 ## E-9 — Cryptographic caveats (literature, not observation)
 
 **Question:** does the contract depend on SHA-1 properties?

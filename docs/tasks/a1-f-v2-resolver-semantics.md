@@ -56,11 +56,25 @@ admissible. They are checked in the order given.
 
 ### 2.2 RESPONSE complete
 
-- **every operation the lookup REQUIRES must succeed.** A required operation that
+**Two conditions, and BOTH are required.** This section is named for the
+*response*, not for the commands: an operation reporting success is not the same
+as an answer having arrived.
+
+- **every operation the lookup requires must SUCCEED.** A required operation that
   fails leaves the response incomplete **whether or not it emitted anything** —
-  including the case where the very first operation fails and nothing at all is
-  produced. The condition is on the operation's success, not on whether it
-  managed to contribute output;
+  including a first operation that fails producing nothing;
+- **AND those operations must actually YIELD a usable kind and the complete bytes
+  for the requested oid.** An operation that exits zero while reporting the object
+  missing, truncated, or otherwise unavailable **has not produced a response**.
+
+The second condition is not redundant, and assuming it followed from the first is
+how an earlier revision of this contract left a case unassigned. **Git offers
+lookup forms that report absence through a ZERO exit status** — `cat-file --batch`
+and `--batch-check` answer `<oid> missing` and exit `0` (evidence E-8.2). A
+resolver may therefore never infer availability from exit status alone: success is
+a property of the command, availability is a property of the answer, and §2.2
+requires the second.
+
 - the output of a failed command is **debris, never evidence** — it is never
   hashed, never parsed, and never compared against the citation.
 
@@ -103,12 +117,13 @@ for any admissible input, either §2 holds or it does not
                                           which is the ordinary "object is not
                                           there" case)
 
-  §2 holds                            -> §2.2 means every required operation
-                                         succeeded, so kind and bytes were
-                                         obtained; oid(kind, bytes) is then
-                                         DEFINED, because §3.1 requires a total
-                                         function; so exactly one of == or !=
-                                         holds -> branch 2 or branch 3
+  §2 holds                            -> §2.2's SECOND condition means a usable
+                                         kind and the complete bytes were
+                                         actually obtained — not merely that the
+                                         commands exited zero; oid(kind, bytes)
+                                         is then DEFINED, because §3.1 requires a
+                                         total function; so exactly one of == or
+                                         != holds -> branch 2 or branch 3
 
 no fourth case remains
 ```
