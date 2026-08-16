@@ -8,6 +8,19 @@ or consumer authority. If this file conflicts with the normative contract
 in docs/tasks/a1-f-v2-resolver-semantics.md, the normative contract wins
 and the discrepancy is a defect in this evidence record.
 
+THE PREREGISTRATION DOES NOT CLAIM ITS EVIDENCE MACHINERY IS
+SELF-VERIFYING. The co-versioning check below is a mechanical aid, NOT a
+completeness oracle, and its PASS is not part of the closure basis for
+RS-P0. It has an OPEN and KNOWINGLY INCOMPLETE neutralization boundary --
+repository-local configuration cannot be cleared wholesale the way `env -i`
+clears the environment -- so no finite enumeration of mechanisms makes its
+PASS mean "nothing was missed". Two defects in it are recorded as OPEN
+below rather than repaired here (see the note after the withdrawn claims).
+Treating that check as something that must reach an independent CLEAN is
+what turned thirteen revisions of review into work on a Git-history
+verifier; that work belongs to a separate effort with a declared trusted
+base, not inside this preregistration.
+
 The contract is cited by PATH. A pin is IMPOSSIBLE here rather than merely
 inconvenient: this file and the contract are added in the SAME commit, so
 any revision naming the contract would have to be a commit that did not
@@ -528,6 +541,35 @@ claims are on the record rather than edited away:
      distinguishes the two and an unreadable tree is CANNOT CHECK. A missing
      signal was being spent as a negative result -- the exact failure this
      record exists to refuse.
+
+OPEN DEFECTS IN THE CHECK ITSELF, RECORDED AND NOT REPAIRED HERE. Both are
+TRUE, both were reproduced, and neither is fixed in this record, because
+fixing them is what the iteration above shows has no termination condition:
+
+  O-1. `blob()` uses ROOT-tree readability to tell a genuinely absent path
+       from a traversal failure, and the root tree is not the tree the
+       lookup traverses. Reproduced on Git 2.43.0 by removing the loose
+       tree object for `HEAD:docs/tasks`:
+
+           rev-parse HEAD:<contract>  -> exit 1   (path unresolvable)
+           rev-parse HEAD^{tree}      -> exit 0   (root tree still fine)
+
+       so the failure is reported as `absent`. A merge comparison over a
+       broken subtree can therefore read as clean instead of CANNOT CHECK.
+       `ls-tree` separates the two cases -- exit 1 for traversal failure,
+       exit 0 with empty output for genuine absence -- and that is the shape
+       a replacement should use.
+
+  O-2. Two command substitutions convert a failed enumeration into an empty
+       list rather than into CANNOT CHECK: the shallow-boundary `range`
+       assignment, whose `rev-list` status is masked by a following
+       `printf`, and the merge loop's inline parent enumeration.
+
+O-1 and O-2 are the SAME defect as the one this contract was written
+against: a failure to observe reported as an observation of absence. That
+they recur inside the enforcement machinery is evidence for the contract's
+premise, not against it -- and it is why that machinery is not a closure
+oracle here.
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
