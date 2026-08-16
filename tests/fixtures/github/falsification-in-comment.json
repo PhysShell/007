@@ -1,0 +1,88 @@
+{
+  "pull_request": {
+    "number": 145,
+    "state": "open",
+    "draft": false,
+    "merged": false,
+    "mergeable_state": "clean",
+    "created_at": "2026-08-15T07:08:14Z",
+    "updated_at": "2026-08-16T03:47:58Z",
+    "head": {
+      "ref": "claude/a1-contract-freeze-dkrnnq",
+      "sha": "7e965325ee97dd9826df1b05aa32f69b7a3eaad4",
+      "repo": { "full_name": "PhysShell/007" }
+    },
+    "base": {
+      "ref": "main",
+      "sha": "e70d019923a958bb18d8dbb266da007c6e93a88c",
+      "repo": { "full_name": "PhysShell/007" }
+    }
+  },
+  "reviews": [
+    {
+      "id": 4944200001,
+      "user": { "login": "chatgpt-codex-connector[bot]", "id": 199175422, "type": "Bot" },
+      "author_association": "NONE",
+      "state": "COMMENTED",
+      "body": "\n### 💡 Codex Review\n\nHere are some automated review suggestions for this pull request.\n\n**Reviewed commit:** `7e965325ee`\n",
+      "submitted_at": "2026-08-16T03:47:58Z",
+      "commit_id": "7e965325ee97dd9826df1b05aa32f69b7a3eaad4",
+      "html_url": "https://github.com/PhysShell/007/pull/145#pullrequestreview-4944200001",
+      "pull_request_url": "https://api.github.com/repos/PhysShell/007/pulls/145"
+    }
+  ],
+  "review_comments": [],
+  "issue_comments": [
+    {
+      "id": 5305700001,
+      "user": { "login": "coderabbitai[bot]", "id": 136622811, "type": "Bot" },
+      "author_association": "NONE",
+      "body": "Executing this displayed block verbatim always takes the `CANNOT CHECK` path: because the backslash-newline is inside single quotes, it becomes a literal `\\` argument in `E`, and expansion fails with `/usr/bin/env: '\\': No such file or directory`. Therefore the documented four-outcome check cannot perform any history validation as written.\n\nReproduction:\n\n```\n$ sh block.sh; echo $?\n/usr/bin/env: '\\': No such file or directory\n2\n```",
+      "created_at": "2026-08-16T03:52:10Z",
+      "updated_at": "2026-08-16T03:52:10Z",
+      "issue_url": "https://api.github.com/repos/PhysShell/007/issues/145",
+      "html_url": "https://github.com/PhysShell/007/pull/145#issuecomment-5305700001"
+    }
+  ],
+  "check_runs": {
+    "total_count": 4,
+    "check_runs": [
+      {
+        "id": 95112139711,
+        "name": "worktree+verifier tests",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "7e965325ee97dd9826df1b05aa32f69b7a3eaad4",
+        "started_at": "2026-08-16T03:28:24Z",
+        "completed_at": "2026-08-16T03:28:56Z"
+      },
+      {
+        "id": 95112139663,
+        "name": "dependency advisories",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "7e965325ee97dd9826df1b05aa32f69b7a3eaad4",
+        "started_at": "2026-08-16T03:28:24Z",
+        "completed_at": "2026-08-16T03:28:48Z"
+      },
+      {
+        "id": 95112139631,
+        "name": "dependency policy",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "7e965325ee97dd9826df1b05aa32f69b7a3eaad4",
+        "started_at": "2026-08-16T03:28:24Z",
+        "completed_at": "2026-08-16T03:28:50Z"
+      },
+      {
+        "id": 95112139641,
+        "name": "worker gate",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "7e965325ee97dd9826df1b05aa32f69b7a3eaad4",
+        "started_at": "2026-08-16T03:28:24Z",
+        "completed_at": "2026-08-16T03:33:10Z"
+      }
+    ]
+  }
+}
