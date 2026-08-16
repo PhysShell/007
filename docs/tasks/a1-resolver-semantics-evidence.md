@@ -22,9 +22,10 @@ without this record at all:
 
     set -eu
     E='/usr/bin/env -i PATH=/usr/bin GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null'
-    root=$($E /usr/bin/git rev-parse --show-toplevel) ||
+    N='-c log.showSignature=false -c core.fsmonitor=false'
+    root=$($E /usr/bin/git $N rev-parse --show-toplevel) ||
       { echo 'CANNOT CHECK: not inside a work tree'; exit 2; }
-    G() { $E /usr/bin/git -C "$root" "$@"; }
+    G() { $E /usr/bin/git $N -C "$root" "$@"; }
 
     base=e70d019923a958bb18d8dbb266da007c6e93a88c
     contract=docs/tasks/a1-f-v2-resolver-semantics.md
@@ -74,7 +75,15 @@ without this record at all:
         printf 'contract changed alone at %s\n' "$c"
     done
 
-    blob() { G rev-parse --verify --quiet "$1:$2" || echo absent; }
+    blob() {
+      if oid=$(G rev-parse --verify --quiet "$1:$2"); then
+        printf '%s\n' "$oid"
+      elif G rev-parse --verify --quiet "$1^{tree}" >/dev/null; then
+        printf 'absent\n'
+      else
+        printf 'unreadable\n'
+      fi
+    }
 
     merges=$(G rev-list --merges "$base"..HEAD) ||
       { echo 'CANNOT CHECK: merge enumeration failed'; exit 2; }
@@ -84,6 +93,11 @@ without this record at all:
       alone=0
       for p in $(G log -1 --format=%P "$m"); do
         pc=$(blob "$p" "$contract"); pr=$(blob "$p" "$record")
+        for v in "$mc" "$mr" "$pc" "$pr"; do
+          if [ "$v" = unreadable ]; then
+            echo 'CANNOT CHECK: tree unreadable during merge comparison'; exit 2
+          fi
+        done
         if [ "$pc" != "$mc" ] && [ "$pr" = "$mr" ]; then alone=1; fi
       done
       if [ "$alone" -eq 1 ]; then
@@ -91,9 +105,24 @@ without this record at all:
       fi
     done
 
-The exact-name test uses only shell BUILTINS. After this block the only
-external programs are `/usr/bin/env` and `/usr/bin/git`, both absolute;
-`for`, `[`, `printf` and `echo` are builtins, which `PATH` cannot redirect.
+The exact-name test uses only shell BUILTINS. The only programs this block
+NAMES are `/usr/bin/env` and `/usr/bin/git`, both absolute; `for`, `[`,
+`printf` and `echo` are builtins, which `PATH` cannot redirect.
+
+That is NOT the same as saying only those two programs RUN. `env -i` clears
+the environment and `GIT_CONFIG_NOSYSTEM` / `GIT_CONFIG_GLOBAL` neutralize
+the system and global config -- but `.git/config` is NEITHER, and Git has no
+variable that disables repository-local configuration. Settings there can
+name a program that Git then executes:
+
+    log.showSignature=true + gpg.program   executed by `log` on a SIGNED commit
+    core.fsmonitor                         executed by `diff-tree` (index refresh)
+
+Both were reproduced writing to a marker file while this block ran, and both
+are disabled by name in `N`. **The enumeration in `N` is NOT claimed
+complete**, for the same reason the indirection table and the graph controls
+are not: it lists the mechanisms that were found and tested, and a setting
+nobody has looked for is not covered by having looked at these.
 A path containing whitespace would word-split and fail to match, printing a
 GAP that is not one -- wrong in the FAIL-CLOSED direction, and neither of
 the two paths compared here contains whitespace. If the caller controls the
@@ -467,6 +496,38 @@ claims are on the record rather than edited away:
          evil   (contract vs all parents)   GAP
          discard (side contract-only)       GAP   -- fail-closed, see above
          ordinary co-versioned merge        silent
+
+ 13. claiming that only `/usr/bin/env` and `/usr/bin/git` execute. They are
+     the only programs this block NAMES; they are not the only ones that RUN.
+     `GIT_CONFIG_NOSYSTEM` and `GIT_CONFIG_GLOBAL` neutralize the system and
+     global config, and `.git/config` is NEITHER -- Git has no variable that
+     disables repository-local configuration, so a setting there can name a
+     program Git executes. Reproduced with a marker-writing helper, WHILE
+     THIS BLOCK RAN:
+
+         log.showSignature=true + gpg.program  -> 2 executions, via `log` on
+                                                  a SIGNED contract commit
+         core.fsmonitor                        -> 1 execution, via `diff-tree`
+
+     Found by the reviewer: the first. Found by sweeping the block's own
+     command set against every repository-local setting that names a program:
+     the second. `merge-base`, `rev-list` and `rev-parse` triggered neither.
+
+     Both are disabled by name in `N`, and the marker is silent afterwards.
+     **`N` is NOT claimed complete** -- it lists what was found and tested,
+     and a setting nobody has looked for is not covered by having looked at
+     these. This is the same posture as the indirection table and the graph
+     controls, and it is the honest one: the environment could be enumerated
+     because it is cleared wholesale by `env -i`, and repository-local
+     configuration cannot be, because there is no wholesale clear.
+
+     The exploit path also depended on a defect of my own: `blob()` converted
+     ANY `rev-parse` failure into the literal `absent`, so a tree that became
+     UNREADABLE mid-run compared equal to a tree that genuinely lacked the
+     path, and a contract-only merge could score clean. `blob()` now
+     distinguishes the two and an unreadable tree is CANNOT CHECK. A missing
+     signal was being spent as a negative result -- the exact failure this
+     record exists to refuse.
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
