@@ -59,7 +59,8 @@ without this record at all:
       printf 'RE-VERIFICATION OWED: contract at %s, verified against %s\n' \
              "$now" "$verified_against"
 
-    commits=$(G log --format=%H "$base"..HEAD -- "$contract") ||
+    commits=$(G log --full-history --no-merges --format=%H "$base"..HEAD \
+                 -- "$contract") ||
       { echo 'CANNOT CHECK: history enumeration failed'; exit 2; }
 
     for c in $commits; do
@@ -71,6 +72,23 @@ without this record at all:
       done
       [ "$hit" -eq 1 ] ||
         printf 'contract changed alone at %s\n' "$c"
+    done
+
+    blob() { G rev-parse --verify --quiet "$1:$2" || echo absent; }
+
+    merges=$(G rev-list --merges "$base"..HEAD) ||
+      { echo 'CANNOT CHECK: merge enumeration failed'; exit 2; }
+
+    for m in $merges; do
+      mc=$(blob "$m" "$contract"); mr=$(blob "$m" "$record")
+      csame=0; rsame=0
+      for p in $(G log -1 --format=%P "$m"); do
+        if [ "$(blob "$p" "$contract")" = "$mc" ]; then csame=1; fi
+        if [ "$(blob "$p" "$record")"   = "$mr" ]; then rsame=1; fi
+      done
+      if [ "$csame" -eq 0 ] && [ "$rsame" -eq 1 ]; then
+        printf 'contract changed by merge at %s\n' "$m"
+      fi
     done
 
 The exact-name test uses only shell BUILTINS. After this block the only
@@ -103,6 +121,32 @@ cannot be refused by name, because the boundary is legitimate repository
 state. The guard is therefore a claim about the RANGE, not about the
 repository: this enumeration is coverage only if nothing inside it was cut.
 
+AND THE WALK ITSELF DISCARDS HISTORY BY DEFAULT. A path-limited `git log`
+SIMPLIFIES: it reports the simplest history explaining the final tree, not
+every commit that touched the path. A contract-only commit on a side branch
+whose change a later merge discards is dropped from the walk entirely --
+enumerated as zero, reported as coverage, with nothing in the repository
+truncated or substituted. `--full-history` keeps every path.
+
+That flag excludes merges, so merges need their own arm. An EVIL MERGE can
+carry a contract different from EVERY parent while no non-merge commit
+changed it, and `diff-tree` on a merge without `-m` prints nothing at all --
+so the per-commit test above would read it as touching no files. The merge
+arm therefore compares BLOB IDENTITIES against each parent rather than
+diffing: the contract differing from all parents while the record matches
+one is the merge-shaped form of `contract changed alone`.
+
+Three ways to lose a commit, and they are independent:
+
+    substitution   replace refs, grafts   refused by name
+    truncation     shallow boundary       range asserted, not refused
+    simplification default log walk       --full-history + a merge arm
+
+The repository of record has ZERO merges in `base..HEAD`, and `--full-history`
+returns the same eighteen commits as the default walk here. This change is a
+no-op for the current history; it is not a no-op for the claim, which was
+that every contract-touching commit in the range had been examined.
+
 One recorded side effect of `GIT_GRAFT_FILE=/dev/null`: on history-walking
 commands Git opens the named file and emits its graft-file deprecation
 advice on STDERR. Exit status and stdout are unaffected, and the four
@@ -121,7 +165,9 @@ FOUR outcomes, and they must not be collapsed:
 
     exit 2                  CANNOT CHECK -- says NOTHING about the pairing
     RE-VERIFICATION OWED    the contract moved since the last re-check
-    commits printed         GAPS -- each must appear in the ledger below
+    commits printed         GAPS -- each must appear in the ledger below,
+                            whether printed as `changed alone` (a commit) or
+                            `changed by merge` (a merge against its parents)
     exit 0, no output       NONE FOUND -- examined, and the obligation held
 
 Every commit that prints must appear in the ledger, naming what was
@@ -342,6 +388,44 @@ claims are on the record rather than edited away:
 
          merge, ancestry intact, no boundary declared : exit 0, 5 revisions
          same, orphan parent declared a boundary      : exit 2, CANNOT CHECK
+
+ 11. enumerating with a walk that DISCARDS HISTORY BY DEFAULT. Item 10 asserted
+     the range was not truncated; it did not ask whether the walk reported
+     every commit inside it. A path-limited `git log` SIMPLIFIES to the
+     simplest history explaining the final tree. Discriminating witness: a
+     side branch changing the contract ONLY, and a later merge taking the
+     other parent's version, so the change is discarded:
+
+         default walk    : side commit ABSENT, exit 0, 5 revisions
+         --full-history  : side commit PRESENT, exit 0, 6 revisions
+
+     Nothing was substituted and nothing was truncated. The repository was
+     intact and the walk still did not report a contract-only commit inside
+     the range it claimed to have examined.
+
+     `--full-history` excludes merges, so the merge case is a SECOND hole
+     rather than a detail of the first. An EVIL MERGE can carry a contract
+     differing from EVERY parent while no non-merge commit changed it, and
+     `diff-tree` on a merge without `-m` prints NOTHING, so the per-commit
+     test would have read such a merge as touching no files at all.
+     Discriminating witness, contract edited into the merge tree with the
+     record untouched:
+
+         --full-history --no-merges : merge ABSENT (it is a merge)
+         merge arm, blob vs parents : `contract changed by merge` printed
+
+     A negative control confirms the arm does not fire on an ordinary merge
+     that takes a parent's contract unchanged.
+
+     **Three independent ways to lose a commit**: SUBSTITUTION (refused by
+     name), TRUNCATION (asserted, since a boundary is legitimate state), and
+     SIMPLIFICATION (a property of the walk, present in a perfectly healthy
+     repository). The first two were treated as the whole of "is this graph
+     the real one"; they are not.
+
+     No-op for the current history -- zero merges in `base..HEAD`, and
+     `--full-history` returns the same eighteen commits as the default walk.
+     Not a no-op for the claim.
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
