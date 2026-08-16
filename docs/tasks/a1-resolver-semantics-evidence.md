@@ -21,7 +21,7 @@ the contract moved since the last re-check, and did any commit move it
 without this record at all:
 
     set -eu
-    E='env -i PATH=/usr/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null'
+    E='/usr/bin/env -i PATH=/usr/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null'
     root=$($E /usr/bin/git rev-parse --show-toplevel) ||
       { echo 'CANNOT CHECK: not inside a work tree'; exit 2; }
     G() { $E /usr/bin/git -C "$root" "$@"; }
@@ -46,9 +46,22 @@ without this record at all:
     for c in $commits; do
       names=$(G diff-tree --no-commit-id --name-only -r "$c") ||
         { echo 'CANNOT CHECK: diff-tree failed'; exit 2; }
-      printf '%s\n' "$names" | grep -Fqx -- "$record" ||
+      hit=0
+      for n in $names; do
+        if [ "$n" = "$record" ]; then hit=1; fi
+      done
+      [ "$hit" -eq 1 ] ||
         printf 'contract changed alone at %s\n' "$c"
     done
+
+The exact-name test uses only shell BUILTINS. After this block the only
+external programs are `/usr/bin/env` and `/usr/bin/git`, both absolute;
+`for`, `[`, `printf` and `echo` are builtins, which `PATH` cannot redirect.
+A path containing whitespace would word-split and fail to match, printing a
+GAP that is not one -- wrong in the FAIL-CLOSED direction, and neither of
+the two paths compared here contains whitespace. If the caller controls the
+shell itself, nothing in this block helps; that is the stated boundary, not
+an oversight.
 
 `verified_against` names the contract's last-touching commit as of the
 re-check recorded below. It is nameable precisely because it already exists:
@@ -166,6 +179,18 @@ claims are on the record rather than edited away:
      The control set is not a property of most invocations. **An
      unsanitised bootstrap selects the subject that every sanitised command
      then examines carefully.**
+
+  5. deciding the exact-name test with `grep`, the one program in that block
+     still resolved through the CALLER's `PATH`. The constructed environment
+     covered the git calls and not the comparison that interprets them. With
+     a `grep` shim that exits 0, the block printed nothing and exited 0 --
+     NONE FOUND -- while five contract-only revisions sat in the history it
+     claimed to have examined. Reproduced. `env` was bare for the same
+     reason and is now absolute.
+
+     Pinning `grep` would have repaired the site. The comparison is done
+     with builtins instead, because **a decision must not depend on a
+     program the environment gets to choose.**
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
