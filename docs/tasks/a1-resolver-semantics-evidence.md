@@ -21,10 +21,10 @@ the contract moved since the last re-check, and did any commit move it
 without this record at all:
 
     set -eu
-    root=$(/usr/bin/git rev-parse --show-toplevel) ||
+    E='env -i PATH=/usr/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null'
+    root=$($E /usr/bin/git rev-parse --show-toplevel) ||
       { echo 'CANNOT CHECK: not inside a work tree'; exit 2; }
-    G() { env -i PATH=/usr/bin GIT_CONFIG_NOSYSTEM=1 \
-          GIT_CONFIG_GLOBAL=/dev/null /usr/bin/git -C "$root" "$@"; }
+    G() { $E /usr/bin/git -C "$root" "$@"; }
 
     base=e70d019923a958bb18d8dbb266da007c6e93a88c
     contract=docs/tasks/a1-f-v2-resolver-semantics.md
@@ -152,6 +152,20 @@ claims are on the record rather than edited away:
      The record's own header requires every git invocation here to run
      under a constructed environment and an absolute executable. The check
      policing that record did neither.
+
+  4. sanitising every git call EXCEPT the one that decides which repository
+     the others examine. The repair for (3) discovered the work-tree root
+     with an inherited environment, so an inherited `GIT_WORK_TREE` or
+     `GIT_DIR` pointed `root` at a foreign checkout and every later `-C
+     "$root"` command then validated that checkout's history -- NONE FOUND,
+     exit 0, about the wrong repository. Verified: with `GIT_WORK_TREE` and
+     `GIT_DIR` set to a scratch repo, `/usr/bin/git rev-parse
+     --show-toplevel` returned the foreign root; under the constructed
+     environment it returned this one.
+
+     The control set is not a property of most invocations. **An
+     unsanitised bootstrap selects the subject that every sanitised command
+     then examines carefully.**
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
