@@ -1,0 +1,94 @@
+{
+  "pull_request": {
+    "number": 145,
+    "state": "open",
+    "draft": false,
+    "merged": false,
+    "mergeable_state": "clean",
+    "created_at": "2026-08-15T07:08:14Z",
+    "updated_at": "2026-08-16T10:33:27Z",
+    "head": {
+      "ref": "claude/a1-contract-freeze-dkrnnq",
+      "sha": "ed7969c4636362bcfc248bcb9957e140ca899f8c",
+      "repo": { "full_name": "PhysShell/007" }
+    },
+    "base": {
+      "ref": "main",
+      "sha": "e70d019923a958bb18d8dbb266da007c6e93a88c",
+      "repo": { "full_name": "PhysShell/007" }
+    }
+  },
+  "reviews": [
+    {
+      "id": 4944100001,
+      "user": { "login": "chatgpt-codex-connector[bot]", "id": 199175422, "type": "Bot" },
+      "author_association": "NONE",
+      "state": "COMMENTED",
+      "body": "\n### 💡 Codex Review\n\nHere are some automated review suggestions for this pull request.\n\n**Reviewed commit:** `c08abce9dd`\n",
+      "submitted_at": "2026-08-16T10:21:38Z",
+      "commit_id": "c08abce9dd0356facae400db1950cd9644976114",
+      "html_url": "https://github.com/PhysShell/007/pull/145#pullrequestreview-4944100001",
+      "pull_request_url": "https://api.github.com/repos/PhysShell/007/pulls/145"
+    }
+  ],
+  "review_comments": [
+    {
+      "id": 3791514579,
+      "pull_request_review_id": 4944100001,
+      "in_reply_to_id": null,
+      "user": { "login": "chatgpt-codex-connector[bot]", "id": 199175422, "type": "Bot" },
+      "author_association": "NONE",
+      "path": "docs/tasks/a1-resolver-semantics-evidence.md",
+      "line": 82,
+      "side": "RIGHT",
+      "commit_id": "c08abce9dd0356facae400db1950cd9644976114",
+      "original_commit_id": "c08abce9dd0356facae400db1950cd9644976114",
+      "body": "**P1  Detect unreadable descendant trees before reporting absence**\n\nIf a descendant tree needed to resolve either path becomes missing or corrupt after history enumeration, this fallback still reports `absent`.",
+      "created_at": "2026-08-16T10:21:38Z",
+      "updated_at": "2026-08-16T10:21:38Z",
+      "html_url": "https://github.com/PhysShell/007/pull/145#discussion_r3791514579"
+    }
+  ],
+  "issue_comments": [],
+  "check_runs": {
+    "total_count": 4,
+    "check_runs": [
+      {
+        "id": 95151861436,
+        "name": "worktree+verifier tests",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "ed7969c4636362bcfc248bcb9957e140ca899f8c",
+        "started_at": "2026-08-16T10:28:27Z",
+        "completed_at": "2026-08-16T10:29:03Z"
+      },
+      {
+        "id": 95151861719,
+        "name": "dependency policy",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "ed7969c4636362bcfc248bcb9957e140ca899f8c",
+        "started_at": "2026-08-16T10:28:26Z",
+        "completed_at": "2026-08-16T10:29:04Z"
+      },
+      {
+        "id": 95151861657,
+        "name": "dependency advisories",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "ed7969c4636362bcfc248bcb9957e140ca899f8c",
+        "started_at": "2026-08-16T10:28:28Z",
+        "completed_at": "2026-08-16T10:29:05Z"
+      },
+      {
+        "id": 95151861720,
+        "name": "worker gate",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "ed7969c4636362bcfc248bcb9957e140ca899f8c",
+        "started_at": "2026-08-16T10:28:26Z",
+        "completed_at": "2026-08-16T10:33:27Z"
+      }
+    ]
+  }
+}
