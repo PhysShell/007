@@ -34,6 +34,25 @@ without this record at all:
     G rev-parse --verify --quiet "$base^{commit}" >/dev/null ||
       { echo 'CANNOT CHECK: base commit absent'; exit 2; }
 
+    G merge-base --is-ancestor "$base" HEAD ||
+      { echo 'CANNOT CHECK: base is not a reachable ancestor of HEAD'; exit 2; }
+
+    if [ "$(G rev-parse --is-shallow-repository)" != false ]; then
+      sf=$(G rev-parse --git-path shallow)
+      case "$sf" in /*) ;; *) sf="$root/$sf" ;; esac
+      [ -f "$sf" ] ||
+        { echo 'CANNOT CHECK: shallow repository, boundary set unreadable'; exit 2; }
+      range=$(G rev-list "$base..HEAD"; printf '%s\n' "$base")
+      while read -r b; do
+        for r in $range; do
+          if [ "$r" = "$b" ]; then
+            echo 'CANNOT CHECK: shallow boundary inside the enumerated range'
+            exit 2
+          fi
+        done
+      done < "$sf"
+    fi
+
     now=$(G log -1 --format=%H -- "$contract") ||
       { echo 'CANNOT CHECK: contract history unreadable'; exit 2; }
     [ "$now" = "$verified_against" ] ||
@@ -62,6 +81,34 @@ GAP that is not one -- wrong in the FAIL-CLOSED direction, and neither of
 the two paths compared here contains whitespace. If the caller controls the
 shell itself, nothing in this block helps; that is the stated boundary, not
 an oversight.
+
+THE REPOSITORY OF RECORD IS ITSELF SHALLOW. `rev-parse
+--is-shallow-repository` reports `true` here and `.git/shallow` carries
+twelve boundary commits; the enumeration is nevertheless complete because
+none of those boundaries lies in `base..HEAD`. That was true by accident of
+how the container was cloned, not by anything this block established, so it
+is now ASSERTED rather than assumed: `merge-base --is-ancestor` proves the
+range is anchored at `base`, and the boundary set is intersected with the
+range because a truncated walk reports neither an error nor a short count --
+it simply stops, and the commits it never reached cannot be distinguished
+from commits that do not exist. A shallow boundary at `verified_against`
+with the base object fetched separately enumerated ONE contract-only
+revision instead of FIVE, exit 0, every printed revision already in the
+ledger -- a clean PASS covering four revisions that were never examined.
+
+Naming the EXECUTABLE, the ENVIRONMENT and the GRAPH is still not enough if
+the graph is COMPLETE only by assumption. `refs/replace` and `.git/info/grafts`
+SUBSTITUTE parentage and are refused by name; shallowness TRUNCATES it and
+cannot be refused by name, because the boundary is legitimate repository
+state. The guard is therefore a claim about the RANGE, not about the
+repository: this enumeration is coverage only if nothing inside it was cut.
+
+One recorded side effect of `GIT_GRAFT_FILE=/dev/null`: on history-walking
+commands Git opens the named file and emits its graft-file deprecation
+advice on STDERR. Exit status and stdout are unaffected, and the four
+outcomes below are defined on those alone; a reader running this block in a
+repository with no graft file will still see the hint, and it is our own
+control producing it, not a graft.
 
 `verified_against` names the contract's last-touching commit as of the
 re-check recorded below. It is nameable precisely because it already exists:
@@ -260,7 +307,41 @@ claims are on the record rather than edited away:
      executable ran and no recorded output changes. It is listed here rather
      than made silently, because editing a transcript is a change to a claim
      about what was executed.
-     closure.
+
+ 10. treating an enumeration as coverage without establishing that the range
+     was COMPLETE. `rev-parse --verify` proved the base object was PRESENT,
+     which is not the same as REACHABLE: in a shallow repository whose
+     boundary is `f748f66c8b7deca55f66227d4b211c19d668b5ba` with the base
+     object fetched separately, the walk stops at the boundary and reports
+     neither an error nor a short count. Discriminating witness:
+
+         base inside the fetched region  : 5 contract-only revisions, exit 0
+         boundary at verified_against    : 1 contract-only revision,  exit 0
+
+     The one revision printed was already in the ledger, so the run was a
+     clean PASS over four revisions that were never examined. The record's
+     own mechanical check had the same blind spot and reported zero gaps in
+     that repository; it now carries the same guard (property N).
+
+     **The repository of record is itself shallow** -- twelve boundaries --
+     and the enumeration is complete here only because none of them lies in
+     `base..HEAD`. That held by accident of how the container was cloned;
+     it is now asserted, by `merge-base --is-ancestor` and by intersecting
+     the boundary set with the range.
+
+     Replace refs and grafts SUBSTITUTE parentage and can be refused by
+     name. **Shallowness TRUNCATES it and cannot be, because a boundary is
+     legitimate repository state.** So the guard is a claim about the RANGE,
+     not about the repository: naming the executable, the environment and
+     the graph is still not enough if the graph is COMPLETE only by
+     assumption.
+
+     Both guards are exercised. The boundary-intersection arm needed a
+     merge-shaped witness, because on a linear range any truncation severs
+     ancestry and the first guard fires before the second is reached:
+
+         merge, ancestry intact, no boundary declared : exit 0, 5 revisions
+         same, orphan parent declared a boundary      : exit 2, CANNOT CHECK
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
