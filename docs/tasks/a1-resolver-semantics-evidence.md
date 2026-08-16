@@ -21,7 +21,8 @@ the contract moved since the last re-check, and did any commit move it
 without this record at all:
 
     set -eu
-    E='/usr/bin/env -i PATH=/usr/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null'
+    E='/usr/bin/env -i PATH=/usr/bin GIT_NO_REPLACE_OBJECTS=1 \
+       GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null'
     root=$($E /usr/bin/git rev-parse --show-toplevel) ||
       { echo 'CANNOT CHECK: not inside a work tree'; exit 2; }
     G() { $E /usr/bin/git -C "$root" "$@"; }
@@ -191,6 +192,29 @@ claims are on the record rather than edited away:
      Pinning `grep` would have repaired the site. The comparison is done
      with builtins instead, because **a decision must not depend on a
      program the environment gets to choose.**
+
+  6. running the history check WITHOUT `GIT_NO_REPLACE_OBJECTS=1`. `env -i`
+     clears the ENVIRONMENT; `refs/replace` lives IN THE REPOSITORY, so
+     `log` and `diff-tree` walked replacement commits. Reproduced in a clean
+     clone: replacing `f748f66c8b7deca55f66227d4b211c19d668b5ba` with a
+     commit carrying its tree but `e70d019923a958bb18d8dbb266da007c6e93a88c`
+     as parent made this block print nothing and exit 0 -- NONE FOUND --
+     while the unreplaced history holds five contract-only revisions. Adding
+     the variable back, all five print.
+
+     **`CTRL`, defined in this same file, has carried
+     `GIT_NO_REPLACE_OBJECTS=1` since the beginning.** Every reproduction
+     here ran under it. The check that polices this record did not, so the
+     record demanded of its evidence a control it did not apply to its own
+     enforcement -- and §2.1's indirection clause forbids exactly this class
+     of repository-controlled redirection for resolver lookups.
+
+     What this does NOT close: the alternates half, still witnessed OPEN
+     (E-5.1). Its exposure here is different in kind -- an alternate can
+     make an object AVAILABLE that would otherwise be missing, which turns
+     a CANNOT CHECK into an answer, never a GAP into NONE FOUND. That is
+     the fail-closed direction, and it is stated rather than counted as
+     closure.
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
