@@ -85,7 +85,13 @@ const SPECS: &[FixtureSpec] = &[
                 "/check_runs/check_runs/0/head_sha",
                 "/pull_request/head/sha",
             ),
-            Relation::Equal("/review_comments/0/commit_id", "/reviews/0/commit_id"),
+            // NOTE: the README lists `/review_comments/0/commit_id` as a
+            // decisive observation but states NO relation between it and
+            // `/reviews/0/commit_id`. An earlier revision of this file asserted
+            // they were equal. The bytes happen to satisfy that, so the test was
+            // green — while enforcing an invariant the frozen evidence never
+            // claimed. Requiring the pointer to resolve is the whole of what the
+            // README supports here.
         ],
     },
     FixtureSpec {
