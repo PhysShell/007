@@ -59,6 +59,63 @@ Case 12 is not decoration. The mixed-merge defect (case 11) survived a round
 precisely because the positive witnesses passed and nothing exercised a shape
 where the predicate's halves disagree.
 
+## Status
+
+```text
+13 Git-level scenarios reproducible          (14 assertions; case 13 carries
+                                              a second, marker-based one)
+ 1 preserved but NON-DISCRIMINATING          O-1
+ 3 API-level scenarios deliberately deferred to the classifier's own fixtures
+```
+
+O-1's honest status is **RECIPE PRESERVED / DISCRIMINATING WITNESS OWED** —
+neither PASS nor FAIL. The script exits 0 because every case matches its
+*recorded* expectation, and O-1's recorded expectation says the shape does not
+reach the mechanism. That is not the same as fifteen green checks, and this
+file should not be summarised as such.
+
+This is Step **0A** of #147. Step **0B** — the API-level fixtures — is still
+owed. The split is not bookkeeping: it marks the boundary of the future tool.
+Git-level fixtures exist to show *why closure authority must not be built on
+local Git*; API-level fixtures test *the classifier itself*, and should run
+with neither Git nor network.
+
+## Two rules this corpus earned the hard way
+
+**A negative regression fixture must discriminate the mechanism it claims to
+test.** Ideally three points, not one:
+
+```text
+control, defect absent      -> expected result
+defective mechanism active  -> wrong result
+repaired mechanism          -> expected result
+```
+
+O-1 currently has only the first and third. Case 12 (ordinary co-versioned
+merge) is the counterexample that makes case 11 meaningful, and case 11's defect
+survived a round precisely because nothing exercised a shape where the
+predicate's two halves disagree.
+
+**Every adversarial fixture must carry a positive control proving the hostile
+condition actually exists before the asserted result is evaluated.** Two
+failures while writing this script are the reason:
+
+| Construction failure | Consequence |
+|---|---|
+| remote-tracking refs are not copied by `clone` | fixtures silently lacked the intended subject |
+| `--depth` is silently ignored for local-path clones | the "shallow" fixture was a complete repository |
+
+Both are one class:
+
+```text
+fixture construction fails -> test still runs -> hostile condition absent -> VACUOUS PASS
+```
+
+The second is the more dangerous, because it produced a green result for a
+scenario that did not exist. Any harness for #147 should assert the hostile
+precondition (`rev-parse --is-shallow-repository`, the presence of the replace
+ref, the marker file, …) *before* evaluating the property under test.
+
 ## Known gaps in this corpus
 
 Stated because a corpus that hides its own holes is the failure it exists to
