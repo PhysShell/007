@@ -81,12 +81,12 @@ without this record at all:
 
     for m in $merges; do
       mc=$(blob "$m" "$contract"); mr=$(blob "$m" "$record")
-      csame=0; rsame=0
+      alone=0
       for p in $(G log -1 --format=%P "$m"); do
-        if [ "$(blob "$p" "$contract")" = "$mc" ]; then csame=1; fi
-        if [ "$(blob "$p" "$record")"   = "$mr" ]; then rsame=1; fi
+        pc=$(blob "$p" "$contract"); pr=$(blob "$p" "$record")
+        if [ "$pc" != "$mc" ] && [ "$pr" = "$mr" ]; then alone=1; fi
       done
-      if [ "$csame" -eq 0 ] && [ "$rsame" -eq 1 ]; then
+      if [ "$alone" -eq 1 ]; then
         printf 'contract changed by merge at %s\n' "$m"
       fi
     done
@@ -135,6 +135,22 @@ so the per-commit test above would read it as touching no files. The merge
 arm therefore compares BLOB IDENTITIES against each parent rather than
 diffing: the contract differing from all parents while the record matches
 one is the merge-shaped form of `contract changed alone`.
+
+The merge arm compares the two blobs JOINTLY against each parent. Asking
+separately whether ANY parent shares the contract and whether ANY parent
+shares the record lets the two halves be answered by DIFFERENT parents: a
+merge taking the contract from one and the record from the other satisfies
+both and scores clean, while relative to the second parent the contract moved
+and the record did not. The predicate is a conjunction per parent, and
+aggregating its halves independently does not test it.
+
+STATED RESIDUAL, in the FAIL-CLOSED direction: a merge that DISCARDS a side
+branch's contract-only change also prints here, because relative to that side
+parent the contract moved while the record did not -- even though the
+surviving contract is the version the record was already verified against.
+The ledger resolves it; the check does not attempt to, because distinguishing
+a revert from a change requires knowing which content was verified, which is
+exactly what `verified_against` records and this block does not infer.
 
 Three ways to lose a commit, and they are independent:
 
@@ -426,6 +442,31 @@ claims are on the record rather than edited away:
      No-op for the current history -- zero merges in `base..HEAD`, and
      `--full-history` returns the same eighteen commits as the default walk.
      Not a no-op for the claim.
+
+ 12. aggregating the merge arm's two halves INDEPENDENTLY. Item 11 asked
+     whether ANY parent shared the merge's contract and, separately, whether
+     ANY parent shared its record. Those two questions can be answered by
+     DIFFERENT parents. Discriminating witness -- both parents co-change the
+     contract and the record, and the merge takes the contract from A and the
+     record from B:
+
+         relative to A : contract SAME    -> nothing owed from this parent
+         relative to B : contract DIFFERS, record SAME  -> changed ALONE
+         aggregated    : csame=1 (via A), rsame=1 (via B)  -> NO GAP PRINTED
+
+     Executed against the shipped block: no `contract changed by merge`, on a
+     shape with a real unre-checked contract change in it. The predicate is a
+     CONJUNCTION PER PARENT, and testing its halves separately does not test
+     it -- an ordinary correctness bug in my own repair, not a property of
+     Git.
+
+     The arm now compares both blobs jointly against each parent. Witnessed
+     across four merge shapes, with the negative control distinguishing them:
+
+         mixed  (contract A, record B)      GAP   -- was silent
+         evil   (contract vs all parents)   GAP
+         discard (side contract-only)       GAP   -- fail-closed, see above
+         ordinary co-versioned merge        silent
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
 see E-4, E-7 and E-8.3. The distinction is co-versioning, not convenience.
