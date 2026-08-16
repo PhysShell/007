@@ -21,8 +21,7 @@ the contract moved since the last re-check, and did any commit move it
 without this record at all:
 
     set -eu
-    E='/usr/bin/env -i PATH=/usr/bin GIT_NO_REPLACE_OBJECTS=1 \
-       GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null'
+    E='/usr/bin/env -i PATH=/usr/bin GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null'
     root=$($E /usr/bin/git rev-parse --show-toplevel) ||
       { echo 'CANNOT CHECK: not inside a work tree'; exit 2; }
     G() { $E /usr/bin/git -C "$root" "$@"; }
@@ -214,6 +213,53 @@ claims are on the record rather than edited away:
      make an object AVAILABLE that would otherwise be missing, which turns
      a CANNOT CHECK into an answer, never a GAP into NONE FOUND. That is
      the fail-closed direction, and it is stated rather than counted as
+     closure. See also item 7: `GIT_NO_REPLACE_OBJECTS=1` did not close the
+     graph either, and that claim was too broad when written.
+
+  7. treating `GIT_NO_REPLACE_OBJECTS=1` as sufficient to fix the traversed
+     graph. It is not: a legacy `.git/info/grafts` file rewrites parentage
+     and that variable does not disable it. Discriminating witness, clean
+     clone, grafting `f748f66c8b7deca55f66227d4b211c19d668b5ba` directly to
+     `e70d019923a958bb18d8dbb266da007c6e93a88c`:
+
+         graft active, GIT_NO_REPLACE_OBJECTS only :  1 commit
+         graft active, + GIT_GRAFT_FILE=/dev/null  : 18 commits
+         no graft at all                           : 18 commits
+
+     `GIT_GRAFT_FILE=/dev/null` is now in the prefix. **Two mechanisms, one
+     property**: naming the executable and the environment does not name the
+     GRAPH, and the graph needs its own enumeration -- which, like §2.1's
+     indirection table, is not claimed complete.
+
+  8. shipping a check that could not run at all. The continuation added in
+     `7e965325ee97dd9826df1b05aa32f69b7a3eaad4` sat INSIDE single quotes, so
+     the backslash-newline was literal, `$E` expanded to a bare `\` argument,
+     and every execution died with `/usr/bin/env: '\': No such file or
+     directory` -- CANNOT CHECK, exit 2, permanently. A four-outcome check
+     that can only ever reach one outcome.
+
+     The defect is not the backslash. **I verified a hand-retyped
+     single-line copy instead of the block the commit shipped.** The
+     discriminating-witness rule catches a test that cannot distinguish
+     healthy from broken; this is its neighbour -- a test run against a
+     DIFFERENT ARTIFACT than the one delivered. The record's own mechanical
+     check now extracts this block from this file and executes it
+     (property M), because the only reliable way to test the artifact is to
+     run the artifact.
+
+  9. writing `env` unqualified in `CTRL`, `NOREPL` and every recorded
+     invocation, while the header claimed absolute executables under a
+     constructed environment. A `PATH` shim could intercept every controlled
+     command in this file. Fixing only the history check's prefix in item 6
+     repaired the site the reviewer named and left the wrapper every
+     reproduction actually uses.
+
+     All command-position occurrences now read `/usr/bin/env`. This is a
+     TEXTUAL change to recorded command lines: `env` resolved to
+     `/usr/bin/env` in the recording environment (verified), so the same
+     executable ran and no recorded output changes. It is listed here rather
+     than made silently, because editing a transcript is a change to a claim
+     about what was executed.
      closure.
 
 Citations of any OTHER artifact are pinned to a full 40-hex revision --
@@ -251,7 +297,7 @@ debt is recorded in E-8.1 and is owed by every §2.1-conditioned witness here.
 
 ```console
 CTRL() {
-  env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+  /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
          GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 \
          GIT_CONFIG_GLOBAL=/dev/null "$@"
 }
@@ -329,7 +375,7 @@ arms are exactly where those requirements were switched off.
 **Exact environment / tool version:**
 
 ```console
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git --version
 git version 2.43.0
@@ -444,7 +490,7 @@ omitted. The variant is defined here in full:
 
 ```console
 NOREPL() {
-  env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+  /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "$@"
 }
 ```
@@ -554,19 +600,19 @@ $ cp  ".git/objects/${D:0:2}/${D:2}" \
 $ CTRL /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" rev-parse --show-object-format
 sha1                         # exit 0   <-- §2.3 holds: a recognised format
 
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file -t $A
 blob                         # exit 0   <-- kind operation succeeds
 
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob $A > body.out
                              # exit 0   <-- body succeeds: COMPLETE response,
 $ cat body.out               #              so §2.2 holds too
 SUBSTITUTED CONTENT
 
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git hash-object --stdin < body.out
 7feb07853362884e770de9cde3265336be1697fb     # != the requested
@@ -747,13 +793,13 @@ $ cp  ".git/objects/${D:0:2}/${D:2}" \
       ".git/objects/${C:0:2}/${C:2}"                 # hop 2: C's path holds D
 
 # --- route OPEN: every control EXCEPT GIT_NO_REPLACE_OBJECTS ---
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob "$A"
 ATTACKER CONTENT VIA TWO HOPS                        # exit 0
 
 # --- route CLOSED: the same command with the full §2.1 control set ---
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob "$A"
 AUTHENTIC AUTHORITY                                  # exit 0
@@ -957,12 +1003,12 @@ $ stat -c%s "$p"
 36339
 
 # --- the lookup: the env -i prefix is ON each command, not a separate step ---
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file -t $B
 blob                                    # exit 0   <-- the kind operation SUCCEEDS
 
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd) -C "$(pwd)" cat-file blob $B > body.out
 fatal: unable to stream a394ec43d91e167d3dae803e62e1049e0b642694 to stdout
@@ -970,7 +1016,7 @@ fatal: unable to stream a394ec43d91e167d3dae803e62e1049e0b642694 to stdout
 $ stat -c%s body.out
 6225920                                 # 6.2 MB of stdout from the FAILED command
 
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git hash-object --stdin < body.out      # id of the debris
 4ba9f2dda3a7db27a6ab082e60c2aeee535d5681
@@ -1197,7 +1243,7 @@ certainly not in it.
 $ CTRL /usr/bin/git init -q bc
 $ MISSING=1111111111111111111111111111111111111111
 
-$ printf '%s\n' "$MISSING" | env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 \
+$ printf '%s\n' "$MISSING" | /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 \
       GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 \
       GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd)/bc -C bc \
@@ -1205,14 +1251,14 @@ $ printf '%s\n' "$MISSING" | env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 \
 1111111111111111111111111111111111111111 missing
                                         # exit 0
 
-$ printf '%s\n' "$MISSING" | env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 \
+$ printf '%s\n' "$MISSING" | /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 \
       GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 \
       GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd)/bc -C bc cat-file --batch
 1111111111111111111111111111111111111111 missing
                                         # exit 0
 
-$ env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+$ /usr/bin/env -i PATH=/usr/bin GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
       GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
       /usr/bin/git -c safe.directory=$(pwd)/bc -C bc cat-file -t "$MISSING"
 fatal: git cat-file: could not get object info
