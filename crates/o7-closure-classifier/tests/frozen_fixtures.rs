@@ -64,7 +64,6 @@ fn policy() -> Policy {
             "review/codex".to_owned(),
             "review/coderabbit".to_owned(),
         ],
-        completeness_claimed: false,
     }
 }
 
@@ -190,6 +189,7 @@ fn classify_fixture(doc: &Value, falsifications: Vec<FalsificationFact>) -> Pred
         falsifications,
         known_debts: Vec::new(),
     })
+    .expect("the fixture adapter supplies every required observation explicitly")
 }
 
 fn state_of(p: &Predicate, id: &str) -> State {

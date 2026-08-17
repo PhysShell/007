@@ -11,8 +11,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_classifier::{
-    classify, Acquisition, CheckConclusion, CheckEvidence, ClassifierInput, FalsificationFact,
-    ObservationInput, Policy, ReviewEvidence, SourceKind, State, Subject, Verification,
+    classify, Acquisition, CheckConclusion, CheckEvidence, ClassifierError, ClassifierInput,
+    FalsificationFact, ObservationInput, Policy, ReviewEvidence, SourceKind, State, Subject,
+    Verification,
 };
 use std::collections::BTreeMap;
 
@@ -33,7 +34,6 @@ fn policy() -> Policy {
     Policy {
         id: "007/closure/v1".to_owned(),
         required_observations: required,
-        completeness_claimed: false,
     }
 }
 
@@ -88,6 +88,11 @@ fn input(subject: Subject, observations: BTreeMap<String, ObservationInput>) -> 
     }
 }
 
+/// `classify` now refuses malformed input, so every well-formed case unwraps.
+fn ok(inp: &ClassifierInput) -> o7_closure_classifier::Predicate {
+    classify(inp).expect("this input is well formed")
+}
+
 fn state_of(p: &o7_closure_classifier::Predicate, id: &str) -> State {
     p.observations
         .iter()
@@ -100,14 +105,14 @@ fn state_of(p: &o7_closure_classifier::Predicate, id: &str) -> State {
 
 #[test]
 fn case_01_initial_head_differs_from_expected_is_stale() {
-    let p = classify(&input(subject(HEAD, OTHER, HEAD), all_green(HEAD)));
+    let p = ok(&input(subject(HEAD, OTHER, HEAD), all_green(HEAD)));
     assert_eq!(p.headline, State::Stale);
     assert!(p.subject_stale);
 }
 
 #[test]
 fn case_02_final_head_differs_from_expected_is_stale() {
-    let p = classify(&input(subject(HEAD, HEAD, OTHER), all_green(HEAD)));
+    let p = ok(&input(subject(HEAD, HEAD, OTHER), all_green(HEAD)));
     assert_eq!(p.headline, State::Stale);
     assert!(p.subject_stale);
 }
@@ -116,7 +121,7 @@ fn case_02_final_head_differs_from_expected_is_stale() {
 fn case_02b_stale_snapshot_still_preserves_the_observation_vector() {
     // The head moving must not erase what each observation said about the frozen
     // subject; the headline is derived presentation, not a replacement.
-    let p = classify(&input(subject(HEAD, HEAD, OTHER), all_green(HEAD)));
+    let p = ok(&input(subject(HEAD, HEAD, OTHER), all_green(HEAD)));
     assert_eq!(p.headline, State::Stale);
     assert_eq!(state_of(&p, "ci/worker-gate"), State::Pass);
     assert_eq!(state_of(&p, "review/codex"), State::Pass);
@@ -128,7 +133,7 @@ fn case_02b_stale_snapshot_still_preserves_the_observation_vector() {
 fn case_03_clean_review_on_the_wrong_sha_is_not_positive_evidence() {
     let mut obs = all_green(HEAD);
     obs.insert("review/codex".to_owned(), clean_review(OTHER, "codex"));
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
     assert_eq!(
         state_of(&p, "review/codex"),
         State::Owed,
@@ -147,7 +152,7 @@ fn case_11_ci_and_reviews_from_different_shas_cannot_combine() {
         "review/coderabbit".to_owned(),
         clean_review(OTHER, "coderabbit"),
     );
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
     for id in ["review/codex", "review/coderabbit"] {
         assert_eq!(state_of(&p, id), State::Owed);
     }
@@ -164,7 +169,7 @@ fn case_11b_a_check_bound_to_another_sha_is_not_evidence_here() {
         "ci/worker-gate".to_owned(),
         passing_check(OTHER, "worker-gate"),
     );
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
     assert_eq!(state_of(&p, "ci/worker-gate"), State::Owed);
 }
 
@@ -183,7 +188,7 @@ fn case_04_a_mutable_comment_cannot_be_positive_verdict_evidence() {
         "review/coderabbit".to_owned(),
         ObservationInput::Review(Acquisition::NotProduced),
     );
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
     assert_eq!(state_of(&p, "review/coderabbit"), State::Owed);
     assert_eq!(p.headline, State::Owed);
 }
@@ -203,7 +208,7 @@ fn case_05_structured_falsification_from_a_non_verdict_surface_is_preserved() {
         author: "coderabbitai[bot]".to_owned(),
         verification: Verification::Reproduced,
     });
-    let p = classify(&inp);
+    let p = ok(&inp);
     assert_eq!(p.headline, State::Finding);
     assert_eq!(p.falsifications.len(), 1);
     // The positive observations are NOT rewritten by it: both facts survive.
@@ -211,19 +216,76 @@ fn case_05_structured_falsification_from_a_non_verdict_surface_is_preserved() {
 }
 
 #[test]
-fn case_05b_falsification_without_a_commit_binding_still_counts() {
-    // Positive evidence is strict about SHA binding; falsification is not. An
-    // issue comment has no commit binding at all, and gating on one would
-    // silently narrow the wide surface.
+fn case_05b_falsification_without_a_commit_binding_is_still_admissible() {
+    // Positive evidence is strict about SHA binding; the falsification channel
+    // is not. An issue comment has no commit binding at all, and requiring one
+    // would silently close the wide surface.
     let mut inp = input(subject(HEAD, HEAD, HEAD), all_green(HEAD));
     inp.falsifications.push(FalsificationFact {
         source_kind: SourceKind::IssueComment,
         stable_id: "issuecomment-1".to_owned(),
         subject_sha: None,
         author: "someone[bot]".to_owned(),
+        verification: Verification::Reproduced,
+    });
+    assert_eq!(ok(&inp).headline, State::Finding);
+}
+
+#[test]
+fn case_05c_a_claimed_falsification_is_owed_not_finding() {
+    // #147 defines FINDING as an admissible VERIFIED defect. A concrete claim
+    // whose verification is still owed is exactly that: owed. Treating it as a
+    // finding would assert a defect nobody has established.
+    let mut inp = input(subject(HEAD, HEAD, HEAD), all_green(HEAD));
+    inp.falsifications.push(FalsificationFact {
+        source_kind: SourceKind::IssueComment,
+        stable_id: "issuecomment-2".to_owned(),
+        subject_sha: None,
+        author: "someone[bot]".to_owned(),
         verification: Verification::Claimed,
     });
-    assert_eq!(classify(&inp).headline, State::Finding);
+    let p = ok(&inp);
+    assert_eq!(p.falsifications[0].state, State::Owed);
+    assert_eq!(p.headline, State::Owed);
+    assert_ne!(p.headline, State::Finding);
+}
+
+#[test]
+fn case_05d_failed_verification_of_a_falsification_is_cannot_check() {
+    // Somebody tried to verify the counterexample and got no trustworthy
+    // answer. That is not "no defect" and not "defect" — it is the third thing.
+    let mut inp = input(subject(HEAD, HEAD, HEAD), all_green(HEAD));
+    inp.falsifications.push(FalsificationFact {
+        source_kind: SourceKind::ReviewComment,
+        stable_id: "discussion-3".to_owned(),
+        subject_sha: Some(HEAD.to_owned()),
+        author: "someone[bot]".to_owned(),
+        verification: Verification::VerificationFailed,
+    });
+    let p = ok(&inp);
+    assert_eq!(p.falsifications[0].state, State::CannotCheck);
+    assert_eq!(p.headline, State::CannotCheck);
+}
+
+#[test]
+fn case_05e_a_falsification_bound_to_another_sha_is_invalid_input() {
+    // A wide surface means more KINDS of surface, not defects of any commit in
+    // the universe. Evidence is never combined across SHAs, so this is refused
+    // rather than quietly contaminating the snapshot.
+    let mut inp = input(subject(HEAD, HEAD, HEAD), all_green(HEAD));
+    inp.falsifications.push(FalsificationFact {
+        source_kind: SourceKind::ReviewComment,
+        stable_id: "discussion-4".to_owned(),
+        subject_sha: Some(OTHER.to_owned()),
+        author: "someone[bot]".to_owned(),
+        verification: Verification::Reproduced,
+    });
+    match classify(&inp) {
+        Err(ClassifierError::FalsificationSubjectMismatch { stable_id, .. }) => {
+            assert_eq!(stable_id, "discussion-4");
+        }
+        other => panic!("expected a subject-mismatch refusal, got {other:?}"),
+    }
 }
 
 #[test]
@@ -248,7 +310,7 @@ fn case_12_same_vendor_same_sha_conflicting_surfaces_are_not_collapsed() {
         author: "codex[bot]".to_owned(),
         verification: Verification::Reproduced,
     });
-    let p = classify(&inp);
+    let p = ok(&inp);
     assert_eq!(state_of(&p, "review/codex"), State::Finding);
     assert_eq!(p.falsifications.len(), 1);
     assert_eq!(p.headline, State::Finding);
@@ -263,7 +325,7 @@ fn case_06_no_verdict_produced_is_owed_not_pass() {
     for acq in [Acquisition::NotProduced, Acquisition::RateLimited] {
         let mut obs = all_green(HEAD);
         obs.insert("review/codex".to_owned(), ObservationInput::Review(acq));
-        let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
+        let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
         assert_eq!(state_of(&p, "review/codex"), State::Owed);
     }
 }
@@ -278,18 +340,25 @@ fn case_07_acquisition_failure_is_cannot_check_not_owed_and_not_empty_success() 
             reason: "503 from the checks endpoint".to_owned(),
         }),
     );
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
     assert_eq!(state_of(&p, "ci/worker-gate"), State::CannotCheck);
     assert_ne!(state_of(&p, "ci/worker-gate"), State::Owed);
     assert_ne!(p.headline, State::Pass);
 }
 
 #[test]
-fn case_07b_a_missing_required_observation_is_owed() {
+fn case_07b_a_missing_required_observation_is_invalid_input_not_owed() {
+    // We cannot know whether it was never produced, lost by a broken adapter,
+    // or never fetched. Calling that unknown OWED would turn a construction
+    // failure into a domain fact — the exact move this design exists to refuse.
     let mut obs = all_green(HEAD);
     obs.remove("review/coderabbit");
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
-    assert_eq!(state_of(&p, "review/coderabbit"), State::Owed);
+    match classify(&input(subject(HEAD, HEAD, HEAD), obs)) {
+        Err(ClassifierError::MissingRequiredObservation { id }) => {
+            assert_eq!(id, "review/coderabbit");
+        }
+        other => panic!("expected a missing-observation refusal, got {other:?}"),
+    }
 }
 
 // --------------------------------------------------------------------- 8, 9 --
@@ -312,7 +381,7 @@ fn case_08_finding_and_cannot_check_both_survive_headline_is_finding() {
             reason: "runner vanished".to_owned(),
         }),
     );
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
     assert_eq!(state_of(&p, "review/codex"), State::Finding);
     assert_eq!(state_of(&p, "ci/worktree-verifier"), State::CannotCheck);
     assert_eq!(p.headline, State::Finding);
@@ -329,7 +398,7 @@ fn case_09_a_later_snapshot_without_the_finding_is_cannot_check_not_pass() {
             reason: "runner vanished".to_owned(),
         }),
     );
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), obs));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
     assert_eq!(state_of(&p, "ci/worktree-verifier"), State::CannotCheck);
     assert_eq!(p.headline, State::CannotCheck);
     assert_ne!(p.headline, State::Pass);
@@ -339,7 +408,7 @@ fn case_09_a_later_snapshot_without_the_finding_is_cannot_check_not_pass() {
 
 #[test]
 fn case_10_pass_enumerates_the_required_set_and_disclaims_completeness() {
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
     assert_eq!(p.headline, State::Pass);
     assert_eq!(
         p.policy.required_observations,
@@ -350,10 +419,21 @@ fn case_10_pass_enumerates_the_required_set_and_disclaims_completeness() {
 }
 
 #[test]
+fn case_10b_v0_cannot_emit_a_completeness_claim() {
+    // Not "we remember to set it false" — there is no input field through which
+    // `true` could be constructed, so the forbidden state is unreachable.
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
+    assert!(!p.policy.completeness_claimed);
+    let json = p.to_json().expect("serializing");
+    assert!(json.contains("\"completenessClaimed\": false"));
+    assert!(!json.contains("\"completenessClaimed\": true"));
+}
+
+#[test]
 fn case_14_known_debt_survives_clean_reviewer_evidence() {
     let mut inp = input(subject(HEAD, HEAD, HEAD), all_green(HEAD));
     inp.known_debts = vec!["W8".to_owned(), "W9 both arms".to_owned()];
-    let p = classify(&inp);
+    let p = ok(&inp);
     assert_eq!(p.headline, State::Pass);
     assert_eq!(
         p.known_debts,
@@ -363,7 +443,7 @@ fn case_14_known_debt_survives_clean_reviewer_evidence() {
 
 #[test]
 fn case_15_predicate_makes_no_merge_authorization_claim() {
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
     let json = p.to_json().expect("serializing the predicate");
     for forbidden in ["merge", "approve", "authoriz", "mergeable", "ready_to"] {
         assert!(
@@ -382,15 +462,15 @@ fn case_13_classification_is_a_pure_function_of_its_input() {
     // checks. What a test can show is the observable half — the same input
     // always yields byte-identical output, so nothing ambient leaks in.
     let inp = input(subject(HEAD, HEAD, HEAD), all_green(HEAD));
-    let a = classify(&inp).to_json().expect("serializing");
-    let b = classify(&inp).to_json().expect("serializing");
+    let a = ok(&inp).to_json().expect("serializing");
+    let b = ok(&inp).to_json().expect("serializing");
     assert_eq!(a, b);
     assert!(!a.contains("timestamp"));
 }
 
 #[test]
 fn observation_order_follows_the_authoritative_policy_order() {
-    let p = classify(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
     let ids: Vec<&str> = p.observations.iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, policy().required_observations);
 }
