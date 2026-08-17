@@ -1,0 +1,50 @@
+{
+  "specimenSet": "closure-provenance-v1",
+  "specimens": ["C"],
+  "synthetic": true,
+  "contract": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": ["3", "7", "11", "13", "14"],
+  "what": "an empty result that is authoritative: the enumeration completed AND the retained candidate set is genuinely empty",
+  "pairedWith": ["incomplete-query-v1.json", "matcher-candidate-set-v1.json"],
+  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals matcher.parameters.expectedAuthorLogin",
+  "locator": {
+    "kind": "github-query",
+    "surface": "pull-request-reviews",
+    "repository": "PhysShell/007",
+    "pullRequest": "9001"
+  },
+  "acquisitionTrace": {
+    "requestedPages": ["1"],
+    "obtainedPages": ["1"],
+    "linkHeaderNextPresentOnLastObtainedPage": false,
+    "failures": [],
+    "objectsReturnedByEndpoint": 0
+  },
+  "canonical": {
+    "schemaVersion": 1,
+    "sourceKind": "github-query-snapshot",
+    "surface": "pull-request-reviews",
+    "requiredObservationId": "review/external-auditor",
+    "binding": {
+      "repository": "PhysShell/007",
+      "pullRequest": "9001"
+    },
+    "pagination": {
+      "perPage": 100,
+      "pagesRequested": ["1"],
+      "pagesObtained": ["1"],
+      "nextPagePresent": false
+    },
+    "enumeration": "COMPLETE",
+    "matcher": {
+      "id": "review-by-expected-author-login",
+      "version": "1",
+      "parameters": {
+        "expectedAuthorLogin": "synthetic-external-reviewer"
+      }
+    },
+    "allReturnedSnapshotDigests": [],
+    "matchedSnapshotDigests": []
+  },
+  "canonicalDigest": "sha256:3536cd338b5e35fdad33282a412872d639742f3f1554a1f8acbf2616680a48c0"
+}

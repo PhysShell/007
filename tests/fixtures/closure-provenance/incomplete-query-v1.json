@@ -1,0 +1,59 @@
+{
+  "specimenSet": "closure-provenance-v1",
+  "specimens": ["D"],
+  "synthetic": true,
+  "contract": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": ["3", "7", "11", "13", "14"],
+  "what": "an empty result that is NOT authoritative, because the enumeration did not complete",
+  "pairedWith": ["complete-empty-query-v1.json", "matcher-candidate-set-v1.json"],
+  "discriminator": "allReturnedSnapshotDigests and matchedSnapshotDigests are byte-identical to the complete specimen; only the enumeration state differs, and the digests differ",
+  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals matcher.parameters.expectedAuthorLogin",
+  "locator": {
+    "kind": "github-query",
+    "surface": "pull-request-reviews",
+    "repository": "PhysShell/007",
+    "pullRequest": "9001"
+  },
+  "acquisitionTrace": {
+    "requestedPages": ["1", "2"],
+    "obtainedPages": ["1"],
+    "linkHeaderNextPresentOnLastObtainedPage": true,
+    "failures": [
+      {
+        "page": "2",
+        "observed": "HTTP 502",
+        "retried": false
+      }
+    ],
+    "objectsReturnedByEndpoint": 0,
+    "objectsOnUnobtainedPages": "unknown — that is the point"
+  },
+  "canonical": {
+    "schemaVersion": 1,
+    "sourceKind": "github-query-snapshot",
+    "surface": "pull-request-reviews",
+    "requiredObservationId": "review/external-auditor",
+    "binding": {
+      "repository": "PhysShell/007",
+      "pullRequest": "9001"
+    },
+    "pagination": {
+      "perPage": 100,
+      "pagesRequested": ["1", "2"],
+      "pagesObtained": ["1"],
+      "nextPagePresent": true
+    },
+    "enumeration": "INCOMPLETE",
+    "incompleteReason": "page 2 fetch returned HTTP 502; not retried",
+    "matcher": {
+      "id": "review-by-expected-author-login",
+      "version": "1",
+      "parameters": {
+        "expectedAuthorLogin": "synthetic-external-reviewer"
+      }
+    },
+    "allReturnedSnapshotDigests": [],
+    "matchedSnapshotDigests": []
+  },
+  "canonicalDigest": "sha256:08cf82ecaf3427e2ff14cd84b9ee3f18ef160dcdea7cb5f1751cd1c36f76d7cd"
+}
