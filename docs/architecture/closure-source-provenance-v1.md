@@ -176,11 +176,17 @@ convention:
   "sourceKind": "github-issue-comment",
   "stableId": "5305700001",
   "user": { "id": "136622811", "login": "coderabbitai[bot]" },
+  "authorAssociation": "CONTRIBUTOR",
   "body": "exact decoded body ...",
   "createdAt": "...",
   "updatedAt": "..."
 }
 ```
+
+The example is a **complete** §8.5 projection, not an abbreviated one. Where an
+example and an allowlist disagree, the allowlist is authoritative — but an
+example that silently drops an allowlisted field is how a projection ends up
+weaker than its own contract.
 
 Numeric ids are serialized as **strings**, so the canonical form does not depend
 on any JSON number implementation limit.
@@ -288,12 +294,22 @@ The predicate binds by digest:
 ```json
 {
   "source": {
-    "kind": "github-issue-comment",
+    "kind": "issue-comment",
     "stable_id": "5305700001",
     "snapshotDigest": "sha256:abc..."
   }
 }
 ```
+
+This fragment is **predicate** shape, so it uses the merged classifier's
+vocabulary: `SourceOut` serializes `kind` and `stable_id` unrenamed, and
+`SourceKind::IssueComment` serializes as `issue-comment`. The
+`github-issue-comment` spelling used in §4 and §7 belongs to the locator and the
+canonical snapshot, which are V1 concepts with their own vocabulary. The two
+must not be interchanged in writing: a predicate example carrying snapshot
+vocabulary reads as an unannounced classifier schema change, and this slice
+changes no classifier schema. `snapshotDigest` is the one field §21 hands to the
+next slice to add.
 
 **Critical rule:**
 
