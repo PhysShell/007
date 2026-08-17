@@ -245,7 +245,8 @@ fn case_05c_a_claimed_falsification_is_owed_not_finding() {
         verification: Verification::Claimed,
     });
     let p = ok(&inp);
-    assert_eq!(p.falsifications[0].state, State::Owed);
+    let record = p.falsifications.first().expect("one record");
+    assert_eq!(record.state, State::Owed);
     assert_eq!(p.headline, State::Owed);
     assert_ne!(p.headline, State::Finding);
 }
@@ -263,7 +264,8 @@ fn case_05d_failed_verification_of_a_falsification_is_cannot_check() {
         verification: Verification::VerificationFailed,
     });
     let p = ok(&inp);
-    assert_eq!(p.falsifications[0].state, State::CannotCheck);
+    let record = p.falsifications.first().expect("one record");
+    assert_eq!(record.state, State::CannotCheck);
     assert_eq!(p.headline, State::CannotCheck);
 }
 

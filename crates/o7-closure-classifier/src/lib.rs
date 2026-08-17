@@ -370,6 +370,26 @@ fn classify_review(
 pub fn classify(input: &ClassifierInput) -> Result<Predicate, ClassifierError> {
     let expected = input.subject.expected_sha.as_str();
 
+    // Refuse malformed input before deriving anything. A predicate produced from
+    // an input we could not read correctly is worse than no predicate: it looks
+    // exactly like one we could.
+    for id in &input.policy.required_observations {
+        if !input.observations.contains_key(id) {
+            return Err(ClassifierError::MissingRequiredObservation { id: id.clone() });
+        }
+    }
+    for f in &input.falsifications {
+        if let Some(sha) = &f.subject_sha {
+            if sha != expected {
+                return Err(ClassifierError::FalsificationSubjectMismatch {
+                    stable_id: f.stable_id.clone(),
+                    subject_sha: sha.clone(),
+                    expected_sha: expected.to_owned(),
+                });
+            }
+        }
+    }
+
     // The head moving invalidates the SNAPSHOT, not the individual observations,
     // which remain statements about the frozen subject. Recorded alongside the
     // vector so nothing is overwritten.
@@ -381,11 +401,10 @@ pub fn classify(input: &ClassifierInput) -> Result<Predicate, ClassifierError> {
         .required_observations
         .iter()
         .map(|id| {
-            // A required observation nobody supplied is owed. Absence of an
-            // entry is the caller's explicit omission, not an acquisition
-            // failure, and the two are not merged.
+            // Presence was established above, so `None` here is unreachable —
+            // and is still not silently turned into a state.
             let (state, source) = match input.observations.get(id) {
-                None => (State::Owed, None),
+                None => (State::CannotCheck, None),
                 Some(ObservationInput::Check(acq)) => classify_check(acq, expected),
                 Some(ObservationInput::Review(acq)) => classify_review(acq, expected),
             };
@@ -408,9 +427,11 @@ pub fn classify(input: &ClassifierInput) -> Result<Predicate, ClassifierError> {
             subject_sha: f.subject_sha.clone(),
             author: f.author.clone(),
             verification: f.verification,
-            // RED-2: every record still reports FINDING regardless of how far
-            // its verification actually got. GREEN-2 maps each variant.
-            state: State::Finding,
+            state: match f.verification {
+                Verification::Reproduced => State::Finding,
+                Verification::Claimed => State::Owed,
+                Verification::VerificationFailed => State::CannotCheck,
+            },
         })
         .collect();
 
@@ -420,11 +441,9 @@ pub fn classify(input: &ClassifierInput) -> Result<Predicate, ClassifierError> {
     let mut headline = observations
         .iter()
         .map(|o| o.state)
+        .chain(falsifications.iter().map(|f| f.state))
         .max_by_key(|s| s.rank())
         .unwrap_or(State::Pass);
-    if !falsifications.is_empty() && State::Finding.rank() > headline.rank() {
-        headline = State::Finding;
-    }
     if subject_stale {
         headline = State::Stale;
     }
