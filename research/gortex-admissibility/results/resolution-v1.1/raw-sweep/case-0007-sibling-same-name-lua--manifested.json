@@ -1,0 +1,42 @@
+{
+  "case": "case-0007-sibling-same-name-lua",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "caveat_class": "coverage_incomplete",
+      "confidence_label": [],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 0,
+      "observed": [],
+      "oracle_may_claim_complete": false,
+      "oracle_required_caveats": [
+        "coverage_incomplete"
+      ],
+      "origin": [],
+      "outcome": "EMPTY_CAVEATED",
+      "relation": "callers",
+      "seed": "seed-invoice-send-lua",
+      "seed_bound": true,
+      "tier": []
+    }
+  ],
+  "profile": "manifested",
+  "seed_binding": [
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          9,
+          11
+        ],
+        "path": "source/billing/invoice.lua",
+        "symbol": "Invoice:send"
+      },
+      "resolved_id": "case-0007-sibling-same-name-lua--manifested/source/billing/invoice.lua::Invoice.send",
+      "resolved_line": 9,
+      "seed": "seed-invoice-send-lua"
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+schema: oracle-v0
+case: case-0007-sibling-same-name-lua
+language: lua
+oracle_kind: constructed
+
+independent_oracle:
+  available: false
+  note: >
+    No compiler or language server establishes receiver types for the untyped
+    parameters here, because Lua does not carry that information. Availability
+    is recorded per (language, relation) and this is the entry that is genuinely
+    `unavailable` -- not because of any extractor's tier, but because the
+    language does not determine the answer. The `dispatch_new` fact below is a
+    counter-example within the same file: local dataflow does determine it.
+
+adversarial_about: >
+  A deliberate mirror of case-0001 in a language that supplies less information.
+  The two `send` methods and the two parameter-receiver call sites are
+  semantically identical to the TypeScript case, but here the honest answer is
+  different: with an untyped parameter as receiver, the call site genuinely
+  cannot be attributed to one declaration. A third call site constructs its
+  receiver locally, where the answer IS determined. The pair measures whether
+  claimed confidence tracks what the source actually settles, rather than
+  tracking the extractor's own bookkeeping.
+
+seeds:
+  - id: seed-invoice-send-lua
+    gold_identity:
+      path: source/billing/invoice.lua
+      symbol: "Invoice:send"
+      line_range: [9, 11]
+
+facts:
+  - seed: seed-invoice-send-lua
+    relation: callers
+    expected:
+      - path: source/app/dispatch.lua
+        symbol: M.dispatch_new
+        line: 19
+        reason: >
+          receiver is constructed from Invoice.new in the same scope; local
+          dataflow settles this and a caller set that omits it is short
+    forbidden: []
+    admissibility:
+      may_claim_complete: false
+      may_claim_safe_to_rename: false
+      required_caveats: [coverage_incomplete]
+      note: >
+        `dispatch_invoice` (line 8) is a sound over-approximation and may be
+        returned without penalty -- but so, strictly, is `dispatch_mail`
+        (line 13), since nothing in the file excludes it. `forbidden` is
+        therefore empty by design: in this language no edge in this file can be
+        called phantom on static grounds. The whole scoring weight sits on the
+        admissibility block. Any completeness or rename-safety claim is false
+        here regardless of the edge set returned.
+
+        PAIRED COMPARISON: score this fact alongside case-0001 fact 1. Identical
+        semantics, identical shape, different admissible claim. A system whose
+        reported confidence is the same in both has not propagated what the
+        language settles into what it is willing to assert. The pair, not either
+        fact alone, is the measurement.

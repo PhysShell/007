@@ -1,0 +1,81 @@
+{
+  "case": "case-0002-alias-reexport",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "caveat_class": "coverage_incomplete",
+      "confidence_label": [
+        "INFERRED"
+      ],
+      "expected_missing": [
+        "renew"
+      ],
+      "forbidden_present": [],
+      "index": 0,
+      "observed": [
+        "bootstrap"
+      ],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [],
+      "origin": [
+        "text_matched"
+      ],
+      "outcome": "MISS_HONEST",
+      "relation": "callers",
+      "seed": "seed-refresh-token",
+      "seed_bound": true,
+      "tier": [
+        "heuristic"
+      ]
+    },
+    {
+      "caveat_class": null,
+      "confidence_label": [
+        "EXTRACTED",
+        "INFERRED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 1,
+      "observed": [
+        "case-0002-alias-reexport--bare/source/app/bootstrap.ts",
+        "case-0002-alias-reexport--bare/source/index.ts",
+        "renewToken"
+      ],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [
+        "alias_indirection"
+      ],
+      "origin": [
+        "ast_resolved",
+        "text_matched"
+      ],
+      "outcome": "PASS",
+      "relation": "references",
+      "seed": "seed-refresh-token",
+      "seed_bound": true,
+      "tier": [
+        "ast",
+        "heuristic"
+      ]
+    }
+  ],
+  "profile": "bare",
+  "seed_binding": [
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          2,
+          4
+        ],
+        "path": "source/core/token.ts",
+        "symbol": "refreshToken"
+      },
+      "resolved_id": "case-0002-alias-reexport--bare/source/core/token.ts::refreshToken",
+      "resolved_line": 2,
+      "seed": "seed-refresh-token"
+    }
+  ]
+}

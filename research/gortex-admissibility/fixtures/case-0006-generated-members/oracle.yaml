@@ -1,0 +1,71 @@
+schema: oracle-v0
+case: case-0006-generated-members
+language: typescript
+oracle_kind: constructed
+
+independent_oracle:
+  available: true
+  tool: TypeScript language service, for the code edges only
+  note: >
+    The oracle resolves `usage.ts -> ApiClient.fetchInvoice` and stops there. It
+    has nothing to say about contracts/api.yaml, which is not code. The
+    code-to-contract edge is established by construction, and recovering it is
+    the part of this case that tests artifact-node support rather than parsing.
+
+adversarial_about: >
+  The method under test lives in a generated file carrying an explicit
+  @generated marker, and its real source of truth is a non-code contract file.
+  Every code edge is ordinary and easy; the trap is the action derived from
+  them. A rename applied at the definition site is correct-looking, compiles,
+  passes review, and is silently reverted by the next codegen run.
+
+seeds:
+  - id: seed-fetch-invoice
+    gold_identity:
+      path: source/generated/api-client.ts
+      symbol: ApiClient.fetchInvoice
+      line_range: [3, 5]
+
+facts:
+  - seed: seed-fetch-invoice
+    relation: callers
+    expected:
+      - path: source/app/usage.ts
+        symbol: loadInvoice
+        line: 4
+    forbidden: []
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: false
+      required_caveats: [generated_code]
+      note: >
+        The caller set is exhaustive and trivially so. `may_claim_safe_to_rename`
+        is false anyway: the definition is generated, so an edit there does not
+        persist. This is the case where correctness and safety come apart most
+        sharply -- a perfect caller set still supports an unsafe action.
+
+        The impersistence is CONSTRUCTED, not narrated. tools/codegen.py renders
+        the generated file from contracts/api.yaml, and `--check` compares the
+        rendering against the committed file. Applying the rename this fact
+        forbids -- at the definition site, contract untouched -- makes that
+        check fail. The unsafety is therefore a property of the fixture that can
+        be executed, not an interpretation of a `@generated` comment.
+
+  - seed: seed-fetch-invoice
+    relation: references
+    expected:
+      - path: source/contracts/api.yaml
+        symbol: operations[].id = fetchInvoice
+        line: 4
+        reason: >
+          the only edit that survives regeneration; reachable only if non-code
+          artifacts are graph nodes rather than opaque files
+    forbidden: []
+    admissibility:
+      may_claim_complete: false
+      may_claim_safe_to_rename: false
+      required_caveats: [generated_code]
+      note: >
+        Scored as a capability probe. Missing this edge is an expected and
+        acceptable outcome for a code-only graph; claiming a complete rename set
+        while missing it is not.
