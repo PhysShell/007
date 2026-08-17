@@ -6,17 +6,19 @@
   "witnesses": ["2", "3", "8.1", "8.3", "11", "17", "18"],
   "what": "a review whose commit_id does not match the subject head, with both values durably retained so the state is explainable without re-fetching a mutable object",
   "subjectRead": {
-    "note": "head_before and head_after are retained as two observations even when they agree; identical digests here mean the head did not move during evaluation",
-    "observations": [
+    "note": "two head reads are two declared acquisition events, not one snapshot pointed at twice. They carry the same snapshotDigest here, which is how 'the head did not move' is recorded.",
+    "headReadEvents": [
       {
-        "observationId": "E-head-before",
-        "observedAt": "2026-08-02T10:59:00Z",
-        "canonicalDigest": "sha256:d646aaf34306a0458cfda7899989689fe4f205a12c5ad16a0b0504263dd3a7ea"
+        "role": "HEAD_BEFORE",
+        "snapshotDigest": "sha256:d646aaf34306a0458cfda7899989689fe4f205a12c5ad16a0b0504263dd3a7ea",
+        "acquisition": "AVAILABLE",
+        "observedAt": "2026-08-02T10:59:00Z"
       },
       {
-        "observationId": "E-head-after",
-        "observedAt": "2026-08-02T11:07:00Z",
-        "canonicalDigest": "sha256:d646aaf34306a0458cfda7899989689fe4f205a12c5ad16a0b0504263dd3a7ea"
+        "role": "HEAD_AFTER",
+        "snapshotDigest": "sha256:d646aaf34306a0458cfda7899989689fe4f205a12c5ad16a0b0504263dd3a7ea",
+        "acquisition": "AVAILABLE",
+        "observedAt": "2026-08-02T11:07:00Z"
       }
     ],
     "canonical": {
@@ -28,7 +30,8 @@
       "headRef": "claude/synthetic-specimen",
       "headRepoFullName": "PhysShell/007",
       "updatedAt": "2026-08-02T10:58:44Z"
-    }
+    },
+    "canonicalDigest": "sha256:d646aaf34306a0458cfda7899989689fe4f205a12c5ad16a0b0504263dd3a7ea"
   },
   "review": {
     "locator": {
@@ -45,7 +48,8 @@
       "stableId": "9000000101",
       "user": {
         "id": "9000000901",
-        "login": "synthetic-external-reviewer"
+        "login": "synthetic-external-reviewer",
+        "type": "User"
       },
       "authorAssociation": "NONE",
       "state": "COMMENTED",
@@ -53,25 +57,26 @@
       "submittedAt": "2026-08-02T11:03:19Z",
       "commitId": "9d4c1f0b7a6e5c3d2b1a0f9e8d7c6b5a49382716"
     },
-    "canonicalDigest": "sha256:0b26e4314ccf744752c35673a68d2c68a7bdefee2fa7d97e68ed22bb2efc047c"
+    "canonicalDigest": "sha256:3833b5a27bf09f9f7f2aaad00075a0626f39acac23b24ebaf072c7f84d0ced6e"
   },
   "decisionBasis": {
     "note": "these are the values the adapter would hand the classifier; each names the snapshot it came from",
     "observedReviewCommitId": {
       "value": "9d4c1f0b7a6e5c3d2b1a0f9e8d7c6b5a49382716",
       "sourceField": "commitId",
-      "fromSnapshotDigest": "sha256:0b26e4314ccf744752c35673a68d2c68a7bdefee2fa7d97e68ed22bb2efc047c"
+      "fromSnapshotDigest": "sha256:3833b5a27bf09f9f7f2aaad00075a0626f39acac23b24ebaf072c7f84d0ced6e"
     },
     "expectedSha": {
       "value": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
       "sourceField": "headSha",
+      "fromHeadReadRole": "HEAD_BEFORE",
       "fromSnapshotDigest": "sha256:d646aaf34306a0458cfda7899989689fe4f205a12c5ad16a0b0504263dd3a7ea"
     },
     "reviewSubjectMatchesHead": {
       "value": false,
       "kind": "derived-acquisition-fact",
       "derivedFrom": [
-        "sha256:0b26e4314ccf744752c35673a68d2c68a7bdefee2fa7d97e68ed22bb2efc047c",
+        "sha256:3833b5a27bf09f9f7f2aaad00075a0626f39acac23b24ebaf072c7f84d0ced6e",
         "sha256:d646aaf34306a0458cfda7899989689fe4f205a12c5ad16a0b0504263dd3a7ea"
       ]
     }

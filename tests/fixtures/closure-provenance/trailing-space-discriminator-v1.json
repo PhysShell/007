@@ -1,0 +1,96 @@
+{
+  "specimenSet": "closure-provenance-v1",
+  "specimens": ["F"],
+  "synthetic": true,
+  "contract": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": ["8", "8.5", "9"],
+  "what": "one observation, two candidate projections of it, identical in every field including updatedAt, differing only in the final byte of body",
+  "why": "a pair that varies body together with updatedAt cannot show that the body was retained byte-exact — the digests differ either way. Holding every other field equal is what makes an adapter calling trim() observable: the trimmed projection is a different digest for a reason that is nothing but the trim.",
+  "locator": {
+    "kind": "github-issue-comment",
+    "repository": "PhysShell/007",
+    "pullRequest": "9001",
+    "stableId": "9000000002"
+  },
+  "observation": {
+    "observationId": "F-obs",
+    "observedAt": "2026-08-04T12:05:00Z",
+    "raw": {
+      "id": 9000000002,
+      "node_id": "IC_kwDOSYNTHETIC2",
+      "url": "https://api.github.com/repos/PhysShell/007/issues/comments/9000000002",
+      "html_url": "https://github.com/PhysShell/007/pull/9001#issuecomment-9000000002",
+      "issue_url": "https://api.github.com/repos/PhysShell/007/issues/9001",
+      "user": {
+        "id": 9000000902,
+        "login": "synthetic-auditor",
+        "avatar_url": "https://avatars.githubusercontent.com/u/9000000902?v=4",
+        "type": "User",
+        "site_admin": false
+      },
+      "author_association": "CONTRIBUTOR",
+      "body": "Checked against the frozen record; the enumeration terminated early. ",
+      "created_at": "2026-08-04T12:00:00Z",
+      "updated_at": "2026-08-04T12:00:00Z",
+      "reactions": {
+        "url": "https://api.github.com/repos/PhysShell/007/issues/comments/9000000002/reactions",
+        "total_count": 0,
+        "+1": 0,
+        "-1": 0
+      },
+      "performed_via_github_app": null
+    }
+  },
+  "projections": [
+    {
+      "projectionId": "F-faithful",
+      "conformsToContract": true,
+      "rule": "body retained exactly as decoded, trailing space included",
+      "canonical": {
+        "schemaVersion": 1,
+        "sourceKind": "github-issue-comment",
+        "stableId": "9000000002",
+        "user": {
+          "id": "9000000902",
+          "login": "synthetic-auditor",
+          "type": "User"
+        },
+        "authorAssociation": "CONTRIBUTOR",
+        "body": "Checked against the frozen record; the enumeration terminated early. ",
+        "createdAt": "2026-08-04T12:00:00Z",
+        "updatedAt": "2026-08-04T12:00:00Z"
+      },
+      "canonicalDigest": "sha256:158067f6a4caff8a171616f08f4400f8727a7d05da8ddb043449b47009c8c593"
+    },
+    {
+      "projectionId": "F-trimmed",
+      "conformsToContract": false,
+      "rule": "what an adapter applying trim() to body would emit — §9 forbids this",
+      "canonical": {
+        "schemaVersion": 1,
+        "sourceKind": "github-issue-comment",
+        "stableId": "9000000002",
+        "user": {
+          "id": "9000000902",
+          "login": "synthetic-auditor",
+          "type": "User"
+        },
+        "authorAssociation": "CONTRIBUTOR",
+        "body": "Checked against the frozen record; the enumeration terminated early.",
+        "createdAt": "2026-08-04T12:00:00Z",
+        "updatedAt": "2026-08-04T12:00:00Z"
+      },
+      "canonicalDigest": "sha256:afde4f22d318e52eae4cc39e76554b5bf2a4eaf3fc007e12b42f3fbfef901552"
+    }
+  ],
+  "differingFields": ["body"],
+  "identicalFields": [
+    "schemaVersion",
+    "sourceKind",
+    "stableId",
+    "user",
+    "authorAssociation",
+    "createdAt",
+    "updatedAt"
+  ]
+}

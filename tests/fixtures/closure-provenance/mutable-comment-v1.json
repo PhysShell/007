@@ -3,7 +3,7 @@
   "specimens": ["A", "B"],
   "synthetic": true,
   "contract": "docs/architecture/closure-source-provenance-v1.md",
-  "witnesses": ["3", "5", "6", "7", "8.5", "9", "11"],
+  "witnesses": ["2", "3", "5", "6", "7", "8", "8.5", "11"],
   "locator": {
     "kind": "github-issue-comment",
     "repository": "PhysShell/007",
@@ -12,6 +12,7 @@
   },
   "specimenA": {
     "what": "one stable_id, three observed versions, three distinct digests",
+    "notAWitnessFor": "§9 byte-exact bodies — A-v2 changes body and updatedAt together, so its digest would move even under a trimming adapter. The §9 witness is specimen F.",
     "versions": [
       {
         "observationId": "A-v1",
@@ -22,33 +23,35 @@
           "stableId": "9000000001",
           "user": {
             "id": "9000000900",
-            "login": "synthetic-reviewer"
+            "login": "synthetic-reviewer",
+            "type": "User"
           },
           "authorAssociation": "CONTRIBUTOR",
           "body": "Falsification: the co-versioning check reports success even when the manifest member is absent from the tree.\n\nReproduced on a scratch clone.\n",
           "createdAt": "2026-08-01T09:14:02Z",
           "updatedAt": "2026-08-01T09:14:02Z"
         },
-        "canonicalDigest": "sha256:d2684944a27b3df7de179b5107f3622706a3bf04d88223c38b22be9e05cc2022"
+        "canonicalDigest": "sha256:7df365feb19a1f5659c26af5d392172f7e4cf55abb0a70f56d0e0ca4c886d10a"
       },
       {
         "observationId": "A-v2",
         "observedAt": "2026-08-02T08:30:00Z",
-        "edit": "whitespace only: one trailing space appended to the body",
+        "edit": "one trailing space appended to the body; updatedAt moved, as GitHub does on a real edit",
         "canonical": {
           "schemaVersion": 1,
           "sourceKind": "github-issue-comment",
           "stableId": "9000000001",
           "user": {
             "id": "9000000900",
-            "login": "synthetic-reviewer"
+            "login": "synthetic-reviewer",
+            "type": "User"
           },
           "authorAssociation": "CONTRIBUTOR",
           "body": "Falsification: the co-versioning check reports success even when the manifest member is absent from the tree.\n\nReproduced on a scratch clone.\n ",
           "createdAt": "2026-08-01T09:14:02Z",
           "updatedAt": "2026-08-02T08:20:11Z"
         },
-        "canonicalDigest": "sha256:92b9d2f33b117711a299965b9010e1f5feedd05d459358d84bb9c1f359e8a85a"
+        "canonicalDigest": "sha256:8df21d6ecfdbd8f41f8d07da3d254f357029012fc7a25cd548dc59458613cb08"
       },
       {
         "observationId": "A-v3",
@@ -60,21 +63,22 @@
           "stableId": "9000000001",
           "user": {
             "id": "9000000900",
-            "login": "synthetic-reviewer"
+            "login": "synthetic-reviewer",
+            "type": "User"
           },
           "authorAssociation": "CONTRIBUTOR",
           "body": "edited: never mind\n",
           "createdAt": "2026-08-01T09:14:02Z",
           "updatedAt": "2026-08-03T17:41:55Z"
         },
-        "canonicalDigest": "sha256:4e5e75212bbe80f2e908298600d7db07951a72a370ce36de8f2d47ecbd11628d"
+        "canonicalDigest": "sha256:a58fac356b69a224e59e18bf80aeaafa95f2f4e4b410d00e4071c4461988a83d"
       }
     ]
   },
   "specimenB": {
     "what": "two raw observations of A-v1 differing only outside the allowlist project to one canonical form and therefore to one digest",
     "canonicalDigestSharedWith": "A-v1",
-    "canonicalDigest": "sha256:d2684944a27b3df7de179b5107f3622706a3bf04d88223c38b22be9e05cc2022",
+    "canonicalDigest": "sha256:7df365feb19a1f5659c26af5d392172f7e4cf55abb0a70f56d0e0ca4c886d10a",
     "rawObservations": [
       {
         "observationId": "B-raw-1",

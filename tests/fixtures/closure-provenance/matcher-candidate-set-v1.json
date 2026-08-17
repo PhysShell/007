@@ -1,0 +1,95 @@
+{
+  "specimenSet": "closure-provenance-v1",
+  "specimens": ["G"],
+  "synthetic": true,
+  "contract": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": ["3", "8.3", "11", "13"],
+  "what": "a COMPLETE enumeration that returned two reviews, one of which satisfies the named matcher, recorded alongside an empty matched subset",
+  "why": "under a query snapshot that keeps only the matched set, this situation and a genuinely empty repository are the same artifact: an empty list. Retaining the full candidate set and naming the selection rule makes the empty matched subset checkable — re-running review-by-expected-author-login v1 over the two retained candidates does not reproduce it.",
+  "pairedWith": ["complete-empty-query-v1.json"],
+  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals the expected author of requiredObservationId (synthetic-external-reviewer)",
+  "locator": {
+    "kind": "github-query",
+    "surface": "pull-request-reviews",
+    "repository": "PhysShell/007",
+    "pullRequest": "9001"
+  },
+  "acquisitionTrace": {
+    "requestedPages": ["1"],
+    "obtainedPages": ["1"],
+    "linkHeaderNextPresentOnLastObtainedPage": false,
+    "failures": [],
+    "objectsReturnedByEndpoint": 2
+  },
+  "candidates": [
+    {
+      "candidateId": "G-unrelated",
+      "satisfiesMatcherRule": false,
+      "note": "different author login",
+      "canonical": {
+        "schemaVersion": 1,
+        "sourceKind": "github-submitted-review",
+        "stableId": "9000000201",
+        "user": {
+          "id": "9000000903",
+          "login": "synthetic-unrelated-bot",
+          "type": "Bot"
+        },
+        "authorAssociation": "NONE",
+        "state": "COMMENTED",
+        "body": "Automated formatting summary. No verdict.\n",
+        "submittedAt": "2026-08-05T08:11:00Z",
+        "commitId": "1f2e3d4c5b6a798807162534435261708f9e0d1c"
+      },
+      "canonicalDigest": "sha256:e4c2cc9db510b457646f948d37f7d1fcb77e7bbba745ed75213805d3b22d9283"
+    },
+    {
+      "candidateId": "G-qualifying",
+      "satisfiesMatcherRule": true,
+      "note": "author login equals the expected author; this is the object an empty matched subset would erase",
+      "canonical": {
+        "schemaVersion": 1,
+        "sourceKind": "github-submitted-review",
+        "stableId": "9000000202",
+        "user": {
+          "id": "9000000901",
+          "login": "synthetic-external-reviewer",
+          "type": "User"
+        },
+        "authorAssociation": "NONE",
+        "state": "CHANGES_REQUESTED",
+        "body": "The manifest member is still unreachable from the frozen tree.\n",
+        "submittedAt": "2026-08-05T09:02:47Z",
+        "commitId": "1f2e3d4c5b6a798807162534435261708f9e0d1c"
+      },
+      "canonicalDigest": "sha256:46716a874a01e88147d1188e9713d94ddea40cf651425266d849b8f3e23b5520"
+    }
+  ],
+  "canonical": {
+    "schemaVersion": 1,
+    "sourceKind": "github-query-snapshot",
+    "surface": "pull-request-reviews",
+    "requiredObservationId": "review/external-auditor",
+    "binding": {
+      "repository": "PhysShell/007",
+      "pullRequest": "9001"
+    },
+    "pagination": {
+      "perPage": 100,
+      "pagesRequested": ["1"],
+      "pagesObtained": ["1"],
+      "nextPagePresent": false
+    },
+    "enumeration": "COMPLETE",
+    "matcher": {
+      "id": "review-by-expected-author-login",
+      "version": "1"
+    },
+    "allReturnedSnapshotDigests": [
+      "sha256:e4c2cc9db510b457646f948d37f7d1fcb77e7bbba745ed75213805d3b22d9283",
+      "sha256:46716a874a01e88147d1188e9713d94ddea40cf651425266d849b8f3e23b5520"
+    ],
+    "matchedSnapshotDigests": []
+  },
+  "canonicalDigest": "sha256:b8e9904008e3e9b8857301a14e7801b17bb8ad6ee5ce253bd964a1582d22b46c"
+}

@@ -32,6 +32,16 @@ later test confirms its own crib sheet, which is exactly what §12 forbids.
 The `witnesses` array in each file lists section numbers of the contract
 document, unprefixed (`"8.1"` means §8.1).
 
+### Review correction round
+
+Specimens F and G were added, and A, C, D and E revised, after review of the
+first round found four ways a specimen or a projection could be satisfied
+without the property it was written to establish. Every canonical object here
+now conforms to §8's **closed** projection schema — which is why `user.type`
+appears throughout and every digest constant in this directory was recomputed.
+The specific defects are named in place: see A's `notAWitnessFor`, F's `why`,
+G's `why`, and E's `subjectRead.note`.
+
 ## The specimens
 
 ### A — one `stable_id`, three observed versions
@@ -44,9 +54,12 @@ digests. This is the §2 problem stated as bytes: re-fetching id `9000000001`
 after the third observation returns "edited: never mind", and without retained
 snapshots the earlier text is unrecoverable.
 
-The whitespace version is the §9 witness — byte-exact retention means a
-one-space edit *does* move the digest, and the contract accepts that rather
-than normalizing it away.
+A is **not** the §9 witness, and an earlier revision of this file claimed it
+was. A-v2 moves `body` and `updatedAt` together, as a real GitHub edit does — so
+its digest differs from A-v1 for two reasons at once, and an adapter calling
+`trim()` on bodies would have produced a different digest there too. The
+comparison was green while testing nothing about byte-exactness. Specimen F
+holds `updatedAt` equal so the trim is the only thing that can move the digest.
 
 ### B — same snapshot, different irrelevant API noise, same digest
 
@@ -64,12 +77,31 @@ a thumbs-up would have registered as evidence mutation.
 A and B share a file because they share a subject: one comment id, one
 allowlisted projection, examined for what does and does not move the digest.
 
+### F — the byte-exact witness that actually discriminates
+
+`trailing-space-discriminator-v1.json`
+
+One observation, two candidate projections of it. Every canonical field is
+identical — `stableId`, `user`, `authorAssociation`, `createdAt`, **and
+`updatedAt`** — and the only difference is the final byte of `body`:
+
+| | body ends | digest |
+|---|---|---|
+| `F-faithful` | `early. ` | `sha256:158067f6…` |
+| `F-trimmed` | `early.` | `sha256:afde4f22…` |
+
+`F-trimmed` is what a `trim()`-ing adapter emits and is marked
+`"conformsToContract": false`. Because nothing else varies, the differing digest
+is caused by the trim and by nothing else. That is the property A-v2 could not
+establish.
+
 ### C and D — an empty result is not a fact until the enumeration is
 
 `complete-empty-query-v1.json`, `incomplete-query-v1.json`
 
-A matched pair. `matchedStableIds` is `[]` in both — byte-identical. They
-differ only in whether the enumeration finished:
+A matched pair. `allReturnedSnapshotDigests` and `matchedSnapshotDigests` are
+`[]` in both — byte-identical. They differ only in whether the enumeration
+finished:
 
 | | C | D |
 |---|---|---|
@@ -82,6 +114,24 @@ Their digests differ. That is the whole point: §13 and §14 exist because an
 empty `Vec` cannot distinguish "nobody produced this" from "the fetch broke",
 and a system that cannot distinguish them will eventually report the second as
 the first.
+
+### G — the empty matched subset that the candidate set contradicts
+
+`matcher-candidate-set-v1.json`
+
+A COMPLETE enumeration that returned two reviews — one by an unrelated bot, one
+by the expected author — recorded next to an empty `matchedSnapshotDigests`.
+
+C and G are the discriminating pair for §13's second half. Under a query
+snapshot that keeps only the matched set, they are the same artifact: an empty
+list, a completed enumeration, nothing else. Retaining
+`allReturnedSnapshotDigests` and naming `matcher.id`/`matcher.version` is what
+separates them, because the empty subset in G does not survive re-running the
+named rule over the two retained candidates.
+
+An absence claim that cannot be re-derived from retained bytes is an assertion,
+and a broken matcher is the cheapest way for a real object to become "nothing
+found".
 
 ### E — a wrong-SHA review that explains itself
 
@@ -97,10 +147,13 @@ This is the §2 argument that the mutability problem is not about Markdown: no
 comment body is involved, and the state is still unexplainable if `commitId` is
 not durably recorded.
 
-`head_before` and `head_after` are both present and carry the *same* digest —
-the head did not move. §8.1 requires both reads regardless; a specimen where
-they agree is the one that shows the pair is not stored only when it is
-interesting.
+The two head reads are recorded as two `HeadReadEvent`s, each with `role`,
+`snapshotDigest`, `acquisition` and `observedAt`. They carry the *same* digest —
+the head did not move — and that is exactly why the events matter: an earlier
+revision of this file recorded two pointers at one snapshot, which is
+indistinguishable from having performed a single read. Two declared events with
+one shared digest says "read twice, unchanged"; two pointers say nothing about
+how many reads happened.
 
 ## Digest provenance
 
@@ -134,15 +187,17 @@ test whose expectations were produced by the code under test proves nothing.
 
 ## Recorded honestly, not resolved
 
-- **The query-snapshot key names are illustrative.** Contract §13 fixes the
-  required *content* of a query snapshot (surface, binding, pagination
-  traversed, completeness, matched objects); it does not fix `pagesRequested`,
-  `pagesObtained`, `nextPagePresent`, `enumeration`, `incompleteReason`. These
-  specimens had to pick names to be concrete. Picking them here does not
-  legislate them — if the acquisition slice fixes different names, §13 is where
-  that gets decided, and these constants change with it.
+- ~~The query-snapshot key names are illustrative.~~ **Retired.** §13 now names
+  the query-snapshot fields normatively, so the specimens no longer pick names
+  the contract left open.
 - **No pagination witness exists in Step 0B and none is invented here.** C and D
   are synthetic and say so; they are not evidence that this ever occurred.
+- **The matcher rule is described, not implemented.** `matcher.id` and
+  `matcher.version` are contract-level identity; `review-by-expected-author-login
+  v1` exists only as the prose rule stated in the specimen files. Nothing in this
+  repository executes it, so G's contradiction is verifiable by reading, not by
+  running — and the specimen says which of its two candidates satisfies the rule
+  rather than leaving the reader to infer it.
 - **No verification witness.** §19 leaves the binding between
   `Verification::Reproduced` and its evidence OWED, so specimen A retains only
   what the comment *said*, never a claim that anything was checked.

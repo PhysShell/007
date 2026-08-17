@@ -4,8 +4,9 @@
   "synthetic": true,
   "contract": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": ["3", "7", "11", "13", "14"],
-  "what": "an empty result that is authoritative, because the enumeration completed",
-  "pairedWith": "incomplete-query-v1.json",
+  "what": "an empty result that is authoritative: the enumeration completed AND the retained candidate set is genuinely empty",
+  "pairedWith": ["incomplete-query-v1.json", "matcher-candidate-set-v1.json"],
+  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals the expected author of requiredObservationId (synthetic-external-reviewer)",
   "locator": {
     "kind": "github-query",
     "surface": "pull-request-reviews",
@@ -16,12 +17,14 @@
     "requestedPages": ["1"],
     "obtainedPages": ["1"],
     "linkHeaderNextPresentOnLastObtainedPage": false,
-    "failures": []
+    "failures": [],
+    "objectsReturnedByEndpoint": 0
   },
   "canonical": {
     "schemaVersion": 1,
     "sourceKind": "github-query-snapshot",
     "surface": "pull-request-reviews",
+    "requiredObservationId": "review/external-auditor",
     "binding": {
       "repository": "PhysShell/007",
       "pullRequest": "9001"
@@ -33,7 +36,12 @@
       "nextPagePresent": false
     },
     "enumeration": "COMPLETE",
-    "matchedStableIds": []
+    "matcher": {
+      "id": "review-by-expected-author-login",
+      "version": "1"
+    },
+    "allReturnedSnapshotDigests": [],
+    "matchedSnapshotDigests": []
   },
-  "canonicalDigest": "sha256:ef3290df3c3de8141bf3f160a3a23494212c22b6878dd8beef74d744249ed729"
+  "canonicalDigest": "sha256:b4f31bb506d2e7febd19ca624557cacf06a9612ee4808d735825966b080a9f14"
 }

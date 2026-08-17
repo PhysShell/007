@@ -5,8 +5,9 @@
   "contract": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": ["3", "7", "11", "13", "14"],
   "what": "an empty result that is NOT authoritative, because the enumeration did not complete",
-  "pairedWith": "complete-empty-query-v1.json",
-  "discriminator": "matchedStableIds is byte-identical to the complete specimen; only the enumeration state differs, and the digests differ",
+  "pairedWith": ["complete-empty-query-v1.json", "matcher-candidate-set-v1.json"],
+  "discriminator": "allReturnedSnapshotDigests and matchedSnapshotDigests are byte-identical to the complete specimen; only the enumeration state differs, and the digests differ",
+  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals the expected author of requiredObservationId (synthetic-external-reviewer)",
   "locator": {
     "kind": "github-query",
     "surface": "pull-request-reviews",
@@ -23,12 +24,15 @@
         "observed": "HTTP 502",
         "retried": false
       }
-    ]
+    ],
+    "objectsReturnedByEndpoint": 0,
+    "objectsOnUnobtainedPages": "unknown — that is the point"
   },
   "canonical": {
     "schemaVersion": 1,
     "sourceKind": "github-query-snapshot",
     "surface": "pull-request-reviews",
+    "requiredObservationId": "review/external-auditor",
     "binding": {
       "repository": "PhysShell/007",
       "pullRequest": "9001"
@@ -41,7 +45,12 @@
     },
     "enumeration": "INCOMPLETE",
     "incompleteReason": "page 2 fetch returned HTTP 502; not retried",
-    "matchedStableIds": []
+    "matcher": {
+      "id": "review-by-expected-author-login",
+      "version": "1"
+    },
+    "allReturnedSnapshotDigests": [],
+    "matchedSnapshotDigests": []
   },
-  "canonicalDigest": "sha256:5558ab62c08bfa95924a2f0d73533e08a631511b3f196b2417dcef20e5b5c63c"
+  "canonicalDigest": "sha256:677db2f685026542adf63b1da502632283c29e07e97a00d6f74a1c26f38eb1d9"
 }
