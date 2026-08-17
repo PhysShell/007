@@ -175,7 +175,7 @@ convention:
   "schemaVersion": 1,
   "sourceKind": "github-issue-comment",
   "stableId": "5305700001",
-  "user": { "id": "136622811", "login": "coderabbitai[bot]" },
+  "user": { "id": "136622811", "login": "coderabbitai[bot]", "type": "Bot" },
   "authorAssociation": "CONTRIBUTOR",
   "body": "exact decoded body ...",
   "createdAt": "...",
@@ -187,6 +187,11 @@ The example is a **complete** §8.5 projection, not an abbreviated one. Where an
 example and an allowlist disagree, the allowlist is authoritative — but an
 example that silently drops an allowlisted field is how a projection ends up
 weaker than its own contract.
+
+`user.type` is shown as `Bot` deliberately. The login already ends in `[bot]`,
+and that is precisely why the typed field must be carried: a projection that
+keeps only the login invites admissibility to be decided by string-matching a
+suffix any account can adopt.
 
 Numeric ids are serialized as **strings**, so the canonical form does not depend
 on any JSON number implementation limit.
@@ -253,22 +258,41 @@ it does not join this one because it happened to be in the same JSON response.
 
 **Two head reads are two acquisition events, not two pointers.** Retaining one
 snapshot and referring to it twice does not record that two reads were performed.
-V1 requires a durable event per read:
+V1 requires a durable event per read, and the event is **tagged by its
+acquisition status** — a read that did not happen has no bytes to point at:
 
 ```text
-HeadReadEvent
+HeadReadEvent, acquisition = AVAILABLE
   role            HEAD_BEFORE | HEAD_AFTER
-  snapshotDigest
-  acquisition     same vocabulary as the observation acquisition status
+  acquisition     AVAILABLE
+  snapshotDigest  REQUIRED
   observedAt
+
+HeadReadEvent, acquisition = FAILED
+  role            HEAD_BEFORE | HEAD_AFTER
+  acquisition     FAILED
+  reason          REQUIRED
+  observedAt
+  snapshotDigest  MUST BE ABSENT
 ```
+
+Requiring `snapshotDigest` on every event, as an earlier revision did, forces the
+adapter to invent one for a read that produced nothing — and the only digests
+available to invent are a stale one or a fabricated one. Both make a failed read
+look like a successful read of unchanged bytes, which is the exact confusion this
+event was introduced to prevent.
+
+`NOT_PRODUCED` and producer rate-limiting are **inadmissible** on a head read.
+The subject head is not produced by any external party; nobody can decline to
+emit it. An API rate limit is an acquisition failure and is recorded as `FAILED`
+with the reason naming the limit — §15's distinction applies here in only one of
+its two directions.
 
 Two events MAY carry the same `snapshotDigest` — that is precisely how "the head
 did not move" is recorded — but there are still two declared reads. Exactly two
 events per evaluation; fewer is non-conformant.
 
-The event exists so that a read which did not happen is visible. If HEAD_AFTER
-has `acquisition = FAILED`, staleness is **unknown**, and unknown is not "not
+If HEAD_AFTER is `FAILED`, staleness is **unknown**, and unknown is not "not
 stale":
 
 ```text
@@ -478,7 +502,7 @@ REQUIRED             schemaVersion  sourceKind
                      pagination.pagesRequested  pagination.pagesObtained
                      pagination.nextPagePresent
                      enumeration
-                     matcher.id  matcher.version
+                     matcher.id  matcher.version  matcher.parameters
                      allReturnedSnapshotDigests
                      matchedSnapshotDigests
 OPTIONAL-IF-PRESENT  incompleteReason  binding.sha
@@ -505,11 +529,76 @@ Both `allReturnedSnapshotDigests` and `matchedSnapshotDigests` MUST be present
 even when both are empty. An empty candidate set is a fact about the enumeration;
 an absent one is a fact about the adapter.
 
-`matcher.id` / `matcher.version` exist so a selection rule that changes is
-visible as a changed digest rather than as a quietly different answer to the same
-question. Re-running the named matcher over the retained candidate set is the
-only way an absence claim can be checked after the fact — which is the whole
-difference between evidence and assertion.
+### 13.1 The matcher must be re-executable, not merely named
+
+Retaining the objects a function ran over does not reproduce the function. A
+selection rule takes two inputs — the candidate snapshot **and** its parameters —
+and an identity pair that names only the rule leaves the second input to memory:
+
+```text
+"reviews by the expected author"   expected author = ?
+```
+
+An auditor who can resolve every candidate digest and still cannot say which
+author was expected has reproduced the input and not the decision.
+
+```text
+matcher.id          names a deterministic, total, pure predicate
+                    f(candidate canonical snapshot, parameters) -> bool
+matcher.version     changes whenever f's behaviour changes for ANY input
+matcher.parameters  every value f reads that is not the candidate snapshot
+```
+
+The rules that make re-execution possible:
+
+- `f` MUST depend on nothing beyond its two inputs. No clock, no network, no
+  ambient configuration, no repository working state, no environment.
+- `matcher.parameters` MUST be immutable literal values, canonicalized like any
+  other object under §7. A parameter that is a *reference* to a mutable GitHub
+  object is forbidden by §3 for the same reason a matched set of `stable_id`s is:
+  it does not carry what it pointed at.
+- `matcher.parameters` MUST be present even when the rule takes none, as `{}`.
+  An absent parameter block cannot be distinguished from a forgotten one.
+- V1 matchers are **per-candidate**. `f` decides each candidate independently, so
+  `matchedSnapshotDigests` is exactly the subsequence for which `f` is true.
+  Anything needing cross-candidate context — latest-wins, dedup by author,
+  first-match-only — is a different matcher class and needs its own contract
+  rather than an adapter's judgement.
+
+The conformance obligation:
+
+```text
+given  matcher.id + matcher.version + matcher.parameters
+  and  allReturnedSnapshotDigests resolved to their retained snapshots
+then   matchedSnapshotDigests MUST be exactly recomputable
+```
+
+If it is not recomputable, the absence claim is an assertion with provenance
+decoration. That is the whole difference this section exists to protect.
+
+### 13.2 The digest arrays are ordered sequences
+
+They are described as a candidate set and a matched subset, but they serialize as
+JSON arrays, and JCS does **not** sort arrays. Array order is therefore part of
+the digest, and an undefined order means two conforming adapters compute two
+different query digests from one observation.
+
+```text
+allReturnedSnapshotDigests   observation order:
+                             pages in the order they were obtained, and
+                             within a page, the order the API returned objects
+matchedSnapshotDigests       the relative order of allReturnedSnapshotDigests
+duplicates                   RETAINED, never silently deduplicated
+```
+
+`matchedSnapshotDigests` is a **subsequence** of `allReturnedSnapshotDigests`,
+not merely a subset: same members, same relative order.
+
+No sorting. Sorting would discard the enumeration order, which is itself observed
+evidence — and a duplicate is evidence too. GitHub can return the same object on
+two pages when data shifts mid-pagination; recording that twice says the
+enumeration saw it twice, while quietly collapsing it says the adapter decided
+what the enumeration meant.
 
 Without all of this, `NotProduced` means only "this `Vec` is currently empty". We
 already know how that engineering ends.
@@ -703,6 +792,10 @@ from this document. "The implementation will sort it out" means it is not.
 | How are `head_before` / `head_after` represented? | §8.1 — two `HeadReadEvent`s |
 | What if the second head read failed? | §8.1 — `CANNOT_CHECK`, not "not stale" |
 | What proves a matcher did not simply miss the object? | §13 candidate set + matcher id |
+| How is the matcher re-executed later? | §13.1 — id, version **and** parameters |
+| May a matcher read anything else? | §13.1 — no; two inputs only |
+| What order do the digest arrays use? | §13.2 — observation order, duplicates kept |
+| What does a failed head read record? | §8.1 — `reason`, and no `snapshotDigest` |
 | What would show an adapter trimming a body? | §9 — an equal-`updatedAt` pair |
 | How is a wrong-SHA `OWED` explained? | §17 decision basis |
 | How is `NotProduced` proven? | §13, §14 |
@@ -733,6 +826,13 @@ from this document. "The implementation will sort it out" means it is not.
   not for the contract.
 - **Semantic normalization** of bodies (§9). V1 is byte-exact; any
   whitespace-insensitive comparison is a later, separately versioned decision.
+- **Matcher implementation registry** (§13.1). The contract obliges
+  `matcher.id` + `matcher.version` to resolve to exactly one predicate, and says
+  nothing about *how* that resolution happens — a registry file, a crate path
+  plus a version, a digest over the implementation. Until it is decided, a
+  matcher named only in prose is a locator pointing at something mutable, which
+  is what §3 objects to everywhere else. The specimens here name such a matcher
+  and say so rather than implying the binding already exists.
 - **Reaction surface** (§8). Still no Step 0B specimen; not added here.
 - **Pagination specimen** (§14). The rule is frozen; the historical witness does
   not exist and the contract vectors for it are synthetic.
@@ -778,3 +878,25 @@ it was written to guarantee.
 The corresponding conformance witness, added in §9, is the equal-`updatedAt`
 body pair: a witness that varies the body together with another field cannot
 distinguish byte-exact retention from `trim()`.
+
+### 24.2 Added in the second review correction round
+
+- **§7 — the example carries `user.type`.** Correction-1 made the example a
+  complete §8.5 projection; correction-2 then added `user.type` to the allowlist
+  and left the example behind, so the contract contradicted itself in the same
+  way a second time.
+- **§8.1 — `HeadReadEvent` is tagged by acquisition status.** `AVAILABLE` carries
+  `snapshotDigest`; `FAILED` carries `reason` and MUST NOT carry one. Requiring a
+  digest unconditionally forced the adapter to supply a stale or fabricated one
+  for a read that produced nothing. `NOT_PRODUCED` and producer rate-limiting are
+  inadmissible on a head read; an API rate limit is `FAILED`.
+- **§13.1 — `matcher.parameters` is REQUIRED**, with the matcher defined as a
+  deterministic pure predicate over exactly two inputs, restricted to
+  per-candidate decisions, and with an explicit obligation that the matched
+  subsequence be recomputable. Correction-2 required retaining the objects the
+  function ran over; it did not require retaining the function's other argument,
+  so provenance could reproduce the input and still not the decision.
+- **§13.2 — the digest arrays are ordered sequences.** Observation order, matched
+  as a subsequence, duplicates retained. JCS does not sort arrays, so without
+  this two conforming adapters could compute different query digests from one
+  observation.
