@@ -209,49 +209,146 @@ garden. Following the Step 0B precedent, these are deliberately excluded:
 headers, auth, permissions, unrelated account metadata, reactions, avatar URLs,
 ambient API metadata.
 
-### 8.1 Pull request / subject read
+**The projection schema is closed.** For each `sourceKind` below, the fields are
+given as an exact **REQUIRED** set and an exact **OPTIONAL-IF-PRESENT** set.
+There is no third category. An adapter that emits a field outside both sets, or
+omits a REQUIRED one, is non-conformant — not "extended".
 
 ```text
-repository            pull_request number
-head.sha              head.ref (where closure-relevant)
-head.repo.full_name   updated_at (if present in source)
+adding a field later  =  new schemaVersion, and a stated reason
+                      != the adapter's judgement at fetch time
 ```
 
-**Both head reads are retained separately** — the one before evaluation and the
-one after. Recording only `subjectStale: true` makes `STALE` unexplainable from
-the artifact.
+Phrases like *where closure-relevant* and *plus any further closure-relevant
+field* were removed from this section deliberately. They leave the projection to
+be settled by whoever writes the adapter, which is the same open door §12 closes
+on the evidence bundle. If a field turns out to be decisive, that is a contract
+change with a version number, not a silent widening.
+
+**Null and absent are the same input, and canonicalize to omission.** GitHub
+sends `"in_reply_to_id": null` for a top-level review comment; another response
+may omit the key. Both mean *no value*, and both MUST produce a canonical object
+with the key absent. Otherwise two adapters observing the same fact compute two
+digests, and the digest stops identifying content.
+
+An OPTIONAL-IF-PRESENT field is therefore never `null` in a canonical object: it
+is present with a value, or not present.
+
+### 8.1 Pull request head / subject read
+
+`sourceKind: github-pull-request-head`
+
+```text
+REQUIRED             schemaVersion  sourceKind
+                     repository  pullRequest
+                     headSha  headRef  headRepoFullName
+OPTIONAL-IF-PRESENT  updatedAt
+```
+
+Deliberately **not** in this projection: `state`, `merged`, `draft`,
+`mergeable_state`, `base`, `created_at`, `html_url`, `node_id`. The head read
+answers *what is the subject, and did it move*. If a later policy makes a
+lifecycle field decisive, it gets a new `sourceKind` or a `schemaVersion` bump —
+it does not join this one because it happened to be in the same JSON response.
+
+**Two head reads are two acquisition events, not two pointers.** Retaining one
+snapshot and referring to it twice does not record that two reads were performed.
+V1 requires a durable event per read:
+
+```text
+HeadReadEvent
+  role            HEAD_BEFORE | HEAD_AFTER
+  snapshotDigest
+  acquisition     same vocabulary as the observation acquisition status
+  observedAt
+```
+
+Two events MAY carry the same `snapshotDigest` — that is precisely how "the head
+did not move" is recorded — but there are still two declared reads. Exactly two
+events per evaluation; fewer is non-conformant.
+
+The event exists so that a read which did not happen is visible. If HEAD_AFTER
+has `acquisition = FAILED`, staleness is **unknown**, and unknown is not "not
+stale":
+
+```text
+HEAD_AFTER failed  ->  CANNOT_CHECK
+                   ->  never a silent absence of STALE
+```
+
+Recording only `subjectStale: true` makes `STALE` unexplainable from the
+artifact; recording only one snapshot digest twice makes a missing second read
+unexplainable in the same way, one level down.
 
 ### 8.2 Check run
 
+`sourceKind: github-actions-check`
+
 ```text
-id  name  head_sha  status  conclusion  started_at  completed_at
+REQUIRED             schemaVersion  sourceKind  stableId
+                     name  headSha  status
+OPTIONAL-IF-PRESENT  conclusion  startedAt  completedAt
 ```
 
-plus any further closure-relevant field already retained by Step 0B, so the V1
-projection is never weaker than the frozen evidence.
+`conclusion` is optional because a queued or in-progress run has none; per §8 it
+is then absent, not `null`.
+
+This is **exactly** the field set the frozen Step 0B check-run objects carry —
+`id, name, head_sha, status, conclusion, started_at, completed_at` — so the
+earlier promise that the V1 projection would never be weaker than the frozen
+evidence is now discharged by enumeration rather than by an open-ended clause.
 
 ### 8.3 Submitted review
 
+`sourceKind: github-submitted-review`
+
 ```text
-id  user.id  user.login  author_association  state  body  submitted_at  commit_id
+REQUIRED             schemaVersion  sourceKind  stableId
+                     user.id  user.login  user.type
+                     authorAssociation  state  body
+                     submittedAt  commitId
+OPTIONAL-IF-PRESENT  (none)
 ```
+
+`user.type` is REQUIRED. The frozen Step 0B corpus retains it, and it is the
+field that distinguishes `Bot` from `User` independently of a login that merely
+looks like a bot. Admissibility must not rest on string-matching `[bot]`.
+
+Excluded: `html_url`, `pull_request_url`, `node_id`. They are locators (§4) and
+per §10 no locator is a content identity.
 
 ### 8.4 Review comment
 
+`sourceKind: github-review-comment`
+
 ```text
-id  pull_request_review_id  in_reply_to_id
-user.id  user.login  author_association
-body  commit_id  original_commit_id
-path  line / original_line (where present)
-side / start_line (where present)
-created_at  updated_at
+REQUIRED             schemaVersion  sourceKind  stableId
+                     pullRequestReviewId
+                     user.id  user.login  user.type
+                     authorAssociation  body
+                     commitId  originalCommitId  path
+                     createdAt  updatedAt
+OPTIONAL-IF-PRESENT  inReplyToId  line  originalLine  side  startLine
 ```
+
+`pullRequestReviewId` is REQUIRED because §18's example derivation
+(`review_comment.pull_request_review_id == review.id`) is unreproducible without
+it.
 
 ### 8.5 Issue comment
 
+`sourceKind: github-issue-comment`
+
 ```text
-id  user.id  user.login  author_association  body  created_at  updated_at
+REQUIRED             schemaVersion  sourceKind  stableId
+                     user.id  user.login  user.type
+                     authorAssociation  body
+                     createdAt  updatedAt
+OPTIONAL-IF-PRESENT  (none)
 ```
+
+Excluded: `html_url`, `issue_url`, `node_id`, `url`, `user.avatar_url`,
+`user.site_admin`, `reactions`, `performed_via_github_app`.
 
 Reactions are **not** added here. The frozen Step 0B README already records
 honestly that no reaction specimen exists.
@@ -269,6 +366,13 @@ If an edit changes one space, the snapshot digest changes. That is correct: the
 evidence bytes changed. If a later policy decides some whitespace is
 semantically irrelevant, that is a **semantic normalization version** and gets
 its own contract — it does not hide inside provenance V1.
+
+**A witness for this rule must vary the body alone.** Two projections that differ
+in the body *and* in `updatedAt` produce different digests either way, so they
+cannot show that the body was retained byte-exact — an adapter calling `trim()`
+would pass that comparison. The conformance witness is a pair whose canonical
+objects are identical in every field except one trailing byte of `body`,
+`updatedAt` included. Only then does an equal digest prove the trim happened.
 
 ## 10. Ruling — `updated_at` is not content identity
 
@@ -350,19 +454,65 @@ NotProduced -> OWED
 ```
 
 there is no object snapshot, because no object was found. But the absence is a
-claim about the **result of a query**, not about an object. V1 therefore defines
-a **query snapshot**, recording at minimum:
+claim about the **result of a query**, not about an object. And "no object was
+found" is really two claims that fail independently:
 
 ```text
-which surface/query was executed
-for which repository / pull request / SHA
-which pagination was traversed
-whether enumeration was COMPLETE
-which matching objects were obtained
+the endpoint returned nothing            (enumeration)
+nothing the endpoint returned qualified  (selection)
 ```
 
-Without it, `NotProduced` means only "this `Vec` is currently empty". We already
-know how that engineering ends.
+Recording only the matched set proves neither. An endpoint that returned a
+qualifying review, plus a matcher that failed to recognise it, is indistinguishable
+from an empty repository — and the failure is invisible because the surviving
+artifact contains exactly one thing: an empty list.
+
+V1 therefore requires a **query snapshot** with the candidate set retained and
+the selection rule named. `sourceKind: github-query-snapshot`:
+
+```text
+REQUIRED             schemaVersion  sourceKind
+                     surface  requiredObservationId
+                     binding.repository  binding.pullRequest
+                     pagination.perPage
+                     pagination.pagesRequested  pagination.pagesObtained
+                     pagination.nextPagePresent
+                     enumeration
+                     matcher.id  matcher.version
+                     allReturnedSnapshotDigests
+                     matchedSnapshotDigests
+OPTIONAL-IF-PRESENT  incompleteReason  binding.sha
+```
+
+`allReturnedSnapshotDigests` is the **complete candidate set** — every object the
+enumeration returned, each retained as a source snapshot under §11, including the
+ones that did not qualify. `matchedSnapshotDigests` is a subset of it.
+
+The rule:
+
+```text
+NotProduced is legal ONLY when
+    enumeration = COMPLETE
+  AND a deterministic, identified matcher
+  AND that matcher, applied to the RETAINED candidate set,
+      yields an empty matched subset
+```
+
+Digests, not ids: a bare `stable_id` in a matched set is a reference to a mutable
+object, which §3 forbids as evidence.
+
+Both `allReturnedSnapshotDigests` and `matchedSnapshotDigests` MUST be present
+even when both are empty. An empty candidate set is a fact about the enumeration;
+an absent one is a fact about the adapter.
+
+`matcher.id` / `matcher.version` exist so a selection rule that changes is
+visible as a changed digest rather than as a quietly different answer to the same
+question. Re-running the named matcher over the retained candidate set is the
+only way an absence claim can be checked after the fact — which is the whole
+difference between evidence and assertion.
+
+Without all of this, `NotProduced` means only "this `Vec` is currently empty". We
+already know how that engineering ends.
 
 ## 14. Pagination — rule frozen now, implementation later
 
@@ -548,7 +698,12 @@ from this document. "The implementation will sort it out" means it is not.
 | How is the digest written? | §7 `sha256:[hex]` |
 | Which fields per V0 surface? | §8.1–8.5 |
 | Which fields are deliberately excluded? | §8, §20 |
-| How are `head_before` / `head_after` represented? | §8.1 |
+| May an adapter add a field it judges relevant? | §8 — no; new `schemaVersion` |
+| Is `null` the same as absent? | §8 — yes, both canonicalize to omission |
+| How are `head_before` / `head_after` represented? | §8.1 — two `HeadReadEvent`s |
+| What if the second head read failed? | §8.1 — `CANNOT_CHECK`, not "not stale" |
+| What proves a matcher did not simply miss the object? | §13 candidate set + matcher id |
+| What would show an adapter trimming a body? | §9 — an equal-`updatedAt` pair |
 | How is a wrong-SHA `OWED` explained? | §17 decision basis |
 | How is `NotProduced` proven? | §13, §14 |
 | What happens on incomplete pagination? | §14 |
@@ -568,6 +723,14 @@ from this document. "The implementation will sort it out" means it is not.
   must not be substituted for one.
 - **Redaction policy** for secrets pasted into untrusted bodies (§20). Naming
   the boundary is not solving it.
+
+  These two are OWED, and that is compatible with freezing this contract. It is
+  **not** compatible with starting the acquisition adapter. §9 requires bodies
+  retained byte-exact and §11 requires the bytes kept; an adapter built before a
+  redaction decision would therefore implement careful immutable storage for a
+  credential somebody pasted into a comment, and content addressing makes that
+  hard to take back. The redaction decision is a precondition for acquisition,
+  not for the contract.
 - **Semantic normalization** of bodies (§9). V1 is byte-exact; any
   whitespace-insensitive comparison is a later, separately versioned decision.
 - **Reaction surface** (§8). Still no Step 0B specimen; not added here.
@@ -589,3 +752,29 @@ per-surface allowlists; §9 byte-exact bodies; §10 `updated_at` is not identity
 precondition for `NotProduced`; §15 the two rate-limit layers; §16 falsification
 scan provenance at zero claims; §17 decision basis; §18 derived facts name their
 inputs; §19 verification witness kept separate; §20 the secret boundary.
+
+### 24.1 Added in the review correction round
+
+Four decisions added after the first specimens were reviewed. None loosens a
+rule; each closes a way the earlier text could be satisfied without the property
+it was written to guarantee.
+
+- **§8 — the projection schema is closed.** Exact REQUIRED and
+  OPTIONAL-IF-PRESENT sets per `sourceKind`, no third category, extension only by
+  `schemaVersion`. The removed *where closure-relevant* / *plus any further
+  closure-relevant field* wording delegated the projection to the adapter.
+- **§8 — `null` and absent are one input** and canonicalize to omission, so two
+  adapters observing the same fact cannot compute two digests.
+- **§8.1 — two head reads are two `HeadReadEvent`s**, each with `role`,
+  `snapshotDigest`, `acquisition` and `observedAt`. Two pointers at one snapshot
+  record one read. A FAILED HEAD_AFTER yields `CANNOT_CHECK`, never a silent
+  absence of `STALE`.
+- **§13 — authoritative absence requires the retained candidate set and a named
+  matcher.** `allReturnedSnapshotDigests` and `matcher.id`/`matcher.version` are
+  REQUIRED; `NotProduced` is legal only when a COMPLETE enumeration *and* the
+  identified matcher over the retained candidates yield an empty matched subset.
+  Matched sets are digests, not ids.
+
+The corresponding conformance witness, added in §9, is the equal-`updatedAt`
+body pair: a witness that varies the body together with another field cannot
+distinguish byte-exact retention from `trim()`.
