@@ -31,10 +31,12 @@
 //! ```
 //!
 //! NO PROSE ORACLE. Nothing here reads English. A defect claim reaches the
-//! classifier as an already-established [`FalsificationFact`] carrying
-//! provenance; extracting such facts from vendor responses is the acquisition
-//! layer's job. This crate decides only what an established fact does to the
-//! state vector.
+//! classifier as a structured [`FalsificationFact`] carrying provenance and a
+//! [`Verification`] status; extracting such facts from vendor responses is the
+//! acquisition layer's job. Note that such a record is NOT necessarily an
+//! established defect — a `Claimed` one is precisely a counterexample whose
+//! verification is still owed — so this crate decides what each record
+//! contributes, never whether some wording amounts to one.
 
 // Mirror the workspace discipline.
 #![forbid(unsafe_code)]
@@ -361,24 +363,47 @@ impl Predicate {
 fn classify_check(
     acq: &Acquisition<CheckEvidence>,
     expected_sha: &str,
-) -> (State, Option<SourceOut>) {
+) -> (State, AcquisitionOut, Option<SourceOut>) {
     match acq {
         Acquisition::Available(check) => {
             let source = Some(SourceOut {
                 kind: SourceKind::GithubActionsCheck,
                 stable_id: check.stable_id.clone(),
             });
-            if check.head_sha != expected_sha {
-                (State::Owed, source)
+            let state = if check.head_sha != expected_sha {
+                State::Owed
             } else {
                 match check.conclusion {
-                    CheckConclusion::Success => (State::Pass, source),
-                    CheckConclusion::Failure => (State::Finding, source),
+                    CheckConclusion::Success => State::Pass,
+                    CheckConclusion::Failure => State::Finding,
                 }
-            }
+            };
+            (state, available(), source)
         }
-        Acquisition::NotProduced | Acquisition::RateLimited => (State::Owed, None),
-        Acquisition::Failed { .. } => (State::CannotCheck, None),
+        Acquisition::NotProduced => (State::Owed, status(AcquisitionStatus::NotProduced), None),
+        Acquisition::RateLimited => (State::Owed, status(AcquisitionStatus::RateLimited), None),
+        Acquisition::Failed { reason } => (State::CannotCheck, failed(reason), None),
+    }
+}
+
+fn available() -> AcquisitionOut {
+    AcquisitionOut {
+        status: AcquisitionStatus::Available,
+        reason: None,
+    }
+}
+
+fn status(status: AcquisitionStatus) -> AcquisitionOut {
+    AcquisitionOut {
+        status,
+        reason: None,
+    }
+}
+
+fn failed(reason: &str) -> AcquisitionOut {
+    AcquisitionOut {
+        status: AcquisitionStatus::Failed,
+        reason: Some(reason.to_owned()),
     }
 }
 
@@ -388,23 +413,25 @@ fn classify_check(
 fn classify_review(
     acq: &Acquisition<ReviewEvidence>,
     expected_sha: &str,
-) -> (State, Option<SourceOut>) {
+) -> (State, AcquisitionOut, Option<SourceOut>) {
     match acq {
         Acquisition::Available(review) => {
             let source = Some(SourceOut {
                 kind: SourceKind::SubmittedReview,
                 stable_id: review.stable_id.clone(),
             });
-            if review.commit_id != expected_sha {
-                (State::Owed, source)
+            let state = if review.commit_id != expected_sha {
+                State::Owed
             } else if review.carries_finding {
-                (State::Finding, source)
+                State::Finding
             } else {
-                (State::Pass, source)
-            }
+                State::Pass
+            };
+            (state, available(), source)
         }
-        Acquisition::NotProduced | Acquisition::RateLimited => (State::Owed, None),
-        Acquisition::Failed { .. } => (State::CannotCheck, None),
+        Acquisition::NotProduced => (State::Owed, status(AcquisitionStatus::NotProduced), None),
+        Acquisition::RateLimited => (State::Owed, status(AcquisitionStatus::RateLimited), None),
+        Acquisition::Failed { reason } => (State::CannotCheck, failed(reason), None),
     }
 }
 
@@ -446,21 +473,19 @@ pub fn classify(input: &ClassifierInput) -> Result<Predicate, ClassifierError> {
         .map(|id| {
             // Presence was established above, so `None` here is unreachable —
             // and is still not silently turned into a state.
-            let (state, source) = match input.observations.get(id) {
-                None => (State::CannotCheck, None),
+            let (state, acquisition, source) = match input.observations.get(id) {
+                None => (
+                    State::CannotCheck,
+                    failed("required observation absent from the input map"),
+                    None,
+                ),
                 Some(ObservationInput::Check(acq)) => classify_check(acq, expected),
                 Some(ObservationInput::Review(acq)) => classify_review(acq, expected),
             };
             ObservationOut {
                 id: id.clone(),
                 state,
-                // RED-3: every observation reports AVAILABLE with no reason, so
-                // NOT_PRODUCED / RATE_LIMITED / FAILED are indistinguishable in
-                // the predicate. GREEN-3 carries the real outcome through.
-                acquisition: AcquisitionOut {
-                    status: AcquisitionStatus::Available,
-                    reason: None,
-                },
+                acquisition,
                 source,
             }
         })
@@ -476,14 +501,19 @@ pub fn classify(input: &ClassifierInput) -> Result<Predicate, ClassifierError> {
             },
             subject_sha: f.subject_sha.clone(),
             author: f.author.clone(),
-            // RED-3: the failure reason is dropped here. GREEN-3 keeps it.
-            verification: VerificationOut {
-                status: match f.verification {
-                    Verification::Reproduced => VerificationStatus::Reproduced,
-                    Verification::Claimed => VerificationStatus::Claimed,
-                    Verification::Failed { .. } => VerificationStatus::Failed,
+            verification: match &f.verification {
+                Verification::Reproduced => VerificationOut {
+                    status: VerificationStatus::Reproduced,
+                    reason: None,
                 },
-                reason: None,
+                Verification::Claimed => VerificationOut {
+                    status: VerificationStatus::Claimed,
+                    reason: None,
+                },
+                Verification::Failed { reason } => VerificationOut {
+                    status: VerificationStatus::Failed,
+                    reason: Some(reason.clone()),
+                },
             },
             state: match f.verification {
                 Verification::Reproduced => State::Finding,
