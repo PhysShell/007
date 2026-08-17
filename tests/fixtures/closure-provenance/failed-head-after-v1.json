@@ -1,0 +1,40 @@
+{
+  "specimenSet": "closure-provenance-v1",
+  "specimens": ["H"],
+  "synthetic": true,
+  "contract": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": ["3", "8.1", "11", "15"],
+  "what": "a HEAD_BEFORE read that succeeded and a HEAD_AFTER read that failed, recorded as two events of different shapes",
+  "why": "under the earlier rule that every head-read event carries a snapshotDigest, this observation had no honest encoding. The adapter would have had to supply either the HEAD_BEFORE digest or a fabricated one, and both make a read that produced nothing look like a read that produced unchanged bytes — which is the confusion the event exists to prevent. The FAILED event carries a reason and no digest, so the second read is present in the record as a read that did not happen.",
+  "pairedWith": "wrong-sha-review-v1.json",
+  "contrastWith": "in wrong-sha-review-v1.json both events are AVAILABLE and share one digest, which records 'read twice, unchanged'. Here the second event has no digest at all, which records 'read attempted, no bytes'. The two situations are not encodable as the same artifact.",
+  "subjectRead": {
+    "headReadEvents": [
+      {
+        "role": "HEAD_BEFORE",
+        "acquisition": "AVAILABLE",
+        "snapshotDigest": "sha256:8119b6a8175478c80fe903c35343cf715b028fdf72ac5ffe814221eec80e911c",
+        "observedAt": "2026-08-06T14:15:00Z"
+      },
+      {
+        "role": "HEAD_AFTER",
+        "acquisition": "FAILED",
+        "reason": "GitHub API secondary rate limit; retry budget exhausted after 3 attempts",
+        "observedAt": "2026-08-06T14:31:52Z"
+      }
+    ],
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-pull-request-head",
+      "repository": "PhysShell/007",
+      "pullRequest": "9002",
+      "headSha": "7c6b5a4938271605f4e3d2c1b0a9988776655443",
+      "headRef": "claude/synthetic-specimen-h",
+      "headRepoFullName": "PhysShell/007",
+      "updatedAt": "2026-08-06T14:12:09Z"
+    },
+    "canonicalDigest": "sha256:8119b6a8175478c80fe903c35343cf715b028fdf72ac5ffe814221eec80e911c"
+  },
+  "acquisitionVocabularyNote": "the failure is an API rate limit, which §15 classes as acquisition-side. Producer rate-limiting and NOT_PRODUCED are inadmissible on a head read: nobody external produces the subject head, so nobody can decline to emit it.",
+  "whatIsNotRecoverable": "whether the head moved between 14:15:00Z and 14:31:52Z. The record says the question was asked and not answered, which is a different fact from the head having stayed put."
+}

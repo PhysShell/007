@@ -6,7 +6,7 @@
   "witnesses": ["3", "7", "11", "13", "14"],
   "what": "an empty result that is authoritative: the enumeration completed AND the retained candidate set is genuinely empty",
   "pairedWith": ["incomplete-query-v1.json", "matcher-candidate-set-v1.json"],
-  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals the expected author of requiredObservationId (synthetic-external-reviewer)",
+  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals matcher.parameters.expectedAuthorLogin",
   "locator": {
     "kind": "github-query",
     "surface": "pull-request-reviews",
@@ -38,10 +38,13 @@
     "enumeration": "COMPLETE",
     "matcher": {
       "id": "review-by-expected-author-login",
-      "version": "1"
+      "version": "1",
+      "parameters": {
+        "expectedAuthorLogin": "synthetic-external-reviewer"
+      }
     },
     "allReturnedSnapshotDigests": [],
     "matchedSnapshotDigests": []
   },
-  "canonicalDigest": "sha256:b4f31bb506d2e7febd19ca624557cacf06a9612ee4808d735825966b080a9f14"
+  "canonicalDigest": "sha256:3536cd338b5e35fdad33282a412872d639742f3f1554a1f8acbf2616680a48c0"
 }

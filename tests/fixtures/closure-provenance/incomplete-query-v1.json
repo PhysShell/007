@@ -7,7 +7,7 @@
   "what": "an empty result that is NOT authoritative, because the enumeration did not complete",
   "pairedWith": ["complete-empty-query-v1.json", "matcher-candidate-set-v1.json"],
   "discriminator": "allReturnedSnapshotDigests and matchedSnapshotDigests are byte-identical to the complete specimen; only the enumeration state differs, and the digests differ",
-  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals the expected author of requiredObservationId (synthetic-external-reviewer)",
+  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals matcher.parameters.expectedAuthorLogin",
   "locator": {
     "kind": "github-query",
     "surface": "pull-request-reviews",
@@ -47,10 +47,13 @@
     "incompleteReason": "page 2 fetch returned HTTP 502; not retried",
     "matcher": {
       "id": "review-by-expected-author-login",
-      "version": "1"
+      "version": "1",
+      "parameters": {
+        "expectedAuthorLogin": "synthetic-external-reviewer"
+      }
     },
     "allReturnedSnapshotDigests": [],
     "matchedSnapshotDigests": []
   },
-  "canonicalDigest": "sha256:677db2f685026542adf63b1da502632283c29e07e97a00d6f74a1c26f38eb1d9"
+  "canonicalDigest": "sha256:08cf82ecaf3427e2ff14cd84b9ee3f18ef160dcdea7cb5f1751cd1c36f76d7cd"
 }

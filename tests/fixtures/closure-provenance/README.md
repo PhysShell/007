@@ -32,15 +32,23 @@ later test confirms its own crib sheet, which is exactly what §12 forbids.
 The `witnesses` array in each file lists section numbers of the contract
 document, unprefixed (`"8.1"` means §8.1).
 
-### Review correction round
+### Review correction rounds
 
-Specimens F and G were added, and A, C, D and E revised, after review of the
-first round found four ways a specimen or a projection could be satisfied
-without the property it was written to establish. Every canonical object here
-now conforms to §8's **closed** projection schema — which is why `user.type`
-appears throughout and every digest constant in this directory was recomputed.
-The specific defects are named in place: see A's `notAWitnessFor`, F's `why`,
-G's `why`, and E's `subjectRead.note`.
+**Round 1.** Specimens F and G were added, and A, C, D and E revised, after
+review found four ways a specimen or a projection could be satisfied without the
+property it was written to establish. Every canonical object here conforms to
+§8's **closed** projection schema — which is why `user.type` appears throughout
+and every digest constant was recomputed. The defects are named in place: see A's
+`notAWitnessFor`, F's `why`, G's `why`, and E's `subjectRead.note`.
+
+**Round 2.** Specimen H was added and the three query snapshots gained
+`matcher.parameters`, so the query digests for C, D and G were recomputed; the
+candidate review digests are unchanged, since a candidate snapshot does not
+contain the matcher. F was already correct and is untouched. The finding behind
+this round is worth stating plainly, because it generalises: round 1 required
+retaining the objects a selection rule ran over, and round 2 found that the
+rule's *other argument* was never retained. Provenance could resolve every
+candidate digest and still not reproduce the decision.
 
 ## The specimens
 
@@ -125,13 +133,43 @@ by the expected author — recorded next to an empty `matchedSnapshotDigests`.
 C and G are the discriminating pair for §13's second half. Under a query
 snapshot that keeps only the matched set, they are the same artifact: an empty
 list, a completed enumeration, nothing else. Retaining
-`allReturnedSnapshotDigests` and naming `matcher.id`/`matcher.version` is what
-separates them, because the empty subset in G does not survive re-running the
-named rule over the two retained candidates.
+`allReturnedSnapshotDigests` and naming the matcher is what separates them,
+because the empty subset in G does not survive re-running the named rule over
+the two retained candidates.
+
+The matcher's `parameters` are carried in the canonical query snapshot, not in
+this README. Naming the rule without its arguments would leave an auditor able to
+resolve every candidate digest and still unable to say which author was expected
+— the input reproduced and the decision not. `expectedAuthorLogin` is therefore
+part of what the query digest covers.
+
+`allReturnedSnapshotDigests` is in observation order and `matchedSnapshotDigests`
+is a subsequence of it (§13.2). JCS does not sort arrays, so this order is inside
+the digest; leaving it to the adapter would let two conforming implementations
+produce two query digests from one observation.
 
 An absence claim that cannot be re-derived from retained bytes is an assertion,
 and a broken matcher is the cheapest way for a real object to become "nothing
 found".
+
+### H — the head read that did not happen
+
+`failed-head-after-v1.json`
+
+`HEAD_BEFORE` succeeded and carries a `snapshotDigest`; `HEAD_AFTER` failed on an
+API rate limit and carries a `reason` and **no digest**.
+
+Under the previous rule — every head-read event carries a `snapshotDigest` — this
+observation had no honest encoding. The adapter would have had to supply the
+HEAD_BEFORE digest or fabricate one, and either makes a read that produced
+nothing look like a read that produced unchanged bytes. E and H are the pair:
+in E, two AVAILABLE events sharing one digest say *read twice, unchanged*; in H,
+the second event has no digest at all and says *read attempted, no bytes*. They
+are no longer expressible as the same artifact.
+
+What the record deliberately does not contain is whether the head moved during
+those sixteen minutes. It contains that the question was asked and not answered,
+which is a different fact.
 
 ### E — a wrong-SHA review that explains itself
 
@@ -192,12 +230,16 @@ test whose expectations were produced by the code under test proves nothing.
   the contract left open.
 - **No pagination witness exists in Step 0B and none is invented here.** C and D
   are synthetic and say so; they are not evidence that this ever occurred.
-- **The matcher rule is described, not implemented.** `matcher.id` and
-  `matcher.version` are contract-level identity; `review-by-expected-author-login
-  v1` exists only as the prose rule stated in the specimen files. Nothing in this
-  repository executes it, so G's contradiction is verifiable by reading, not by
-  running — and the specimen says which of its two candidates satisfies the rule
-  rather than leaving the reader to infer it.
+- **The matcher rule is described, not implemented.** `matcher.id`,
+  `matcher.version` and `matcher.parameters` are contract-level identity, and
+  `review-by-expected-author-login v1` exists only as the prose rule stated in
+  the specimen files. Nothing in this repository executes it, so G's
+  contradiction is verifiable by reading, not by running — and the specimen says
+  which of its two candidates satisfies the rule rather than leaving the reader
+  to infer it. §23 records the underlying gap as OWED: the contract obliges the
+  identity pair to resolve to exactly one predicate and does not yet say how that
+  resolution happens, so a matcher named only in prose is still a locator
+  pointing at something mutable.
 - **No verification witness.** §19 leaves the binding between
   `Verification::Reproduced` and its evidence OWED, so specimen A retains only
   what the comment *said*, never a claim that anything was checked.

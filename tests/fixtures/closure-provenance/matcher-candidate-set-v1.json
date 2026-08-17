@@ -7,7 +7,8 @@
   "what": "a COMPLETE enumeration that returned two reviews, one of which satisfies the named matcher, recorded alongside an empty matched subset",
   "why": "under a query snapshot that keeps only the matched set, this situation and a genuinely empty repository are the same artifact: an empty list. Retaining the full candidate set and naming the selection rule makes the empty matched subset checkable — re-running review-by-expected-author-login v1 over the two retained candidates does not reproduce it.",
   "pairedWith": ["complete-empty-query-v1.json"],
-  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals the expected author of requiredObservationId (synthetic-external-reviewer)",
+  "matcherRule": "review-by-expected-author-login v1: select submitted reviews whose user.login equals matcher.parameters.expectedAuthorLogin. The parameter is carried in the canonical query snapshot, not left in this prose — retaining the candidates without it would reproduce the input and not the decision.",
+  "digestArrayOrder": "observation order per §13.2 — page 1 as obtained, objects in the order the endpoint returned them. matchedSnapshotDigests would appear in that same relative order. No sorting, no deduplication.",
   "locator": {
     "kind": "github-query",
     "surface": "pull-request-reviews",
@@ -83,7 +84,10 @@
     "enumeration": "COMPLETE",
     "matcher": {
       "id": "review-by-expected-author-login",
-      "version": "1"
+      "version": "1",
+      "parameters": {
+        "expectedAuthorLogin": "synthetic-external-reviewer"
+      }
     },
     "allReturnedSnapshotDigests": [
       "sha256:e4c2cc9db510b457646f948d37f7d1fcb77e7bbba745ed75213805d3b22d9283",
@@ -91,5 +95,5 @@
     ],
     "matchedSnapshotDigests": []
   },
-  "canonicalDigest": "sha256:b8e9904008e3e9b8857301a14e7801b17bb8ad6ee5ce253bd964a1582d22b46c"
+  "canonicalDigest": "sha256:12670ada4d41cc693bf50adffc5948361b77943ff630d128b4f92380cd882fda"
 }
