@@ -11,9 +11,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_classifier::{
-    classify, Acquisition, CheckConclusion, CheckEvidence, ClassifierError, ClassifierInput,
-    FalsificationFact, ObservationInput, Policy, ReviewEvidence, SourceKind, State, Subject,
-    Verification,
+    classify, Acquisition, AcquisitionStatus, CheckConclusion, CheckEvidence, ClassifierError,
+    ClassifierInput, FalsificationFact, ObservationInput, Policy, ReviewEvidence, SourceKind,
+    State, Subject, Verification, VerificationStatus,
 };
 use std::collections::BTreeMap;
 
@@ -91,6 +91,16 @@ fn input(subject: Subject, observations: BTreeMap<String, ObservationInput>) -> 
 /// `classify` now refuses malformed input, so every well-formed case unwraps.
 fn ok(inp: &ClassifierInput) -> o7_closure_classifier::Predicate {
     classify(inp).expect("this input is well formed")
+}
+
+fn obs_of<'a>(
+    p: &'a o7_closure_classifier::Predicate,
+    id: &str,
+) -> &'a o7_closure_classifier::ObservationOut {
+    p.observations
+        .iter()
+        .find(|o| o.id == id)
+        .unwrap_or_else(|| panic!("observation {id} missing from the predicate"))
 }
 
 fn state_of(p: &o7_closure_classifier::Predicate, id: &str) -> State {
@@ -261,7 +271,9 @@ fn case_05d_failed_verification_of_a_falsification_is_cannot_check() {
         stable_id: "discussion-3".to_owned(),
         subject_sha: Some(HEAD.to_owned()),
         author: "someone[bot]".to_owned(),
-        verification: Verification::VerificationFailed,
+        verification: Verification::Failed {
+            reason: "reproducer unavailable".to_owned(),
+        },
     });
     let p = ok(&inp);
     let record = p.falsifications.first().expect("one record");
@@ -475,4 +487,93 @@ fn observation_order_follows_the_authoritative_policy_order() {
     let p = ok(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
     let ids: Vec<&str> = p.observations.iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, policy().required_observations);
+}
+
+// ------------------------------------------------------- provenance (RED-3) --
+
+#[test]
+fn case_16_not_produced_and_rate_limited_are_both_owed_yet_distinguishable() {
+    // Two different observed facts that share one state. If the predicate keeps
+    // only the state, it has destroyed the distinction — the same destructive
+    // collapse the headline rule forbids, one level down.
+    let mut obs = all_green(HEAD);
+    obs.insert(
+        "review/codex".to_owned(),
+        ObservationInput::Review(Acquisition::NotProduced),
+    );
+    obs.insert(
+        "review/coderabbit".to_owned(),
+        ObservationInput::Review(Acquisition::RateLimited),
+    );
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
+
+    let codex = obs_of(&p, "review/codex");
+    let rabbit = obs_of(&p, "review/coderabbit");
+    assert_eq!(codex.state, State::Owed);
+    assert_eq!(rabbit.state, State::Owed);
+    assert_eq!(codex.acquisition.status, AcquisitionStatus::NotProduced);
+    assert_eq!(rabbit.acquisition.status, AcquisitionStatus::RateLimited);
+    assert_ne!(codex.acquisition.status, rabbit.acquisition.status);
+}
+
+#[test]
+fn case_17_a_failed_acquisition_keeps_its_reason_in_the_predicate() {
+    // "It failed" cannot be re-evaluated later; #147 requires enough provenance
+    // to re-fetch or re-evaluate, so the reason has to survive serialization.
+    let mut obs = all_green(HEAD);
+    obs.insert(
+        "ci/worker-gate".to_owned(),
+        ObservationInput::Check(Acquisition::Failed {
+            reason: "503 from the checks endpoint".to_owned(),
+        }),
+    );
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), obs));
+
+    let gate = obs_of(&p, "ci/worker-gate");
+    assert_eq!(gate.state, State::CannotCheck);
+    assert_eq!(gate.acquisition.status, AcquisitionStatus::Failed);
+    assert_eq!(
+        gate.acquisition.reason.as_deref(),
+        Some("503 from the checks endpoint")
+    );
+    let json = p.to_json().expect("serializing");
+    assert!(json.contains("503 from the checks endpoint"));
+}
+
+#[test]
+fn case_18_a_failed_falsification_verification_keeps_its_reason() {
+    let mut inp = input(subject(HEAD, HEAD, HEAD), all_green(HEAD));
+    inp.falsifications.push(FalsificationFact {
+        source_kind: SourceKind::ReviewComment,
+        stable_id: "discussion-9".to_owned(),
+        subject_sha: Some(HEAD.to_owned()),
+        author: "someone[bot]".to_owned(),
+        verification: Verification::Failed {
+            reason: "reproducer unavailable".to_owned(),
+        },
+    });
+    let p = ok(&inp);
+
+    let record = p.falsifications.first().expect("one record");
+    assert_eq!(record.state, State::CannotCheck);
+    assert_eq!(record.verification.status, VerificationStatus::Failed);
+    assert_eq!(
+        record.verification.reason.as_deref(),
+        Some("reproducer unavailable")
+    );
+    assert!(p
+        .to_json()
+        .expect("serializing")
+        .contains("reproducer unavailable"));
+}
+
+#[test]
+fn case_19_available_observations_record_that_status_too() {
+    let p = ok(&input(subject(HEAD, HEAD, HEAD), all_green(HEAD)));
+    for id in policy().required_observations {
+        assert_eq!(
+            obs_of(&p, &id).acquisition.status,
+            AcquisitionStatus::Available
+        );
+    }
 }

@@ -136,16 +136,16 @@ pub enum SourceKind {
 /// surface only means "a checkable counterexample may arrive from a surface that
 /// could never carry a verdict" — it does not mean an unverified claim is a
 /// defect. So this gates, and each value maps to exactly one state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verification {
     /// Verified: the defect was reproduced. -> `FINDING`
     Reproduced,
     /// A concrete claim exists and its verification is still owed. -> `OWED`
     Claimed,
     /// Verification was attempted and did not yield a trustworthy answer.
-    /// -> `CANNOT_CHECK`
-    VerificationFailed,
+    /// -> `CANNOT_CHECK`. The reason is carried so the predicate can say WHY,
+    /// not merely that something went wrong.
+    Failed { reason: String },
 }
 
 /// One record on the falsification channel — NOT necessarily an established
@@ -248,10 +248,53 @@ pub struct SourceOut {
     pub stable_id: String,
 }
 
+/// How the observation was obtained, kept separate from the state it produced.
+/// `NOT_PRODUCED` and `RATE_LIMITED` both yield `OWED`, and collapsing them into
+/// the state alone would destroy two distinct observed facts — the same
+/// destructive collapse the headline rule forbids, one level down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AcquisitionStatus {
+    Available,
+    NotProduced,
+    RateLimited,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcquisitionOut {
+    pub status: AcquisitionStatus,
+    /// Always present for `FAILED`: #147 requires the predicate to preserve
+    /// enough provenance to re-evaluate later, and "it failed" alone cannot be
+    /// re-evaluated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum VerificationStatus {
+    Reproduced,
+    Claimed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationOut {
+    pub status: VerificationStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ObservationOut {
     pub id: String,
     pub state: State,
+    /// The acquisition outcome that produced `state`. Distinct from it on
+    /// purpose: several outcomes map to one state.
+    pub acquisition: AcquisitionOut,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceOut>,
 }
@@ -271,7 +314,7 @@ pub struct FalsificationOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject_sha: Option<String>,
     pub author: String,
-    pub verification: Verification,
+    pub verification: VerificationOut,
     /// What this record contributes, so a headline of `FINDING`, `OWED` or
     /// `CANNOT_CHECK` driven by the falsification channel is explainable from
     /// the predicate itself rather than only from this crate's source.
@@ -411,6 +454,13 @@ pub fn classify(input: &ClassifierInput) -> Result<Predicate, ClassifierError> {
             ObservationOut {
                 id: id.clone(),
                 state,
+                // RED-3: every observation reports AVAILABLE with no reason, so
+                // NOT_PRODUCED / RATE_LIMITED / FAILED are indistinguishable in
+                // the predicate. GREEN-3 carries the real outcome through.
+                acquisition: AcquisitionOut {
+                    status: AcquisitionStatus::Available,
+                    reason: None,
+                },
                 source,
             }
         })
@@ -426,11 +476,19 @@ pub fn classify(input: &ClassifierInput) -> Result<Predicate, ClassifierError> {
             },
             subject_sha: f.subject_sha.clone(),
             author: f.author.clone(),
-            verification: f.verification,
+            // RED-3: the failure reason is dropped here. GREEN-3 keeps it.
+            verification: VerificationOut {
+                status: match f.verification {
+                    Verification::Reproduced => VerificationStatus::Reproduced,
+                    Verification::Claimed => VerificationStatus::Claimed,
+                    Verification::Failed { .. } => VerificationStatus::Failed,
+                },
+                reason: None,
+            },
             state: match f.verification {
                 Verification::Reproduced => State::Finding,
                 Verification::Claimed => State::Owed,
-                Verification::VerificationFailed => State::CannotCheck,
+                Verification::Failed { .. } => State::CannotCheck,
             },
         })
         .collect();
