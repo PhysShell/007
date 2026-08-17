@@ -436,8 +436,8 @@ vocabulary: `SourceOut` serializes `kind` and `stable_id` unrenamed, and
 canonical snapshot, which are V1 concepts with their own vocabulary. The two
 must not be interchanged in writing: a predicate example carrying snapshot
 vocabulary reads as an unannounced classifier schema change, and this slice
-changes no classifier schema. `snapshotDigest` is the one field §21 hands to the
-next slice to add.
+changes no classifier schema. `snapshotDigest` is one of the fields §21 hands to
+the classifier provenance binding slice; §21 has the full list.
 
 **Critical rule:**
 
@@ -726,6 +726,17 @@ not let a source-comment digest stand in for one.
 verification witness binding = OWED DESIGN ITEM
 ```
 
+**Consequence, stated normatively rather than left to sequencing.** While that
+binding is OWED, a GitHub acquisition adapter MAY emit `Claimed` and MUST NOT
+emit `Reproduced`. A falsification found on a GitHub surface is by construction
+an unverified claim: a comment cannot verify itself, and the adapter observes
+nothing but comments. Any producer of `Reproduced` is blocked on §19 —
+acquisition is not, because this restriction removes its ability to produce one.
+
+Without that restriction written down, "verification witness is OWED" would be
+discharged by an adapter deciding for itself what `Reproduced` means, which is
+the failure §19 exists to prevent.
+
 ## 20. Credential and secret boundary
 
 No raw HTTP capture. A snapshot projection must never include:
@@ -752,8 +763,44 @@ the boundary and does not introduce masking on its own authority.
 
 ## 21. What the next slices must do
 
-**Next: classifier provenance binding** (a separate slice, after this contract
-merges). The merged classifier must learn to carry:
+The order below is derived from the residuals in §23, not chosen for
+convenience. An OWED item that no slice is blocked on is decoration; each
+precondition here names the slice it actually blocks.
+
+```text
+this contract
+      ↓
+redaction decision (§20)
+      ↓         blocks acquisition: §9 retains bodies byte-exact and §11
+      ↓         retains the bytes, so acquisition without it stores whatever
+      ↓         was pasted into a comment, content-addressed
+      ↓
+matcher implementation binding (§13.1)
+      ↓         blocks the first consumer that APPLIES a matcher, which is
+      ↓         the acquisition adapter, because it computes
+      ↓         matchedSnapshotDigests
+      ↓
+classifier provenance binding
+      ↓
+acquisition adapter
+      ↓
+attestation envelope
+
+verification witness binding (§19)
+            blocks any producer of `Reproduced`. Not on the line above,
+            because §19 forbids the acquisition adapter from emitting one.
+```
+
+**Redaction decision.** A precondition for acquisition, not for this contract.
+
+**Matcher implementation binding.** §13.1 obliges `matcher.id` +
+`matcher.version` to resolve to exactly one predicate and does not say how. Until
+that exists, an adapter told to compute `matchedSnapshotDigests` has no choice
+but to pick a matcher implementation itself — which is the behaviour §13.1 was
+written to forbid, arriving through a missing prerequisite rather than through a
+missing rule.
+
+**Classifier provenance binding.** The merged classifier must learn to carry:
 
 ```text
 subject read provenance
@@ -764,18 +811,26 @@ falsification scan state
 
 Only then does the acquisition adapter have a stable consumer contract.
 
-**Then: acquisition adapter.** It must fetch every required surface, paginate
+**Acquisition adapter.** It must fetch every required surface, paginate
 completely, construct normalized source and query snapshots, **retain the
-snapshot bytes**, compute the canonical digest, construct the decision basis, and
-pass only typed values to the classifier.
+snapshot bytes**, compute the canonical digest, apply the bound matcher,
+construct the decision basis, and pass only typed values to the classifier. Per
+§19 it emits `Claimed`, never `Reproduced`.
 
-**Then: attestation envelope.** It receives an already-stable predicate plus
+**Attestation envelope.** It receives an already-stable predicate plus
 content-addressed provenance snapshots and merely authenticates them.
+
+**Verification witness binding** is not on the sequence above because nothing on
+it emits `Reproduced`. It gates the first slice that does.
 
 ## 22. Acceptance criteria
 
 This contract is frozen only if each question below is answerable mechanically
 from this document. "The implementation will sort it out" means it is not.
+
+A row answered **OWED** is answered: the document says the question is open and
+names where. What is forbidden is a row that reads as settled while §23 records
+it as open — necessary conditions presented as sufficient ones.
 
 | question | section |
 |---|---|
@@ -792,7 +847,8 @@ from this document. "The implementation will sort it out" means it is not.
 | How are `head_before` / `head_after` represented? | §8.1 — two `HeadReadEvent`s |
 | What if the second head read failed? | §8.1 — `CANNOT_CHECK`, not "not stale" |
 | What proves a matcher did not simply miss the object? | §13 candidate set + matcher id |
-| How is the matcher re-executed later? | §13.1 — id, version **and** parameters |
+| What inputs must be retained for matcher re-execution? | §13.1 — id, version, parameters, retained candidates |
+| How does id + version resolve to exactly one predicate? | §23 — **OWED**: matcher implementation binding |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
 | What order do the digest arrays use? | §13.2 — observation order, duplicates kept |
 | What does a failed head read record? | §8.1 — `reason`, and no `snapshotDigest` |
@@ -808,31 +864,51 @@ from this document. "The implementation will sort it out" means it is not.
 | What must never be retained from HTTP/auth? | §20 |
 | What must the next classifier slice add? | §21 |
 | What must the acquisition adapter do? | §21 |
+| May the acquisition adapter emit `Reproduced`? | §19 — no; `Claimed` only |
+| Which residual blocks which slice? | §23, and §21's order is read off it |
 | What remains OWED? | §23 |
 
 ## 23. Residuals — OWED, not decided here
 
-- **Verification witness binding** (§19). No form is specified. A source digest
-  must not be substituted for one.
+Each residual below names **what it blocks**. An OWED item nothing is blocked on
+is a decorative grave for a requirement, and §21's sequence is derived from these
+statements rather than written alongside them.
+
 - **Redaction policy** for secrets pasted into untrusted bodies (§20). Naming
   the boundary is not solving it.
 
-  These two are OWED, and that is compatible with freezing this contract. It is
-  **not** compatible with starting the acquisition adapter. §9 requires bodies
-  retained byte-exact and §11 requires the bytes kept; an adapter built before a
-  redaction decision would therefore implement careful immutable storage for a
-  credential somebody pasted into a comment, and content addressing makes that
-  hard to take back. The redaction decision is a precondition for acquisition,
-  not for the contract.
+  *Blocks the acquisition adapter.* §9 requires bodies retained byte-exact and
+  §11 requires the bytes kept, so an adapter built first would implement careful
+  immutable storage for a credential somebody pasted into a comment — and
+  content addressing makes that hard to take back. A precondition for
+  acquisition, not for this contract.
+
+- **Verification witness binding** (§19). No form is specified. A source digest
+  must not be substituted for one.
+
+  *Blocks any producer of `Reproduced` — which is not the acquisition adapter.*
+  An earlier revision grouped this with redaction as jointly blocking
+  acquisition, but gave only the redaction argument and never an argument for
+  this one. Correcting the grouping rather than padding the sequence: §19 now
+  states normatively that a GitHub acquisition adapter emits `Claimed` and never
+  `Reproduced`, because a comment cannot verify itself. That restriction is what
+  makes acquisition unblocked here; without it, "OWED" would be discharged by
+  the adapter deciding for itself what `Reproduced` means.
 - **Semantic normalization** of bodies (§9). V1 is byte-exact; any
   whitespace-insensitive comparison is a later, separately versioned decision.
-- **Matcher implementation registry** (§13.1). The contract obliges
+- **Matcher implementation binding** (§13.1). The contract obliges
   `matcher.id` + `matcher.version` to resolve to exactly one predicate, and says
   nothing about *how* that resolution happens — a registry file, a crate path
   plus a version, a digest over the implementation. Until it is decided, a
   matcher named only in prose is a locator pointing at something mutable, which
   is what §3 objects to everywhere else. The specimens here name such a matcher
   and say so rather than implying the binding already exists.
+
+  *Blocks the first consumer that applies a matcher*, which is the acquisition
+  adapter, since it computes `matchedSnapshotDigests`. An adapter written before
+  this binding exists has no choice but to select a matcher implementation
+  itself — the behaviour §13.1 forbids, re-entering through a missing
+  prerequisite rather than a missing rule.
 - **Reaction surface** (§8). Still no Step 0B specimen; not added here.
 - **Pagination specimen** (§14). The rule is frozen; the historical witness does
   not exist and the contract vectors for it are synthetic.
@@ -865,15 +941,17 @@ it was written to guarantee.
   closure-relevant field* wording delegated the projection to the adapter.
 - **§8 — `null` and absent are one input** and canonicalize to omission, so two
   adapters observing the same fact cannot compute two digests.
-- **§8.1 — two head reads are two `HeadReadEvent`s**, each with `role`,
-  `snapshotDigest`, `acquisition` and `observedAt`. Two pointers at one snapshot
-  record one read. A FAILED HEAD_AFTER yields `CANNOT_CHECK`, never a silent
-  absence of `STALE`.
+- **§8.1 — two head reads are two `HeadReadEvent`s.** Two pointers at one
+  snapshot record one read. A FAILED HEAD_AFTER yields `CANNOT_CHECK`, never a
+  silent absence of `STALE`. *(This round required `role`, `snapshotDigest`,
+  `acquisition` and `observedAt` on every event; §24.2 replaced that with the
+  tagged shapes, and §8.1 is authoritative.)*
 - **§13 — authoritative absence requires the retained candidate set and a named
-  matcher.** `allReturnedSnapshotDigests` and `matcher.id`/`matcher.version` are
-  REQUIRED; `NotProduced` is legal only when a COMPLETE enumeration *and* the
-  identified matcher over the retained candidates yield an empty matched subset.
-  Matched sets are digests, not ids.
+  matcher.** `allReturnedSnapshotDigests` and matcher identity became REQUIRED;
+  `NotProduced` is legal only when a COMPLETE enumeration *and* the identified
+  matcher over the retained candidates yield an empty matched subsequence.
+  Matched lists are digests, not ids. *(This round named the matcher by
+  `id`/`version` only; §24.2 added `parameters`, and §13.1 is authoritative.)*
 
 The corresponding conformance witness, added in §9, is the equal-`updatedAt`
 body pair: a witness that varies the body together with another field cannot
@@ -900,3 +978,31 @@ distinguish byte-exact retention from `trim()`.
   as a subsequence, duplicates retained. JCS does not sort arrays, so without
   this two conforming adapters could compute different query digests from one
   observation.
+
+### 24.3 Added in the third review correction round
+
+A consistency pass. It introduces one norm; the rest aligns statements the
+document was already making about itself.
+
+- **§19 — a GitHub acquisition adapter emits `Claimed` and never `Reproduced`.**
+  The one new norm, and the reason the sequencing correction below is sound
+  rather than convenient: it is what actually unblocks acquisition, instead of
+  the residual quietly dropping out of the order.
+- **§21 / §23 — preconditions and slice order are derived from each other.**
+  Every residual now names what it blocks; the sequence is read off those
+  statements. Matcher implementation binding enters the order ahead of
+  acquisition, since the adapter computes `matchedSnapshotDigests` and would
+  otherwise choose its own matcher — §13.1's prohibition defeated by a missing
+  arrow rather than a missing rule. Verification-witness binding leaves the
+  linear order and becomes a gate on any producer of `Reproduced`; an earlier
+  revision asserted it blocked acquisition while giving only the redaction
+  argument for the claim.
+- **§22 — the matcher acceptance row splits in two.** Retained inputs are
+  answered; how `id` + `version` resolve to one predicate is OWED. One row was
+  presenting necessary conditions as sufficient ones while §23 recorded the
+  question as open.
+- **§24.1 — the stale `HeadReadEvent` summary is corrected.** It still described
+  the untagged shape that §24.2 replaced. This is the third instance of the same
+  defect class in this document: the normative text is fixed and a downstream
+  summary keeps living in the previous version. Each cross-reference now points
+  at the authoritative section rather than restating it.

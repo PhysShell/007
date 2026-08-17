@@ -239,10 +239,14 @@ test whose expectations were produced by the code under test proves nothing.
   to infer it. §23 records the underlying gap as OWED: the contract obliges the
   identity pair to resolve to exactly one predicate and does not yet say how that
   resolution happens, so a matcher named only in prose is still a locator
-  pointing at something mutable.
+  pointing at something mutable. §21 places that binding **before** the
+  acquisition adapter, since the adapter computes `matchedSnapshotDigests` and
+  would otherwise have to choose a matcher implementation itself.
 - **No verification witness.** §19 leaves the binding between
   `Verification::Reproduced` and its evidence OWED, so specimen A retains only
-  what the comment *said*, never a claim that anything was checked.
+  what the comment *said*, never a claim that anything was checked. §19 also now
+  states the consequence normatively: a GitHub acquisition adapter emits
+  `Claimed` and never `Reproduced`, because a comment cannot verify itself.
 - **No reaction surface specimen**, matching the frozen Step 0B position. The
   `reactions` field appears in specimen B strictly as noise to be discarded.
 - **No secret-in-body specimen.** §20 names the boundary and refuses silent
