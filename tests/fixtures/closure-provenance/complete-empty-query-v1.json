@@ -1,0 +1,39 @@
+{
+  "specimenSet": "closure-provenance-v1",
+  "specimens": ["C"],
+  "synthetic": true,
+  "contract": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": ["3", "7", "11", "13", "14"],
+  "what": "an empty result that is authoritative, because the enumeration completed",
+  "pairedWith": "incomplete-query-v1.json",
+  "locator": {
+    "kind": "github-query",
+    "surface": "pull-request-reviews",
+    "repository": "PhysShell/007",
+    "pullRequest": "9001"
+  },
+  "acquisitionTrace": {
+    "requestedPages": ["1"],
+    "obtainedPages": ["1"],
+    "linkHeaderNextPresentOnLastObtainedPage": false,
+    "failures": []
+  },
+  "canonical": {
+    "schemaVersion": 1,
+    "sourceKind": "github-query-snapshot",
+    "surface": "pull-request-reviews",
+    "binding": {
+      "repository": "PhysShell/007",
+      "pullRequest": "9001"
+    },
+    "pagination": {
+      "perPage": 100,
+      "pagesRequested": ["1"],
+      "pagesObtained": ["1"],
+      "nextPagePresent": false
+    },
+    "enumeration": "COMPLETE",
+    "matchedStableIds": []
+  },
+  "canonicalDigest": "sha256:ef3290df3c3de8141bf3f160a3a23494212c22b6878dd8beef74d744249ed729"
+}
