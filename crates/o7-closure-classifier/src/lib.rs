@@ -254,26 +254,134 @@ impl Predicate {
     }
 }
 
+/// A check is positive evidence only when it is bound to the frozen subject.
+/// A check bound elsewhere is not evidence about this subject at all, so it
+/// leaves the observation owed rather than combining across commits.
+fn classify_check(
+    acq: &Acquisition<CheckEvidence>,
+    expected_sha: &str,
+) -> (State, Option<SourceOut>) {
+    match acq {
+        Acquisition::Available(check) => {
+            let source = Some(SourceOut {
+                kind: SourceKind::GithubActionsCheck,
+                stable_id: check.stable_id.clone(),
+            });
+            if check.head_sha != expected_sha {
+                (State::Owed, source)
+            } else {
+                match check.conclusion {
+                    CheckConclusion::Success => (State::Pass, source),
+                    CheckConclusion::Failure => (State::Finding, source),
+                }
+            }
+        }
+        Acquisition::NotProduced | Acquisition::RateLimited => (State::Owed, None),
+        Acquisition::Failed { .. } => (State::CannotCheck, None),
+    }
+}
+
+/// Positive reviewer evidence is strict: the submitted review's immutable
+/// commit binding must equal the frozen subject. A wrong-SHA review yields no
+/// verdict here — neither a pass nor a finding.
+fn classify_review(
+    acq: &Acquisition<ReviewEvidence>,
+    expected_sha: &str,
+) -> (State, Option<SourceOut>) {
+    match acq {
+        Acquisition::Available(review) => {
+            let source = Some(SourceOut {
+                kind: SourceKind::SubmittedReview,
+                stable_id: review.stable_id.clone(),
+            });
+            if review.commit_id != expected_sha {
+                (State::Owed, source)
+            } else if review.carries_finding {
+                (State::Finding, source)
+            } else {
+                (State::Pass, source)
+            }
+        }
+        Acquisition::NotProduced | Acquisition::RateLimited => (State::Owed, None),
+        Acquisition::Failed { .. } => (State::CannotCheck, None),
+    }
+}
+
 /// Classify one snapshot. Every invocation is independent: no memory of a
 /// previous headline, so a finding that disappears does not linger.
-pub fn classify(_input: &ClassifierInput) -> Predicate {
-    // RED: the contract, the input model and the acceptance tests exist; the
-    // classification logic does not yet. This placeholder deliberately fails the
-    // suite so the GREEN commit has something to turn green.
+pub fn classify(input: &ClassifierInput) -> Predicate {
+    let expected = input.subject.expected_sha.as_str();
+
+    // The head moving invalidates the SNAPSHOT, not the individual observations,
+    // which remain statements about the frozen subject. Recorded alongside the
+    // vector so nothing is overwritten.
+    let subject_stale =
+        input.subject.head_before != expected || input.subject.head_after != expected;
+
+    let observations: Vec<ObservationOut> = input
+        .policy
+        .required_observations
+        .iter()
+        .map(|id| {
+            // A required observation nobody supplied is owed. Absence of an
+            // entry is the caller's explicit omission, not an acquisition
+            // failure, and the two are not merged.
+            let (state, source) = match input.observations.get(id) {
+                None => (State::Owed, None),
+                Some(ObservationInput::Check(acq)) => classify_check(acq, expected),
+                Some(ObservationInput::Review(acq)) => classify_review(acq, expected),
+            };
+            ObservationOut {
+                id: id.clone(),
+                state,
+                source,
+            }
+        })
+        .collect();
+
+    let falsifications: Vec<FalsificationOut> = input
+        .falsifications
+        .iter()
+        .map(|f| FalsificationOut {
+            source: SourceOut {
+                kind: f.source_kind,
+                stable_id: f.stable_id.clone(),
+            },
+            subject_sha: f.subject_sha.clone(),
+            author: f.author.clone(),
+            verification: f.verification,
+        })
+        .collect();
+
+    // Headline is derived presentation over everything recorded: the observation
+    // vector, plus falsification (which has no required-observation slot of its
+    // own), plus subject staleness. The vector itself is never rewritten.
+    let mut headline = observations
+        .iter()
+        .map(|o| o.state)
+        .max_by_key(|s| s.rank())
+        .unwrap_or(State::Pass);
+    if !falsifications.is_empty() && State::Finding.rank() > headline.rank() {
+        headline = State::Finding;
+    }
+    if subject_stale {
+        headline = State::Stale;
+    }
+
     Predicate {
         schema_version: 1,
-        repository: String::new(),
-        pull_request: 0,
-        git_commit: String::new(),
+        repository: input.subject.repository.clone(),
+        pull_request: input.subject.pull_request,
+        git_commit: input.subject.expected_sha.clone(),
         policy: PolicyOut {
-            id: String::new(),
-            required_observations: Vec::new(),
-            completeness_claimed: false,
+            id: input.policy.id.clone(),
+            required_observations: input.policy.required_observations.clone(),
+            completeness_claimed: input.policy.completeness_claimed,
         },
-        observations: Vec::new(),
-        falsifications: Vec::new(),
-        subject_stale: false,
-        headline: State::Pass,
-        known_debts: Vec::new(),
+        observations,
+        falsifications,
+        subject_stale,
+        headline,
+        known_debts: input.known_debts.clone(),
     }
 }
