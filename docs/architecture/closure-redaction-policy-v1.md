@@ -113,36 +113,117 @@ value.
 
 ## 5. Gate outcomes
 
-Exactly three, and they are not collapsible:
+The gate is evaluated **per field**, and the outcome below is the summary of
+those per-field results. Field-level evaluation is what §7 and §10 need; a
+whole-object verdict cannot say which inputs survived.
 
 ```text
-RETAIN          the detector successfully assessed every field that would be
-                retained, and emitted no blocking finding under its policy
+RETAIN          every field the projection would retain was successfully
+                assessed, and none carries a blocking finding
 
-BLOCK_SECRET    the detector successfully assessed and emitted at least one
-                blocking finding
+BLOCK_SECRET    at least one assessed field carries a blocking finding
 
-CANNOT_ASSESS   the detector did not successfully assess every field that
-                would be retained — it failed, was unavailable, errored, or
-                saw only part of the input
+CANNOT_ASSESS   no blocking finding, and at least one field the projection
+                would retain was not successfully assessed
 ```
 
-**`CANNOT_ASSESS` and `RETAIN` must never merge.** "The detector found nothing"
-and "the detector did not run" produce the same empty finding list and mean
-opposite things. This is the project's oldest failure mode:
+### 5.1 Precedence, because the cases overlap
+
+A detector can find a secret in `/body` and then die before reaching
+`/user/login`. Both descriptions then apply, so the choice must be frozen rather
+than left to whoever writes the adapter:
+
+```text
+any blocking finding                       -> BLOCK_SECRET
+else any retained field unassessed         -> CANNOT_ASSESS
+else                                       -> RETAIN
+```
+
+`BLOCK_SECRET` therefore does **not** imply that everything was inspected. So
+coverage is recorded separately and always:
+
+```text
+coverageComplete   true only when every field the projection would retain
+                   was successfully assessed
+```
+
+`BLOCK_SECRET` with `coverageComplete: false` is a normal, expressible state: a
+secret was found and the rest was never looked at. Collapsing that into either
+outcome alone would lose one of the two facts.
+
+### 5.2 The denominator is normative, not declared
+
+"Every field the projection would retain" is fixed by §5.3 below, derived from
+the closed projections of provenance V1 §8. It is **not** whatever an
+acquisition record claims it is.
+
+This matters more than it looks. If the assessed set and the required set both
+come from the same producer, coverage is self-certified:
+
+```text
+record:   "I assessed everything"
+checker:  "well, if you say so"
+```
+
+A consumer verifying an assessment MUST compute the required set from §5.3 by
+`sourceKind`. A record MAY also carry the set it believed was required, but only
+as a declaration to be checked against §5.3 for exact equality — never as the
+authority.
+
+### 5.3 Required field set per source kind
+
+JSON pointers into the **decoded source object**, so these are GitHub's field
+names, not the canonical projection's:
+
+```text
+github-issue-comment
+  /id  /user/id  /user/login  /user/type  /author_association
+  /body  /created_at  /updated_at
+
+github-submitted-review
+  /id  /user/id  /user/login  /user/type  /author_association
+  /state  /body  /submitted_at  /commit_id
+
+github-review-comment
+  /id  /pull_request_review_id
+  /user/id  /user/login  /user/type  /author_association
+  /body  /commit_id  /original_commit_id  /path
+  /created_at  /updated_at
+  present-only: /in_reply_to_id  /line  /original_line  /side  /start_line
+
+github-pull-request-head
+  /number  /head/sha  /head/ref  /head/repo/full_name
+  present-only: /updated_at
+
+github-actions-check
+  /id  /name  /head_sha  /status
+  present-only: /conclusion  /started_at  /completed_at
+```
+
+A **present-only** field joins the required set exactly when it is present in
+the decoded source. Absent means nothing to assess; present means it is retained
+and must therefore be assessed like any other.
+
+`github-query-snapshot` is outside the gate. It is constructed rather than
+fetched, and retains only enumeration facts and digests of objects that passed
+the gate on their own.
+
+Structurally constrained fields — ids, timestamps — are in the set on purpose.
+Assessing them is cheap, and an exception list is how a coverage rule rots: the
+first carve-out is always obviously safe, and it is never the last.
+
+### 5.4 Why the three do not merge
+
+`CANNOT_ASSESS` and `RETAIN` must never merge. "The detector found nothing" and
+"the detector did not run" produce the same empty finding list and mean opposite
+things. This is the project's oldest failure mode:
 
 ```text
 failure -> empty set -> green
 ```
 
 An assessment that did not successfully complete over the exact bytes is **not**
-evidence that retention is safe. Absence of a finding is only meaningful as the
-result of a completed assessment.
-
-`RETAIN` additionally requires **coverage**: the assessed field set must include
-every field the projection would retain. A detector that read `/body` while the
-projection also retains `/user/login` assessed part of the input, and partial
-assessment is `CANNOT_ASSESS`, not `RETAIN`.
+evidence that retention is safe.
 
 ## 6. What each outcome permits
 
@@ -158,7 +239,8 @@ FORBIDDEN   a normal source snapshot of any §8 sourceKind
 FORBIDDEN   digest(original bytes) with the bytes discarded
 FORBIDDEN   mask(original) and any digest over the masked form
 FORBIDDEN   any semantic fact derived from the blocked field values
-PERMITTED   a separately typed blocked-source metadata record (§7)
+PERMITTED   a separately typed reduced source record (§7),
+            holding exactly the fields that individually passed
 ```
 
 Each prohibition, with its reason:
@@ -183,52 +265,83 @@ input. Recorded as a residual in §11, not smuggled in here.
 ### 6.3 CANNOT_ASSESS
 
 Same prohibitions as `BLOCK_SECRET`, for a different reason: the system does not
-know whether the content is safe, and unknown is not safe. The blocked-source
-metadata record of §7 is permitted on the same terms, and carries the
-`CANNOT_ASSESS` outcome rather than pretending a finding exists.
+know whether the content is safe, and unknown is not safe. The reduced source
+record of §7 is permitted on the same terms, and carries the `CANNOT_ASSESS`
+outcome rather than pretending a finding exists.
 
 The two outcomes are **not** merged into one "not retained" bucket. They record
 different facts — one is a positive detection, the other an absent measurement —
 and collapsing them destroys the distinction exactly as `NOT_PRODUCED` and
 `RATE_LIMITED` would be destroyed by collapsing them into `OWED`.
 
-## 7. The blocked-source metadata record
+## 7. The reduced source record
 
-When a source is blocked, fields that are themselves safe MAY still be retained
-— but never as, and never mistakable for, the projection §8 defines.
+When a source does not pass the gate as a whole, the fields that **individually**
+passed MAY still be retained — never as, and never mistakable for, the
+projection §8 of provenance V1 defines.
+
+An earlier revision called this a "blocked-source metadata record" and let the
+producer nominate which fields were safe. Both were wrong. The name implied only
+incidental metadata, while under the rule below a successfully-assessed clean
+`/body` is retainable; and "safe" decided by the same party that wrote the record
+is not a check, it is a claim.
 
 ```text
-sourceKind           github-blocked-source-metadata
+sourceKind           github-reduced-source-record
 REQUIRED             schemaVersion  sourceKind
-                     locatorKind          the §8 sourceKind that was refused
+                     locatorKind          the provenance V1 kind that was refused
                      stableId
                      redactionPolicyVersion
                      outcome              BLOCK_SECRET | CANNOT_ASSESS
-                     retainedFields       object: the safe field values kept
-                     blockedFields        array: JSON pointers NOT retained
-OPTIONAL-IF-PRESENT  (none)
+                     coverageComplete
+                     retainedFields       object keyed by JSON pointer
+                     blockedFields        array of JSON pointers
 ```
 
-Rules:
+### 7.1 Which fields may be retained — computed, not nominated
 
-- Its `sourceKind` is **distinct** from every §8 kind. It MUST NOT reuse the
-  refused kind or that kind's `schemaVersion`. A partial record wearing a
-  complete record's identity is how a projection silently becomes weaker than
+Let `required` be the §5.3 set for `locatorKind`, `assessed` the fields the
+detector successfully assessed, and `flagged` the fields named by blocking
+findings. Then:
+
+```text
+blockedFields   = flagged  ∪  (required \ assessed)
+retainedFields  = required \ blockedFields
+```
+
+Both are **determined**, not chosen. Consequences, stated so they cannot be
+quietly avoided:
+
+- A field named by a finding is blocked. Always.
+- A field the detector never successfully assessed is blocked. Always — an
+  unassessed field is not "probably a timestamp", it is unexamined.
+- `retainedFields` and `blockedFields` **exhaustively partition** `required`:
+  every field appears in exactly one, and nothing appears in neither.
+- Retention is not discretionary in the other direction either. A field that
+  survives the computation is retained, so the record cannot be thinned by
+  judgement after the fact.
+- Keys are full JSON pointers. `/user/login` is a nested field and comparing it
+  by a trimmed leaf name is not the same comparison.
+
+### 7.2 What the record is, and is not
+
+- Its `sourceKind` is **distinct** from every provenance V1 §8 kind and MUST NOT
+  reuse the refused kind or that kind's `schemaVersion`. A partial record wearing
+  a complete record's identity is how a projection silently becomes weaker than
   its contract.
 - `blockedFields` MUST be non-empty. A record that blocked nothing is not a
-  blocked-source record.
-- `retainedFields` MUST NOT contain any field named in `blockedFields`, in whole
-  or in part — no excerpt, no prefix, no length, no digest of it.
-- It is canonicalized and digested like any other retained object (§7 of
-  provenance V1) and its bytes are retained. It is real evidence of a reduced
+  reduced record — it is a complete projection, and should be one.
+- It is canonicalized, digested and retained like any other object, and bound to
+  its authorising assessment per §9.2. It is real evidence of a reduced
   observation, not a placeholder.
-- **It satisfies §11 only for facts derived solely from the fields it actually
-  contains.** A decision that depended on a blocked field is not rescued by it.
+- **It satisfies §11 of provenance V1 only for facts derived solely from the
+  fields it actually contains.** A decision that read a blocked field is not
+  rescued by it.
 
-That last rule is the useful one. A wrong-SHA `OWED` derives from
-`review.commitId` and the subject head; if the review *body* is blocked but
-`commitId` is retained, that decision remains fully explainable from retained
-immutable bytes and stays admissible. A decision that read the body does not.
+That last rule is the load-bearing one. A wrong-SHA `OWED` derives from
+`review.commitId` and the subject head; if the review *body* is blocked while
+`/commit_id` was assessed clean and retained, that decision remains fully
+explainable from retained immutable bytes.
 
 ## 8. Derived facts over blocked content
 
@@ -255,9 +368,20 @@ exists to prevent:
 derived decision  +  deliberately destroyed source  =  provenance hole
 ```
 
-Facts derived **solely** from retained safe metadata are unaffected, and §7
-already states the test: every input field of the derived fact must appear in a
-retained record.
+Facts derived **solely** from fields that survived §7.1 are unaffected. The test
+is mechanical and must be **computed, never declared**:
+
+```text
+for each input pointer of the derived fact
+    resolve it against the retained records for that locator
+        complete projection, or reduced source record
+    absent  ->  the fact is inadmissible
+```
+
+A record that merely asserts `everyInputFieldRetained: true` proves nothing: the
+same party wrote the assertion and the record it describes. A consumer resolves
+the pointers itself, and treats such a field as a claim to be checked rather than
+an answer to be trusted.
 
 ## 9. Detector provenance
 
@@ -272,25 +396,24 @@ REQUIRED             schemaVersion
                      detector.version
                      detector.configDigest
                      representation        what was assessed
-                     assessedFields        JSON pointers into the decoded source
+                     assessedFields        fields SUCCESSFULLY assessed
+                     coverageComplete
                      outcome               RETAIN | BLOCK_SECRET | CANNOT_ASSESS
                      observedAt
 CONDITIONAL          findings              REQUIRED, non-empty, on BLOCK_SECRET
-                     reason                REQUIRED on CANNOT_ASSESS
+                     reasonCode            REQUIRED on CANNOT_ASSESS
+                     reasonDetail          OPTIONAL, and constrained by §9.3
 ```
 
 - `representation` names the form the detector actually saw. V1 defines exactly
-  one legal value, `decoded-source-field-values`, matching §4. It exists as a
-  field rather than as an assumption so that a future representation cannot be
-  introduced silently.
-- `findings` carry an opaque finding identifier and the field pointer. They MUST
-  NOT carry the matched substring, an excerpt, a prefix, a length, or a digest
-  of the matched bytes. A findings list that quotes the secret is a leak wearing
-  a security record's clothing.
-- `reason` on `CANNOT_ASSESS` MUST be non-empty. An unexplained inability to
-  check is indistinguishable from not having tried.
-- A `RETAIN` outcome MUST NOT appear without a completed assessment, and MUST
-  NOT appear when `assessedFields` omits a field the projection retains.
+  one legal value, `decoded-source-field-values`, matching §4. It is a field
+  rather than an assumption so a future representation cannot arrive silently.
+- `assessedFields` means **successfully assessed**: the detector produced a
+  result for that field. A field it started and abandoned is not assessed, and
+  listing it would convert a crash into coverage.
+- `findings` carry an opaque finding identifier and the field pointer, and every
+  field they name must appear in `blockedFields` per §7.1.
+- A `RETAIN` outcome MUST NOT appear without `coverageComplete: true`.
 
 ### 9.1 What "no blocking finding" does and does not mean
 
@@ -309,52 +432,148 @@ about the world that no scanner can support. The contract records the second,
 and the required fields exist so that the record cannot be mistaken for the
 first.
 
-## 10. Consequence for closure state — derived, not decreed
+### 9.2 The assessment is retained evidence, and it is bound
 
-The tempting shorthand is `SECRET_DETECTED -> CANNOT_CHECK`. Checked against the
-frozen vocabulary, that is **right about the state and wrong about the record**,
-so it is not adopted as written.
-
-Derivation, using only #147's vocabulary and provenance V1:
+An assessment that authorises permanent retention and then evaporates is worse
+than no record: a month later one can prove the bytes were kept and not which
+decision permitted keeping them.
 
 ```text
-the producer produced the object          -> not NOT_PRODUCED, so not OWED
-                                             on the producer axis (§15)
-the fetch succeeded; we hold the bytes    -> acquisition is AVAILABLE
-                                             recording FAILED would misreport
-                                             what happened
-the body cannot be retained               -> §3: any state that depended on it
-                                             is unexplainable from the artifact,
-                                             so not PASS and not FINDING
-nothing here concerns head movement       -> not STALE
-                                          => CANNOT_CHECK
+RetentionAssessment
+        ↓ canonicalize (provenance V1 §7)
+        ↓ SHA-256
+   assessmentDigest      and the canonical bytes are RETAINED
 ```
 
-So the **state** is `CANNOT_CHECK`. But the naive arrow collapses the outcome
-into the acquisition axis, which would destroy a true observation: the fetch
-succeeded. Retention admissibility is therefore a **third axis**, orthogonal to
-acquisition status:
+Binding is a **separate retained object**, because provenance V1 §8 projections
+are closed and adding a field to them retroactively is exactly the widening §8
+forbids:
+
+```text
+RetentionBinding
+REQUIRED   schemaVersion
+           recordDigest       the retained projection or reduced record
+           assessmentDigest   the assessment that authorised it
+```
+
+Every retained record produced through this gate — complete projection or reduced
+record — MUST have a `RetentionBinding`. A retained record with no reachable
+authorising assessment is inadmissible: it is bytes somebody kept, not evidence
+somebody was permitted to keep.
+
+### 9.3 The assessment must be safe by construction
+
+The assessment record is retained forever. It must therefore not become the
+place the secret lives.
+
+```text
+FORBIDDEN in any field of the assessment
+    the matched substring, an excerpt, a prefix or suffix,
+    a length, a character count, a digest of the matched bytes,
+    raw detector stdout, stderr, or an exception message,
+    any quoted fragment of an assessed field value
+```
+
+Prohibiting this in `findings` alone is not enough. People are remarkably good at
+moving a leak one field sideways, and the obvious sideways field is the free-text
+failure reason:
+
+```text
+reason: "parser failed near \"<the secret>\""
+```
+
+So `CANNOT_ASSESS` carries a **closed** `reasonCode`:
+
+```text
+DETECTOR_UNAVAILABLE   the detector could not be invoked at all
+DETECTOR_FAILED        it was invoked and did not produce a usable result
+INCOMPLETE_COVERAGE    it produced results for only part of the required set
+INVALID_RESULT         it produced a result that failed validation
+```
+
+`reasonDetail` is optional, and when present MUST be producer-authored text —
+never a pass-through of detector output. The mechanical form of that rule: no
+string anywhere in an assessment may contain a run of 8 or more consecutive
+characters taken from any assessed field value.
+
+## 10. Consequence for closure state — via the decision basis
+
+An earlier revision of this section drew the arrow
+
+```text
+acquisition = AVAILABLE  +  gate = BLOCK_SECRET   ->  CANNOT_CHECK
+```
+
+and that contradicted §7 and its own specimen R7. §7 says a wrong-SHA decision
+resting on a retained `/commit_id` stays fully explainable when the body is
+blocked; the arrow above says the observation is unexplainable regardless. Both
+cannot be true.
+
+The arrow was wrong, and instructively so. Refusing to write `acquisition =
+FAILED` for a successful fetch was correct; asserting `CANNOT_CHECK` for a
+decision whose every input survives is the same error one step later — reporting
+a loss of evidence that did not occur.
+
+**The gate does not determine the state. It determines which inputs remain
+provenanced, and the state follows from that, per decision.**
+
+```text
+gate outcome
+      ↓
+admissible decision basis     which fields still resolve to retained bytes
+      ↓
+per-decision evaluation       does THIS decision's every input resolve?
+      ↓
+state
+```
+
+The rule:
+
+```text
+every input of this decision resolves to a retained record
+    -> the frozen classifier semantics apply, unchanged
+    -> a wrong-SHA review may still be OWED, a check may still be PASS
+
+any input of this decision does not resolve
+    -> that observation is CANNOT_CHECK
+```
+
+So a blocked body does not sweep an entire observation aside. It removes the
+fields it blocked, and each decision is then evaluated against what is left.
+R6 and R7 are the witness pair: identical gate outcome, identical blocked field,
+opposite admissibility, because one decision read the body and the other read
+only `/commit_id`.
+
+### 10.1 The three axes
+
+Retention admissibility is still a third axis, orthogonal to acquisition — that
+part of the earlier revision survives. What changes is that it is **per field**,
+and the state is computed from the axes rather than read off one of them.
 
 ```text
 acquisition     what happened when we tried to obtain the object
-retention gate  whether what we obtained may become retained evidence
-state           derived from both, never replacing either
+retention       per field, whether it may become retained evidence
+state           derived from both, per decision, never replacing either
 ```
 
 ```text
-acquisition = AVAILABLE  +  gate = BLOCK_SECRET     -> CANNOT_CHECK
-acquisition = AVAILABLE  +  gate = CANNOT_ASSESS    -> CANNOT_CHECK
-acquisition = FAILED                                 -> CANNOT_CHECK (§15)
-                                                        gate never reached
+acquisition = AVAILABLE  gate = RETAIN                     normal semantics
+acquisition = AVAILABLE  gate = BLOCK_SECRET, inputs kept   normal semantics
+acquisition = AVAILABLE  gate = BLOCK_SECRET, input blocked CANNOT_CHECK
+acquisition = AVAILABLE  gate = CANNOT_ASSESS, input unkept CANNOT_CHECK
+acquisition = FAILED                                        CANNOT_CHECK (§15)
 ```
 
-All three yield the same headline and are three different facts. Per #147's
-headline rule, the derived presentation must never destroy the per-observation
-vector, so all three remain separately recorded.
+Several rows share a headline and are different facts. Per #147's headline rule,
+the derived presentation must never destroy the per-observation vector, so all of
+them remain separately recorded.
 
-**The classifier has no such axis today.** This is a requirement handed to the
-classifier provenance binding slice, recorded in §11 with what it blocks. No
-classifier change is made here.
+### 10.2 What the classifier still lacks
+
+The classifier can express none of this today: no per-field retention, no notion
+of a decision basis whose inputs may be individually missing. That is a
+requirement handed to the classifier provenance binding slice, recorded in §11
+with what it blocks. No classifier change is made here.
 
 ## 11. Residuals — OWED, each naming what it blocks
 
@@ -365,11 +584,16 @@ classifier change is made here.
   acquisition adapter.* This is deliberately the same shape as provenance V1
   §13.1's matcher binding, and for the same reason: a named algorithm without
   immutable resolution is a locator pointing at mutable semantics.
-- **Classifier retention axis.** The classifier cannot currently express
-  `acquisition = AVAILABLE, gate = BLOCK_SECRET`. *Blocks the classifier
-  provenance binding slice*, which must add it; without it an adapter would have
-  to forge `FAILED` to express a blocked retention, misreporting a fetch that
-  succeeded.
+- **Classifier retention axis.** The classifier can express none of §10: no
+  per-field retention, and no decision basis whose inputs may be individually
+  missing. *Blocks the classifier provenance binding slice*, which must add both;
+  without them an adapter would have to forge `FAILED` to express a blocked
+  retention, misreporting a fetch that succeeded, or discard an observation whose
+  decision inputs all survived.
+- **Where retention bindings live.** §9.2 requires a `RetentionBinding` per
+  retained record and does not say where the set of them is carried. *Blocks the
+  classifier provenance binding slice*, alongside the axis above — the two land
+  in the same schema.
 - **Operational redacted artifact.** Not defined in V1 (§6.2). *Blocks nothing.*
   If ever added it is a separate `sourceKind` and never a decision basis input.
 - **Re-assessment on policy change.** What happens to already-retained snapshots
@@ -412,16 +636,53 @@ retention axis.
 | What exactly does the detector assess? | §4, §9 `representation` |
 | May anything be normalized before assessment? | §4 — no |
 | What are the gate outcomes? | §5 |
-| Can "detector failed" become "no secret"? | §5 — no |
-| What if only some fields were assessed? | §5 — `CANNOT_ASSESS` |
-| May `digest(original)` survive without bytes? | §6.2 — no |
-| May `mask` then `digest` be provenance? | §6.2, §1 — no |
-| May any metadata survive a block? | §7 — yes, separately typed |
-| Can that metadata satisfy §11 for a body-derived fact? | §7 — no |
-| May a claim extracted from a blocked body be emitted? | §8 — no |
+| Which wins when a secret is found *and* the run dies? | §5.1 — `BLOCK_SECRET` |
+| Does `BLOCK_SECRET` imply everything was inspected? | §5.1 — no; `coverageComplete` |
+| Who decides what "every retained field" means? | §5.2, §5.3 — the contract, not the record |
+| Can "detector failed" become "no secret"? | §5.4 — no |
+| Which fields may a reduced record retain? | §7.1 — computed, not nominated |
+| Is an unassessed field retainable? | §7.1 — no |
+| Do retained and blocked cover every field? | §7.1 — exhaustive partition |
+| Can that record satisfy §11 for a blocked-field fact? | §7.2 — no |
+| How is a derived fact's admissibility established? | §8 — pointers resolved, not asserted |
 | What must a detector record about itself? | §9 |
+| Is the assessment itself retained? | §9.2 — yes, digested and bound |
+| What binds a retained record to its assessment? | §9.2 `RetentionBinding` |
+| Can the failure reason leak the secret? | §9.3 — closed `reasonCode` |
 | What does "no blocking finding" mean? | §9.1 |
-| What closure state results? | §10 — `CANNOT_CHECK`, derived |
-| Is the gate part of the acquisition status? | §10 — no, a third axis |
+| Does the gate outcome determine the state? | §10 — no; the decision basis does |
+| May a blocked body leave a decision evaluable? | §10 — yes, if its inputs survive |
+| Is the gate part of the acquisition status? | §10.1 — no, a third axis |
 | What is still OWED, and what does it block? | §11 |
 | Does this unblock acquisition? | §12 — no |
+
+## 14. Correction round 1
+
+Seven defects found by independent review of the first draft and its specimens.
+Recorded here rather than folded silently into the text above, because which
+version of a contract was believed when is itself evidence.
+
+1. **The coverage denominator was self-certified.** §5.2 and §5.3 move it into
+   the contract. The first draft let a record declare what "every retained field"
+   meant, and its own positive control R1 then declared a set narrower than the
+   projection it retained — so the load-bearing rule passed without being tested.
+2. **The assessment was declared evidence and never made durable.** §9.2 gives it
+   canonical bytes, a digest, retention, and a `RetentionBinding` to the record it
+   authorised — as a separate object, since provenance V1 §8 is closed.
+3. **§10 contradicted §7 and specimen R7.** The gate does not determine the
+   state; it determines which inputs remain provenanced, and each decision is
+   evaluated against what survives. Refusing to write `acquisition = FAILED` for a
+   successful fetch was right; asserting `CANNOT_CHECK` for a decision whose every
+   input survived was the same error one step later.
+4. **The reduced record nominated its own safe fields.** §7.1 computes them:
+   findings and unassessed fields are blocked, the rest is retained, and the two
+   exhaustively partition the required set. The record was also renamed from
+   "blocked-source metadata" — under the per-field rule a clean `/body` is
+   retainable, so "metadata" described it wrongly.
+5. **Derived-fact admissibility was asserted rather than resolved.** §8 requires
+   the pointers to be resolved against retained records.
+6. **The failure reason was an unguarded exfiltration channel.** §9.3 closes it
+   with a `reasonCode` vocabulary and a mechanical constraint on any detail text.
+   Forbidding a quoted secret in `findings` only moves it one field sideways.
+7. **Outcome precedence was undefined.** §5.1 freezes it, and `coverageComplete`
+   keeps the second fact rather than losing it to the first.
