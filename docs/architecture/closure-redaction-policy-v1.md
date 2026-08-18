@@ -173,36 +173,40 @@ authority.
 ### 5.3 Required field set per source kind
 
 JSON pointers into the **decoded source object**, so these are GitHub's field
-names, not the canonical projection's:
+names, not the canonical projection's. Each kind has an **always** set and a
+**present-only** set:
 
 ```text
 github-issue-comment
-  /id  /user/id  /user/login  /user/type  /author_association
-  /body  /created_at  /updated_at
+  always        /id  /user/id  /user/login  /user/type
+                /author_association  /body  /created_at  /updated_at
+  present-only  (none)
 
 github-submitted-review
-  /id  /user/id  /user/login  /user/type  /author_association
-  /state  /body  /submitted_at  /commit_id
+  always        /id  /user/id  /user/login  /user/type
+                /author_association  /state  /body  /submitted_at  /commit_id
+  present-only  (none)
 
 github-review-comment
-  /id  /pull_request_review_id
-  /user/id  /user/login  /user/type  /author_association
-  /body  /commit_id  /original_commit_id  /path
-  /created_at  /updated_at
-  present-only: /in_reply_to_id  /line  /original_line  /side  /start_line
+  always        /id  /pull_request_review_id
+                /user/id  /user/login  /user/type  /author_association
+                /body  /commit_id  /original_commit_id  /path
+                /created_at  /updated_at
+  present-only  /in_reply_to_id  /line  /original_line  /side  /start_line
 
 github-pull-request-head
-  /number  /head/sha  /head/ref  /head/repo/full_name
-  present-only: /updated_at
+  always        /number  /head/sha  /head/ref  /head/repo/full_name
+  present-only  /updated_at
 
 github-actions-check
-  /id  /name  /head_sha  /status
-  present-only: /conclusion  /started_at  /completed_at
+  always        /id  /name  /head_sha  /status
+  present-only  /conclusion  /started_at  /completed_at
 ```
 
 A **present-only** field joins the required set exactly when it is present in
 the decoded source. Absent means nothing to assess; present means it is retained
-and must therefore be assessed like any other.
+and must therefore be assessed like any other. Per provenance V1 §8, `null` and
+absent are the same input, so a `null` present-only field is absent here too.
 
 `github-query-snapshot` is outside the gate. It is constructed rather than
 fetched, and retains only enumeration facts and digests of objects that passed
@@ -212,7 +216,45 @@ Structurally constrained fields — ids, timestamps — are in the set on purpos
 Assessing them is cheap, and an exception list is how a coverage rule rots: the
 first carve-out is always obviously safe, and it is never the last.
 
-### 5.4 Why the three do not merge
+### 5.4 Coverage failures name themselves
+
+Whenever coverage is incomplete, the record says why — and it says so
+**independently of the gate outcome**:
+
+```text
+coverageComplete: false   ->   coverageFailureCode REQUIRED
+```
+
+An earlier revision required a reason only on `CANNOT_ASSESS`, which left
+`BLOCK_SECRET` with `coverageComplete: false` recording *that* the assessment
+was partial and never *why*. The vocabulary is closed and is the same one §9.3
+uses:
+
+```text
+DETECTOR_UNAVAILABLE  DETECTOR_FAILED  INCOMPLETE_COVERAGE  INVALID_RESULT
+```
+
+### 5.5 Set-like fields are ordered arrays
+
+`assessedFields`, `blockedFields` and `findings` are logically sets and
+physically JSON arrays. Provenance V1 §13.2 already had to settle this once for
+query snapshots, and the reason is unchanged: JCS orders object keys and does
+**not** sort arrays, so order is inside the digest whether or not anyone chose
+it.
+
+```text
+assessedFields   unique, ascending lexical JSON-pointer order
+blockedFields    unique, ascending lexical JSON-pointer order
+findings         unique on (field, findingId),
+                 ascending lexical order by (field, findingId)
+```
+
+Without this, `["/body", "/id"]` and `["/id", "/body"]` are one fact and two
+digests, and `["/body", "/body", "/id"]` is a third. Detector emission order is
+deliberately **not** preserved: it is not evidence this contract uses, and
+keeping it would make the digest depend on scheduling.
+
+### 5.6 Why the three do not merge
 
 `CANNOT_ASSESS` and `RETAIN` must never merge. "The detector found nothing" and
 "the detector did not run" produce the same empty finding list and mean opposite
@@ -290,7 +332,7 @@ is not a check, it is a claim.
 sourceKind           github-reduced-source-record
 REQUIRED             schemaVersion  sourceKind
                      locatorKind          the provenance V1 kind that was refused
-                     stableId
+                     locator              §7.3, identity only
                      redactionPolicyVersion
                      outcome              BLOCK_SECRET | CANNOT_ASSESS
                      coverageComplete
@@ -323,7 +365,65 @@ quietly avoided:
 - Keys are full JSON pointers. `/user/login` is a nested field and comparing it
   by a trimmed leaf name is not the same comparison.
 
-### 7.2 What the record is, and is not
+### 7.2 What each retained pointer holds
+
+Choosing the right key set and then storing the wrong bytes under it is a
+provenance failure that looks like a success, so the value is frozen too:
+
+```text
+retainedFields[p]  =  exactly the value the COMPLETE §8 projection
+                      would have carried for p
+```
+
+This is deliberately defined by reference rather than as a second mapping. The
+reduced record is a canonical object under provenance V1 §7 and obeys its rules
+— numeric ids serialized as strings, string values taken exactly as decoded,
+no trim, no normalization. So a reduced record is a projection of a **subset** of
+the fields, not a differently-shaped artifact that happens to share a vocabulary.
+
+The practical consequence, and the reason it needed saying: the frozen Step 0B
+fixtures store `"id": 4944100001` as a JSON number because that is the **raw API**
+shape, while a canonical projection carries `"9100000201"` as a string. Both were
+defensible readings of the earlier text. Only one is now legal.
+
+A consumer verifies these values against the decoded source it holds, for
+**every** retained pointer. Checking only `/body` leaves the rest as a place
+where a correct pointer can name incorrect bytes.
+
+### 7.3 The locator is identity, not surviving evidence
+
+The record must remain findable even when nothing survived — R4 retains no field
+at all and still has to say which object was refused. That identity is carried in
+a `locator`, and provenance V1 §4 already separates locator from immutable source
+snapshot, so this is that distinction applied one level down.
+
+```text
+github-issue-comment      repository  pullRequest  stableId
+github-submitted-review   repository  pullRequest  stableId
+github-review-comment     repository  pullRequest  stableId
+github-actions-check      repository  stableId
+github-pull-request-head  repository  pullRequest
+```
+
+`github-pull-request-head` has no `stableId` on purpose: provenance V1 §8.1
+identifies the subject read by repository and pull request number, and inventing
+a synthetic id for it here would contradict the merged schema. An earlier
+revision required `stableId` for every kind and only avoided the contradiction
+because no head specimen existed.
+
+**The normative rule:**
+
+```text
+a locator value is NOT surviving source evidence
+and MUST NOT satisfy a decision-basis pointer
+```
+
+Without it, `/id` can appear in `blockedFields` while the same source-derived id
+sits permanently in the record as `stableId` — the field-retention gate bypassed
+by an alias. A locator is what lets you go and look again; it is never what you
+show instead of having looked.
+
+### 7.4 What the record is, and is not
 
 - Its `sourceKind` is **distinct** from every provenance V1 §8 kind and MUST NOT
   reuse the refused kind or that kind's `schemaVersion`. A partial record wearing
@@ -332,11 +432,10 @@ quietly avoided:
 - `blockedFields` MUST be non-empty. A record that blocked nothing is not a
   reduced record — it is a complete projection, and should be one.
 - It is canonicalized, digested and retained like any other object, and bound to
-  its authorising assessment per §9.2. It is real evidence of a reduced
-  observation, not a placeholder.
+  its authorising assessment per §9.2.
 - **It satisfies §11 of provenance V1 only for facts derived solely from the
-  fields it actually contains.** A decision that read a blocked field is not
-  rescued by it.
+  fields it actually contains in `retainedFields`.** A decision that read a
+  blocked field is not rescued by it, and neither is one that reads the locator.
 
 That last rule is the load-bearing one. A wrong-SHA `OWED` derives from
 `review.commitId` and the subject head; if the review *body* is blocked while
@@ -383,10 +482,18 @@ same party wrote the assertion and the record it describes. A consumer resolves
 the pointers itself, and treats such a field as a claim to be checked rather than
 an answer to be trusted.
 
+Resolution reaches `retainedFields` **only**. Per §7.3 the locator is identity,
+not surviving evidence, so a decision basis naming `/id` is not satisfied by the
+record's `stableId` even though the two describe the same number.
+
 ## 9. Detector provenance
 
 "Safe to retain" is itself an observation and must be as auditable as any other,
 or it becomes ambient magic that no later reader can question.
+
+**The assessment schema is closed.** Exactly the fields below, no others. A
+producer that adds one is non-conformant, not "extended" — and §9.4 explains why
+that closure is the whole security argument rather than a tidiness rule.
 
 ```text
 RetentionAssessment
@@ -395,24 +502,28 @@ REQUIRED             schemaVersion
                      detector.id
                      detector.version
                      detector.configDigest
-                     representation        what was assessed
-                     assessedFields        fields SUCCESSFULLY assessed
+                     representation        decoded-source-field-values
+                     assessedFields        fields SUCCESSFULLY assessed, §5.5 order
                      coverageComplete
                      outcome               RETAIN | BLOCK_SECRET | CANNOT_ASSESS
                      observedAt
 CONDITIONAL          findings              REQUIRED, non-empty, on BLOCK_SECRET
-                     reasonCode            REQUIRED on CANNOT_ASSESS
-                     reasonDetail          OPTIONAL, and constrained by §9.3
+                     coverageFailureCode   REQUIRED when coverageComplete is false
 ```
 
 - `representation` names the form the detector actually saw. V1 defines exactly
-  one legal value, `decoded-source-field-values`, matching §4. It is a field
-  rather than an assumption so a future representation cannot arrive silently.
+  one legal value, matching §4. It is a field rather than an assumption so a
+  future representation cannot arrive silently.
 - `assessedFields` means **successfully assessed**: the detector produced a
   result for that field. A field it started and abandoned is not assessed, and
   listing it would convert a crash into coverage.
-- `findings` carry an opaque finding identifier and the field pointer, and every
-  field they name must appear in `blockedFields` per §7.1.
+- `findings` carry `field` and `findingId`, and every field they name must appear
+  in `blockedFields` per §7.1.
+- **`findingId` is a rule identifier from the bound detector configuration** —
+  one of the rule ids covered by `detector.configDigest`. It is not an arbitrary
+  opaque string. That is what makes it a closed value in the sense of §9.4: its
+  value set is fixed before anything is inspected, so it cannot depend on what
+  was found.
 - A `RETAIN` outcome MUST NOT appear without `coverageComplete: true`.
 
 ### 9.1 What "no blocking finding" does and does not mean
@@ -461,67 +572,52 @@ record — MUST have a `RetentionBinding`. A retained record with no reachable
 authorising assessment is inadmissible: it is bytes somebody kept, not evidence
 somebody was permitted to keep.
 
-### 9.3 The assessment must be safe by construction
-
-The assessment record is retained forever. It must therefore not become the
-place the secret lives.
+### 9.3 Closed vocabularies
 
 ```text
-FORBIDDEN in any field of the assessment
-    the matched substring, an excerpt, a prefix or suffix,
-    a length, a character count, a digest of the matched bytes,
-    raw detector stdout, stderr, or an exception message,
-    any quoted fragment of an assessed field value
+outcome              RETAIN  BLOCK_SECRET  CANNOT_ASSESS
+coverageFailureCode  DETECTOR_UNAVAILABLE  DETECTOR_FAILED
+                     INCOMPLETE_COVERAGE   INVALID_RESULT
+representation       decoded-source-field-values
+findingId            a rule id covered by detector.configDigest
 ```
 
-Prohibiting this in `findings` alone is not enough. People are remarkably good at
-moving a leak one field sideways, and the obvious sideways field is the free-text
-failure reason:
+Findings additionally MUST NOT carry the matched substring, an excerpt, a prefix
+or suffix, a length, a character count, or a digest of the matched bytes.
+
+### 9.4 V1 has no free text, and that is the actual defence
+
+Two earlier revisions tried to keep a free-text failure field safe by forbidding
+it from containing runs of the assessed content — first over the whole
+assessment, then over free text only. Both were the wrong shape of answer.
+
+A substring rule cannot work. It admits every secret shorter than its threshold —
+a six-digit OTP, a PIN, a short passphrase, the interesting half of an API key —
+and it is checking a symptom of leakage rather than the channel. Worse, a
+free-text field plus an open schema means a producer can simply add
+`"debug": "<the secret>"` and satisfy every rule that was written about the
+fields somebody thought of.
+
+So V1 removes `reasonDetail` and closes the schema instead:
 
 ```text
-reason: "parser failed near \"<the secret>\""
+every field of an assessment is a closed vocabulary value,
+a structural identifier, a boolean, or a JSON pointer
+
+no field of an assessment is free text
 ```
 
-So `CANNOT_ASSESS` carries a **closed** `reasonCode`:
+That is a property of the value **sets**, not of the values, and it is checkable
+without guessing what a secret looks like. A closed field cannot carry a secret
+out because its range does not depend on the content inspected.
 
-```text
-DETECTOR_UNAVAILABLE   the detector could not be invoked at all
-DETECTOR_FAILED        it was invoked and did not produce a usable result
-INCOMPLETE_COVERAGE    it produced results for only part of the required set
-INVALID_RESULT         it produced a result that failed validation
-```
+Nothing is lost. `coverageFailureCode` says why coverage failed, `assessedFields`
+says exactly what was covered, and `findings` say which fields were flagged and
+by which configured rule. A prose sentence adds nothing a consumer of this
+contract needs, and adds one place for the entire secret to appear.
 
-### 9.4 Free text is the only channel, so it is the only thing constrained
-
-Every field of an assessment is either **closed** — drawn from a fixed
-vocabulary, or a structural identifier such as a JSON pointer, a digest, a
-timestamp or a detector name — or **free text**. V1 declares exactly one free
-text field:
-
-```text
-reasonDetail   OPTIONAL, producer-authored, never a pass-through of
-               detector stdout, stderr or an exception message
-```
-
-The mechanical rule applies **to free text only**:
-
-```text
-no free-text field may contain a run of 8 or more consecutive characters
-taken from any assessed field value
-```
-
-An earlier revision applied that constraint to every string in the assessment,
-and the first specimen written against it failed: the detector's own `id`,
-`synthetic-fixture-detector`, shares an eight-character run with an assessed
-login, `synthetic-contributor`. The rule was catching a collision between two
-closed identifiers rather than a leak.
-
-The narrower rule is also the stronger claim. A closed field cannot carry a
-secret out because its value set does not depend on the content inspected —
-which is the actual reason it is safe, and worth saying rather than approximating
-with a string comparison. Introducing a second free-text field is a contract
-change, not an implementation detail, precisely so this list stays short enough
-to check.
+Introducing a free-text field later is therefore a contract change with a
+security argument attached, not an implementation convenience.
 
 ## 10. Consequence for closure state — via the decision basis
 
@@ -621,6 +717,13 @@ with what it blocks. No classifier change is made here.
   retained record and does not say where the set of them is carried. *Blocks the
   classifier provenance binding slice*, alongside the axis above — the two land
   in the same schema.
+- **Mechanical coverage of three source kinds.** §5.3 freezes required field sets
+  for five kinds. The preregistration specimens exercise three —
+  `github-issue-comment`, `github-submitted-review`, `github-review-comment` —
+  so `github-pull-request-head` and `github-actions-check` are frozen in prose
+  and mirrored by the checker, but not witnessed by a specimen. *Blocks nothing
+  today*; the acquisition adapter is the first consumer that would notice, and it
+  is already blocked twice over.
 - **Operational redacted artifact.** Not defined in V1 (§6.2). *Blocks nothing.*
   If ever added it is a separate `sourceKind` and never a decision basis input.
 - **Re-assessment on policy change.** What happens to already-retained snapshots
@@ -668,6 +771,12 @@ retention axis.
 | Who decides what "every retained field" means? | §5.2, §5.3 — the contract, not the record |
 | Can "detector failed" become "no secret"? | §5.4 — no |
 | Which fields may a reduced record retain? | §7.1 — computed, not nominated |
+| What value sits under each retained pointer? | §7.2 — what the complete projection would carry |
+| May a locator stand in for a retained field? | §7.3, §8 — no |
+| How are the set-like arrays ordered? | §5.5 — unique, ascending, no emission order |
+| Why is coverage incomplete? | §5.4 — `coverageFailureCode`, whatever the outcome |
+| Can a producer add a field to an assessment? | §9 — no; the schema is closed |
+| Is there any free text in an assessment? | §9.4 — no, and that is the defence |
 | Is an unassessed field retainable? | §7.1 — no |
 | Do retained and blocked cover every field? | §7.1 — exhaustive partition |
 | Can that record satisfy §11 for a blocked-field fact? | §7.2 — no |
@@ -725,3 +834,46 @@ than by reading it.
    text, declares `reasonDetail` the only free-text field in V1, and states the
    real reason a closed field is safe — its value set does not depend on the
    content inspected — rather than approximating that with a substring test.
+
+## 16. Correction round 3
+
+Six defects from a second independent review. The previous rounds are not
+reversed by these — the model they produced is the one being refined. These sit
+where provenance systems usually break last: aliasing between locator and
+evidence, the value under a correct pointer, canonical order of set-like arrays,
+and a small free-text hole that the whole secret eventually fits through.
+
+1. **The reduced record froze which pointers it retained and not what they
+   held.** §7.2 defines `retainedFields[p]` as exactly the value the complete §8
+   projection would carry, by reference to the already-frozen projection rather
+   than as a second mapping. The ambiguity was real: the frozen Step 0B fixtures
+   store `"id"` as a JSON number, a canonical projection carries it as a string,
+   and both readings fit the earlier text.
+2. **`stableId` bypassed the field-retention gate.** A record could list `/id` in
+   `blockedFields` while the same source-derived id sat permanently at the top of
+   the record. §7.3 separates the locator, states per-kind locator shape, and
+   rules that a locator value is not surviving evidence and cannot satisfy a
+   decision-basis pointer. It also drops the `stableId` requirement for
+   `github-pull-request-head`, which provenance V1 §8.1 identifies by repository
+   and pull request number — a contradiction the earlier text avoided only
+   because no head specimen existed.
+3. **The new set-like arrays had no frozen order or uniqueness.** §5.5 fixes
+   unique, ascending lexical order, and forbids duplicates. Provenance V1 §13.2
+   had to settle exactly this for query snapshots; JCS does not sort arrays, so
+   one fact could otherwise have three digests.
+4. **The anti-exfiltration rule was still a substring heuristic.** It admitted
+   every secret shorter than its threshold and left the assessment schema open,
+   so `"debug": "<the secret>"` satisfied every rule anyone had written. §9.4
+   removes `reasonDetail`, closes the schema, and makes the property structural:
+   every field is a closed vocabulary value, a structural identifier, a boolean
+   or a JSON pointer. `findingId` becomes a rule id covered by
+   `detector.configDigest`, so its range is fixed before anything is inspected.
+5. **Precedence was defined and unwitnessed.** §5.1's interesting case — a
+   blocking finding *and* incomplete coverage — had no specimen, so the corpus
+   could not tell the frozen precedence from its inverse. §5.4 additionally
+   requires `coverageFailureCode` whenever coverage is incomplete, so
+   `BLOCK_SECRET` with partial coverage records why it was partial rather than
+   only that it was.
+6. **"Mirrors §5.3" overstated the mechanical coverage.** §5.3 now separates
+   always from present-only sets for all five kinds, and §11 records honestly
+   that specimens exercise three of them.
