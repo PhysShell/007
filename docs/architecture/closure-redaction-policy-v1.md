@@ -491,10 +491,37 @@ INCOMPLETE_COVERAGE    it produced results for only part of the required set
 INVALID_RESULT         it produced a result that failed validation
 ```
 
-`reasonDetail` is optional, and when present MUST be producer-authored text —
-never a pass-through of detector output. The mechanical form of that rule: no
-string anywhere in an assessment may contain a run of 8 or more consecutive
-characters taken from any assessed field value.
+### 9.4 Free text is the only channel, so it is the only thing constrained
+
+Every field of an assessment is either **closed** — drawn from a fixed
+vocabulary, or a structural identifier such as a JSON pointer, a digest, a
+timestamp or a detector name — or **free text**. V1 declares exactly one free
+text field:
+
+```text
+reasonDetail   OPTIONAL, producer-authored, never a pass-through of
+               detector stdout, stderr or an exception message
+```
+
+The mechanical rule applies **to free text only**:
+
+```text
+no free-text field may contain a run of 8 or more consecutive characters
+taken from any assessed field value
+```
+
+An earlier revision applied that constraint to every string in the assessment,
+and the first specimen written against it failed: the detector's own `id`,
+`synthetic-fixture-detector`, shares an eight-character run with an assessed
+login, `synthetic-contributor`. The rule was catching a collision between two
+closed identifiers rather than a leak.
+
+The narrower rule is also the stronger claim. A closed field cannot carry a
+secret out because its value set does not depend on the content inspected —
+which is the actual reason it is safe, and worth saying rather than approximating
+with a string comparison. Introducing a second free-text field is a contract
+change, not an implementation detail, precisely so this list stays short enough
+to check.
 
 ## 10. Consequence for closure state — via the decision basis
 
@@ -686,3 +713,15 @@ version of a contract was believed when is itself evidence.
    Forbidding a quoted secret in `findings` only moves it one field sideways.
 7. **Outcome precedence was undefined.** §5.1 freezes it, and `coverageComplete`
    keeps the second fact rather than losing it to the first.
+
+## 15. Correction round 2
+
+One defect, found by the specimens written against correction round 1 rather
+than by reading it.
+
+1. **§9.3's anti-exfiltration rule was scoped to the whole assessment**, so it
+   fired on a collision between two closed identifiers: the detector's own `id`
+   and an assessed login sharing an eight-character run. §9.4 scopes it to free
+   text, declares `reasonDetail` the only free-text field in V1, and states the
+   real reason a closed field is safe — its value set does not depend on the
+   content inspected — rather than approximating that with a substring test.
