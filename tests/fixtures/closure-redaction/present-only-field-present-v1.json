@@ -1,0 +1,120 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R10"
+  ],
+  "synthetic": true,
+  "sourceKind": "github-review-comment",
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "5.3",
+    "5.5",
+    "7.2"
+  ],
+  "what": "a review comment whose present-only /in_reply_to_id is present, so it joins the required set and must be assessed",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "R10 and R11 are the present-only pair. The two sources differ by one optional field, and the required set differs with it \u2014 which is what makes \u00a75.3's present-only rule a computation rather than a sentence.",
+  "contrastWith": "present-only-field-absent-v1.json",
+  "locator": {
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000401"
+  },
+  "gateOutcome": "RETAIN",
+  "decodedSource": {
+    "/id": 9100000401,
+    "/pull_request_review_id": 9100000301,
+    "/user/id": 9100000909,
+    "/user/login": "synthetic-line-reviewer",
+    "/user/type": "Bot",
+    "/author_association": "NONE",
+    "/body": "This branch is unreachable from the frozen tree.\n",
+    "/commit_id": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+    "/original_commit_id": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+    "/path": "docs/architecture/closure-redaction-policy-v1.md",
+    "/created_at": "2026-08-18T11:30:00Z",
+    "/updated_at": "2026-08-18T11:30:00Z",
+    "/line": 42,
+    "/side": "RIGHT",
+    "/in_reply_to_id": 9100000400
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/commit_id",
+    "/created_at",
+    "/id",
+    "/in_reply_to_id",
+    "/line",
+    "/original_commit_id",
+    "/path",
+    "/pull_request_review_id",
+    "/side",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
+  "assessment": {
+    "schemaVersion": 1,
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:f00372ef104d490574feb48d7bc487fed22a1a262aab4277996f57a674c20e43"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [
+      "/author_association",
+      "/body",
+      "/commit_id",
+      "/created_at",
+      "/id",
+      "/in_reply_to_id",
+      "/line",
+      "/original_commit_id",
+      "/path",
+      "/pull_request_review_id",
+      "/side",
+      "/updated_at",
+      "/user/id",
+      "/user/login",
+      "/user/type"
+    ],
+    "coverageComplete": true,
+    "outcome": "RETAIN",
+    "observedAt": "2026-08-18T11:30:30Z"
+  },
+  "assessmentDigest": "sha256:d82e58ba31347b2ace60a891c185b0ff0f74a413d8726df7ca4da58801e81d69",
+  "retention": {
+    "permitted": true,
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-review-comment",
+      "authorAssociation": "NONE",
+      "body": "This branch is unreachable from the frozen tree.\n",
+      "commitId": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+      "createdAt": "2026-08-18T11:30:00Z",
+      "stableId": "9100000401",
+      "inReplyToId": "9100000400",
+      "line": 42,
+      "originalCommitId": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+      "path": "docs/architecture/closure-redaction-policy-v1.md",
+      "pullRequestReviewId": "9100000301",
+      "side": "RIGHT",
+      "updatedAt": "2026-08-18T11:30:00Z",
+      "user": {
+        "id": "9100000909",
+        "login": "synthetic-line-reviewer",
+        "type": "Bot"
+      }
+    },
+    "canonicalDigest": "sha256:d4ddc77ad68d6b7bc9861e1ae0867bf6f112d5ecb2c30323f8be77a633565bc9"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "recordDigest": "sha256:d4ddc77ad68d6b7bc9861e1ae0867bf6f112d5ecb2c30323f8be77a633565bc9",
+    "assessmentDigest": "sha256:d82e58ba31347b2ace60a891c185b0ff0f74a413d8726df7ca4da58801e81d69"
+  }
+}

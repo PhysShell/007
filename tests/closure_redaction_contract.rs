@@ -29,7 +29,7 @@
 //! shape and for referential consistency between a record and its binding.
 //!
 //! NOTHING LOAD-BEARING IS TAKEN FROM THE SPECIMEN. The required field set
-//! comes from `REQUIRED_FIELDS` below, mirroring contract §5.3; coverage, the
+//! comes from `ALWAYS_FIELDS` / `PRESENT_ONLY_FIELDS` below, mirroring §5.3; coverage, the
 //! retained/blocked partition and derived-fact admissibility are all computed.
 //! Where a specimen declares one of these, the declaration is checked against
 //! the computed value rather than used as its source. An earlier revision took
@@ -55,52 +55,167 @@ const SPECIMENS: &[(&str, &str)] = &[
     ("derived-fact-blocked-v1.json", "R6"),
     ("safe-metadata-retained-v1.json", "R7"),
     ("token-shaped-safe-v1.json", "R8"),
+    ("finding-with-incomplete-coverage-v1.json", "R9"),
+    ("present-only-field-present-v1.json", "R10"),
+    ("present-only-field-absent-v1.json", "R11"),
 ];
 
 const OUTCOMES: &[&str] = &["RETAIN", "BLOCK_SECRET", "CANNOT_ASSESS"];
 
-/// Contract §5.3, mirrored. The authority for "every field the projection would
-/// retain". Specimens do not get a vote.
-const REQUIRED_FIELDS: &[(&str, &[&str])] = &[
+/// Contract §5.3, mirrored: the always set and the present-only set per source
+/// kind. The authority for "every field the projection would retain" — specimens
+/// do not get a vote. All five gated kinds are mirrored; §11 records that the
+/// specimens exercise three of them.
+const ALWAYS_FIELDS: &[(&str, &[&str])] = &[
     (
         "github-issue-comment",
         &[
-            "/id",
-            "/user/id",
-            "/user/login",
-            "/user/type",
             "/author_association",
             "/body",
             "/created_at",
+            "/id",
             "/updated_at",
+            "/user/id",
+            "/user/login",
+            "/user/type",
         ],
     ),
     (
         "github-submitted-review",
         &[
+            "/author_association",
+            "/body",
+            "/commit_id",
             "/id",
+            "/state",
+            "/submitted_at",
             "/user/id",
             "/user/login",
             "/user/type",
-            "/author_association",
-            "/state",
-            "/body",
-            "/submitted_at",
-            "/commit_id",
         ],
+    ),
+    (
+        "github-review-comment",
+        &[
+            "/author_association",
+            "/body",
+            "/commit_id",
+            "/created_at",
+            "/id",
+            "/original_commit_id",
+            "/path",
+            "/pull_request_review_id",
+            "/updated_at",
+            "/user/id",
+            "/user/login",
+            "/user/type",
+        ],
+    ),
+    (
+        "github-pull-request-head",
+        &["/head/ref", "/head/repo/full_name", "/head/sha", "/number"],
+    ),
+    (
+        "github-actions-check",
+        &["/head_sha", "/id", "/name", "/status"],
     ),
 ];
 
-/// Contract §9.3 closed vocabulary.
-const REASON_CODES: &[&str] = &[
+const PRESENT_ONLY_FIELDS: &[(&str, &[&str])] = &[
+    ("github-issue-comment", &[]),
+    ("github-submitted-review", &[]),
+    (
+        "github-review-comment",
+        &[
+            "/in_reply_to_id",
+            "/line",
+            "/original_line",
+            "/side",
+            "/start_line",
+        ],
+    ),
+    ("github-pull-request-head", &["/updated_at"]),
+    (
+        "github-actions-check",
+        &["/completed_at", "/conclusion", "/started_at"],
+    ),
+];
+
+/// Contract §7.2: pointers whose projected value is a string, not the raw number.
+const ID_POINTERS: &[&str] = &[
+    "/id",
+    "/user/id",
+    "/pull_request_review_id",
+    "/in_reply_to_id",
+];
+
+/// Contract §7.2 via provenance V1 §8: the canonical path each decoded pointer
+/// projects to. Used to rebuild the expected projection and compare it whole,
+/// rather than hunting for values inside a rendered string.
+const PROJECTION_PATH: &[(&str, &[&str])] = &[
+    ("/id", &["stableId"]),
+    ("/user/id", &["user", "id"]),
+    ("/user/login", &["user", "login"]),
+    ("/user/type", &["user", "type"]),
+    ("/author_association", &["authorAssociation"]),
+    ("/body", &["body"]),
+    ("/created_at", &["createdAt"]),
+    ("/updated_at", &["updatedAt"]),
+    ("/state", &["state"]),
+    ("/submitted_at", &["submittedAt"]),
+    ("/commit_id", &["commitId"]),
+    ("/original_commit_id", &["originalCommitId"]),
+    ("/path", &["path"]),
+    ("/pull_request_review_id", &["pullRequestReviewId"]),
+    ("/in_reply_to_id", &["inReplyToId"]),
+    ("/line", &["line"]),
+    ("/original_line", &["originalLine"]),
+    ("/side", &["side"]),
+    ("/start_line", &["startLine"]),
+];
+
+/// Contract §7.3: which locator fields identify each kind.
+const LOCATOR_SHAPE: &[(&str, &[&str])] = &[
+    (
+        "github-issue-comment",
+        &["pullRequest", "repository", "stableId"],
+    ),
+    (
+        "github-submitted-review",
+        &["pullRequest", "repository", "stableId"],
+    ),
+    (
+        "github-review-comment",
+        &["pullRequest", "repository", "stableId"],
+    ),
+    ("github-actions-check", &["repository", "stableId"]),
+    ("github-pull-request-head", &["pullRequest", "repository"]),
+];
+
+/// Contract §5.4 / §9.3 closed vocabulary.
+const COVERAGE_FAILURE_CODES: &[&str] = &[
     "DETECTOR_UNAVAILABLE",
     "DETECTOR_FAILED",
     "INCOMPLETE_COVERAGE",
     "INVALID_RESULT",
 ];
 
-/// Contract §9.4: the only free-text field in V1.
-const FREE_TEXT_FIELDS: &[&str] = &["reasonDetail"];
+/// Contract §9: the assessment schema is closed. Exactly these keys, and §9.4's
+/// security argument is that none of them is free text.
+const ASSESSMENT_ALWAYS: &[&str] = &[
+    "schemaVersion",
+    "redactionPolicyVersion",
+    "detector",
+    "representation",
+    "assessedFields",
+    "coverageComplete",
+    "outcome",
+    "observedAt",
+];
+const ASSESSMENT_CONDITIONAL: &[&str] = &["findings", "coverageFailureCode"];
+
+/// The rule ids covered by the specimens' bound detector configuration.
+const CONFIGURED_RULE_IDS: &[&str] = &["SYN-TOKEN-1"];
 
 const PROVENANCE_SOURCE_KINDS: &[&str] = &[
     "github-pull-request-head",
@@ -154,12 +269,95 @@ fn strings(v: Option<&Value>) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
-fn required_for(kind: &str) -> BTreeSet<String> {
-    REQUIRED_FIELDS
-        .iter()
+fn table<'a>(t: &'a [(&str, &[&str])], kind: &str) -> &'a [&'a str] {
+    t.iter()
         .find(|(k, _)| *k == kind)
-        .map(|(_, f)| f.iter().map(|p| (*p).to_owned()).collect())
-        .unwrap_or_else(|| panic!("contract §5.3 has no field set for {kind:?}"))
+        .map(|(_, f)| *f)
+        .unwrap_or_else(|| panic!("contract §5.3 has no entry for {kind:?}"))
+}
+
+/// Contract §5.3: always ∪ the present-only fields actually present. Computed
+/// from the decoded source, never read from the specimen.
+fn required_for(kind: &str, src: &Value) -> BTreeSet<String> {
+    let mut out: BTreeSet<String> = table(ALWAYS_FIELDS, kind)
+        .iter()
+        .map(|p| (*p).to_owned())
+        .collect();
+    for p in table(PRESENT_ONLY_FIELDS, kind) {
+        if src.get(*p).is_some_and(|v| !v.is_null()) {
+            out.insert((*p).to_owned());
+        }
+    }
+    out
+}
+
+/// Contract §7.2: the value the complete projection would carry for `pointer`.
+fn projected_value(pointer: &str, raw: &Value) -> Value {
+    if ID_POINTERS.contains(&pointer) {
+        let n = raw
+            .as_i64()
+            .unwrap_or_else(|| panic!("{pointer} should be a raw numeric id, got {raw}"));
+        Value::String(n.to_string())
+    } else {
+        raw.clone()
+    }
+}
+
+/// Rebuild the complete §8 projection the contract says these bytes produce.
+fn expected_projection(kind: &str, src: &Value, required: &BTreeSet<String>) -> Value {
+    let mut out = serde_json::Map::new();
+    out.insert("schemaVersion".into(), Value::from(1));
+    out.insert("sourceKind".into(), Value::String(kind.to_owned()));
+    for pointer in required {
+        let path = PROJECTION_PATH
+            .iter()
+            .find(|(p, _)| p == pointer)
+            .map(|(_, path)| *path)
+            .unwrap_or_else(|| panic!("no projection path for {pointer}"));
+        let raw = src
+            .get(pointer)
+            .unwrap_or_else(|| panic!("{pointer} required but absent from the source"));
+        let value = projected_value(pointer, raw);
+        match path {
+            [key] => {
+                out.insert((*key).to_owned(), value);
+            }
+            [parent, key] => {
+                out.entry((*parent).to_owned())
+                    .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                    .as_object_mut()
+                    .expect("nested projection object")
+                    .insert((*key).to_owned(), value);
+            }
+            other => panic!("unsupported projection path {other:?}"),
+        }
+    }
+    Value::Object(out)
+}
+
+/// Contract §5.5: unique, ascending lexical order.
+fn assert_canonical_pointer_array(label: &str, field: &str, v: Option<&Value>) {
+    let items: Vec<&str> = v
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("{label}: {field} is not an array"))
+        .iter()
+        .map(|x| {
+            x.as_str()
+                .unwrap_or_else(|| panic!("{label}: {field} holds a non-string"))
+        })
+        .collect();
+    let mut sorted = items.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        items, sorted,
+        "{label}: {field} is not in ascending order (§5.5)"
+    );
+    let unique: BTreeSet<&&str> = items.iter().collect();
+    assert_eq!(
+        unique.len(),
+        items.len(),
+        "{label}: {field} contains duplicates (§5.5)"
+    );
 }
 
 fn contains_word(haystack: &str, needle: &str) -> bool {
@@ -191,7 +389,7 @@ struct Unit {
     outcome: String,
     assessment: Value,
     retention: Value,
-    assessed_body: String,
+    src: Value,
     reduced: Option<Value>,
     binding: Value,
     assessment_digest: String,
@@ -200,9 +398,9 @@ struct Unit {
 
 fn units(file: &str, doc: &Value) -> Vec<Unit> {
     let kind = doc
-        .pointer("/locator/kind")
+        .get("sourceKind")
         .and_then(Value::as_str)
-        .unwrap_or_else(|| panic!("{file}: locator.kind missing"))
+        .unwrap_or_else(|| panic!("{file}: sourceKind missing"))
         .to_owned();
     let build = |label: String, scope: &Value, outer: &Value| Unit {
         label,
@@ -211,7 +409,7 @@ fn units(file: &str, doc: &Value) -> Vec<Unit> {
         outcome: str_at(scope, "gateOutcome").to_owned(),
         assessment: scope.get("assessment").expect("assessment").clone(),
         retention: scope.get("retention").expect("retention").clone(),
-        assessed_body: str_at(scope, "assessedBody").to_owned(),
+        src: scope.get("decodedSource").expect("decodedSource").clone(),
         reduced: scope.get("reducedSourceRecord").cloned(),
         binding: scope
             .get("retentionBinding")
@@ -250,9 +448,21 @@ impl Unit {
             .unwrap_or_default()
     }
 
+    fn required(&self) -> BTreeSet<String> {
+        required_for(&self.kind, &self.src)
+    }
+
+    fn body(&self) -> String {
+        self.src
+            .get("/body")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    }
+
     /// Contract §7.1, computed here rather than read from the record.
     fn expected_partition(&self) -> (BTreeSet<String>, BTreeSet<String>) {
-        let required = required_for(&self.kind);
+        let required = self.required();
         let assessed = self.assessed();
         let flagged = self.flagged();
         let blocked: BTreeSet<String> = required
@@ -267,7 +477,7 @@ impl Unit {
     /// The pointers that still resolve to a retained record for this locator.
     fn resolvable(&self) -> BTreeSet<String> {
         match &self.reduced {
-            None => required_for(&self.kind),
+            None => self.required(),
             Some(r) => r
                 .pointer("/canonical/retainedFields")
                 .and_then(Value::as_object)
@@ -405,7 +615,7 @@ fn coverage_is_computed_from_the_normative_field_set() {
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
             let l = &unit.label;
-            let required = required_for(&unit.kind);
+            let required = unit.required();
             let assessed = unit.assessed();
             assert!(
                 assessed.is_subset(&required),
@@ -419,13 +629,16 @@ fn coverage_is_computed_from_the_normative_field_set() {
                 Some(computed),
                 "{l}: coverageComplete disagrees with the normative field set"
             );
-            if let Some(declared) = doc.get("declaredRequiredFields") {
-                assert_eq!(
-                    strings(Some(declared)),
-                    required,
-                    "{l}: declaredRequiredFields disagrees with contract §5.3"
-                );
-            }
+            assert_eq!(
+                strings(unit.scope.get("requiredFields")),
+                required,
+                "{l}: the specimen's requiredFields disagrees with contract §5.3"
+            );
+            assert_canonical_pointer_array(
+                l,
+                "assessedFields",
+                unit.assessment.get("assessedFields"),
+            );
         }
     }
 }
@@ -463,14 +676,6 @@ fn a_failed_assessment_cannot_look_safe() {
             let (a, l) = (&unit.assessment, &unit.label);
             match unit.outcome.as_str() {
                 "CANNOT_ASSESS" => {
-                    let code = a
-                        .get("reasonCode")
-                        .and_then(Value::as_str)
-                        .unwrap_or_else(|| panic!("{l}: CANNOT_ASSESS without a reasonCode"));
-                    assert!(
-                        REASON_CODES.contains(&code),
-                        "{l}: reasonCode {code:?} is outside the §9.3 vocabulary"
-                    );
                     assert!(
                         a.get("findings").is_none(),
                         "{l}: CANNOT_ASSESS must not carry findings — it measured nothing"
@@ -494,6 +699,15 @@ fn a_failed_assessment_cannot_look_safe() {
                                 "{l}: finding without {key}"
                             );
                         }
+                        let id = f
+                            .get("findingId")
+                            .and_then(Value::as_str)
+                            .expect("findingId");
+                        assert!(
+                            CONFIGURED_RULE_IDS.contains(&id),
+                            "{l}: findingId {id:?} is not a rule of the bound configuration — \
+                             an arbitrary string is not a closed value (§9, §9.4)"
+                        );
                         for key in [
                             "match", "matched", "excerpt", "sample", "value", "digest", "length",
                         ] {
@@ -506,14 +720,14 @@ fn a_failed_assessment_cannot_look_safe() {
                     }
                 }
                 "RETAIN" => {
-                    assert_eq!(
-                        a.get("findings").and_then(Value::as_array).map(Vec::len),
-                        Some(0),
-                        "{l}: RETAIN must record a completed assessment with no findings"
+                    assert!(
+                        a.get("findings").is_none(),
+                        "{l}: findings is present iff BLOCK_SECRET — an empty list and an \
+                         absent key would be two encodings of one fact"
                     );
                     assert!(
-                        a.get("reasonCode").is_none(),
-                        "{l}: RETAIN must not carry a failure reason"
+                        a.get("coverageFailureCode").is_none(),
+                        "{l}: RETAIN must not carry a coverage failure code"
                     );
                 }
                 other => panic!("{l}: unknown outcome {other:?}"),
@@ -522,28 +736,111 @@ fn a_failed_assessment_cannot_look_safe() {
     }
 }
 
-/// Contract §9.4: only free text is constrained, and it carries no run of eight
-/// or more characters from an assessed value.
+/// Contract §9 and §9.4: the assessment schema is closed, so there is nowhere
+/// for a secret to be written. This replaces an earlier substring heuristic,
+/// which admitted every secret shorter than its threshold and could not see a
+/// field nobody had thought of.
 #[test]
-fn free_text_carries_no_assessed_content() {
+fn the_assessment_schema_is_closed() {
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
             let l = &unit.label;
-            for key in FREE_TEXT_FIELDS {
-                let Some(text) = unit.assessment.get(*key).and_then(Value::as_str) else {
-                    continue;
-                };
-                let body: Vec<char> = unit.assessed_body.chars().collect();
-                for window in body.windows(8) {
-                    let frag: String = window.iter().collect();
-                    assert!(
-                        !text.contains(&frag),
-                        "{l}: {key} contains {frag:?} taken from an assessed value"
-                    );
-                }
+            let keys: BTreeSet<&str> = unit
+                .assessment
+                .as_object()
+                .expect("assessment object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let always: BTreeSet<&str> = ASSESSMENT_ALWAYS.iter().copied().collect();
+            let allowed: BTreeSet<&str> = always
+                .union(&ASSESSMENT_CONDITIONAL.iter().copied().collect())
+                .copied()
+                .collect();
+            assert!(
+                always.is_subset(&keys),
+                "{l}: assessment is missing a required field"
+            );
+            assert!(
+                keys.is_subset(&allowed),
+                "{l}: assessment carries {:?}, outside the closed schema — a field \
+                 nobody constrained is where the secret ends up",
+                keys.difference(&allowed).collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+/// Contract §5.4: incomplete coverage names its reason, whatever the outcome.
+#[test]
+fn incomplete_coverage_names_its_reason() {
+    let mut incomplete_with_finding = 0;
+    for (file, doc) in all_docs() {
+        for unit in units(file, &doc) {
+            let (a, l) = (&unit.assessment, &unit.label);
+            let complete = a
+                .get("coverageComplete")
+                .and_then(Value::as_bool)
+                .expect("coverageComplete");
+            if complete {
+                assert!(
+                    a.get("coverageFailureCode").is_none(),
+                    "{l}: complete coverage must not carry a failure code"
+                );
+                continue;
+            }
+            let code = a
+                .get("coverageFailureCode")
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("{l}: incomplete coverage without a failure code"));
+            assert!(
+                COVERAGE_FAILURE_CODES.contains(&code),
+                "{l}: coverageFailureCode {code:?} is outside the §5.4 vocabulary"
+            );
+            if !unit.flagged().is_empty() {
+                incomplete_with_finding += 1;
             }
         }
     }
+    assert!(
+        incomplete_with_finding > 0,
+        "no specimen witnesses §5.1's overlap — a blocking finding together with \
+         incomplete coverage. Without one the corpus cannot tell the frozen \
+         precedence from its inverse."
+    );
+}
+
+/// Contract §5.3: the present-only rule is a computation over the decoded
+/// source, and the corpus witnesses it in both directions.
+#[test]
+fn present_only_fields_join_the_set_only_when_present() {
+    let present = load("present-only-field-present-v1.json");
+    let absent = load("present-only-field-absent-v1.json");
+    let (pu, au) = (
+        units("present-only-field-present-v1.json", &present),
+        units("present-only-field-absent-v1.json", &absent),
+    );
+    let (p, a) = (pu.first().expect("R10"), au.first().expect("R11"));
+    assert_eq!(p.kind, a.kind, "the pair must share a source kind");
+
+    let optional = "/in_reply_to_id";
+    assert!(
+        p.src.get(optional).is_some() && a.src.get(optional).is_none(),
+        "the pair must differ by exactly the presence of {optional}"
+    );
+    assert!(
+        p.required().contains(optional),
+        "a present present-only field must join the required set"
+    );
+    assert!(
+        !a.required().contains(optional),
+        "an absent present-only field must stay out of the required set"
+    );
+    assert_eq!(
+        p.required().len(),
+        a.required().len() + 1,
+        "the required sets must differ by exactly that one field"
+    );
 }
 
 #[test]
@@ -576,6 +873,14 @@ fn a_blocked_source_produces_no_provenance_snapshot() {
                 assert!(
                     unit.reduced.is_none(),
                     "{l}: RETAIN needs no reduced record"
+                );
+                // §7.2, whole-object: the projection is exactly what the decoded
+                // source produces under the frozen mapping. Checking the key set
+                // alone would let a correct pointer name incorrect bytes.
+                assert_eq!(
+                    canonical,
+                    &expected_projection(&unit.kind, &unit.src, &unit.required()),
+                    "{l}: the retained projection is not what §7.2 says these bytes produce"
                 );
             } else {
                 assert!(
@@ -660,7 +965,7 @@ fn the_retained_blocked_split_is_computed_not_nominated() {
                 "{l}: a record that blocked nothing is not a reduced record"
             );
 
-            let required = required_for(&unit.kind);
+            let required = unit.required();
             let union: BTreeSet<String> = got_retained.union(&got_blocked).cloned().collect();
             assert_eq!(
                 union, required,
@@ -679,6 +984,37 @@ fn the_retained_blocked_split_is_computed_not_nominated() {
             assert!(
                 well_formed_digest(str_at(reduced, "canonicalDigest")),
                 "{l}: the reduced record is retained evidence and needs its digest"
+            );
+            assert_canonical_pointer_array(l, "blockedFields", canonical.get("blockedFields"));
+
+            // §7.2: the right pointer is not enough — the value under it is frozen too.
+            let retained_map = canonical
+                .pointer("/retainedFields")
+                .and_then(Value::as_object)
+                .expect("retainedFields");
+            for (pointer, held) in retained_map {
+                let raw = unit.src.get(pointer).unwrap_or_else(|| {
+                    panic!("{l}: {pointer} retained but absent from the source")
+                });
+                assert_eq!(
+                    held,
+                    &projected_value(pointer, raw),
+                    "{l}: {pointer} holds a value the complete projection would not carry"
+                );
+            }
+
+            // §7.3: identity lives in the locator, and the locator is not evidence.
+            let loc = canonical
+                .get("locator")
+                .and_then(Value::as_object)
+                .unwrap_or_else(|| panic!("{l}: reduced record without a locator"));
+            let shape: BTreeSet<&str> = table(LOCATOR_SHAPE, &unit.kind).iter().copied().collect();
+            let got: BTreeSet<&str> = loc.keys().map(String::as_str).collect();
+            assert_eq!(got, shape, "{l}: locator shape disagrees with §7.3");
+            assert!(
+                canonical.get("stableId").is_none(),
+                "{l}: stableId must live in the locator, not beside the retained fields — \
+                 otherwise a blocked /id walks back in under an alias"
             );
         }
     }
@@ -714,6 +1050,7 @@ fn blocked_bytes_never_reach_a_snapshot() {
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
             let l = &unit.label;
+            let body = unit.body();
             let body_survives = unit.resolvable().contains("/body");
 
             if body_survives {
@@ -728,7 +1065,7 @@ fn blocked_bytes_never_reach_a_snapshot() {
                         .to_owned(),
                 };
                 assert_eq!(
-                    kept, unit.assessed_body,
+                    kept, body,
                     "{l}: the retained body differs from the assessed body — something \
                      normalized it between the gate and retention"
                 );
@@ -739,7 +1076,7 @@ fn blocked_bytes_never_reach_a_snapshot() {
             canonical_objects(&doc, &mut everywhere);
             for canonical in &everywhere {
                 assert!(
-                    !canonical.to_string().contains(&unit.assessed_body),
+                    !body.is_empty() && !canonical.to_string().contains(&body),
                     "{l}: a blocked body appears inside a canonical object"
                 );
             }
@@ -773,6 +1110,22 @@ fn a_derived_fact_needs_every_input_resolved() {
                     claim, computed,
                     "{l}: the fixture's retention claim disagrees with the retained record"
                 );
+            }
+
+            if let Some(reduced) = &unit.reduced {
+                let loc = reduced
+                    .pointer("/canonical/locator")
+                    .and_then(Value::as_object)
+                    .expect("locator");
+                for input in &inputs {
+                    if !resolvable.contains(input) {
+                        let leaf = input.rsplit('/').next().unwrap_or(input);
+                        assert!(
+                            !loc.contains_key(leaf),
+                            "{l}: {input} is blocked, and the locator must not satisfy it (§7.3)"
+                        );
+                    }
+                }
             }
 
             if computed {
@@ -816,7 +1169,14 @@ fn the_byte_discriminator_isolates_one_field() {
         "the discriminator needs exactly two variants"
     );
 
-    let bodies: Vec<&str> = variants.iter().map(|v| str_at(v, "assessedBody")).collect();
+    let bodies: Vec<&str> = variants
+        .iter()
+        .map(|v| {
+            v.pointer("/decodedSource/~1body")
+                .and_then(Value::as_str)
+                .expect("decoded body")
+        })
+        .collect();
     let (a, b) = (bodies.first().expect("a"), bodies.last().expect("b"));
     assert_ne!(a, b, "the two variants must differ");
     assert_eq!(
@@ -925,29 +1285,51 @@ fn contract_states_every_required_field_this_file_asserts() {
             .join("docs/architecture/closure-redaction-policy-v1.md"),
     )
     .expect("reading the contract");
+
     let mut per_kind: BTreeMap<&str, usize> = BTreeMap::new();
-    for (kind, fields) in REQUIRED_FIELDS {
-        assert!(contract.contains(kind), "contract does not mention {kind}");
-        for f in *fields {
-            assert!(
-                contract.contains(f),
-                "contract §5.3 does not state required field {f} for {kind}"
-            );
+    for (table_name, t) in [
+        ("always", ALWAYS_FIELDS),
+        ("present-only", PRESENT_ONLY_FIELDS),
+    ] {
+        for (kind, fields) in t {
+            assert!(contract.contains(kind), "contract does not mention {kind}");
+            for f in *fields {
+                assert!(
+                    contract.contains(f),
+                    "contract §5.3 does not state {table_name} field {f} for {kind}"
+                );
+            }
             *per_kind.entry(kind).or_default() += 1;
         }
     }
-    assert!(per_kind.len() >= 2, "the mirror should cover several kinds");
-    for code in REASON_CODES {
+    assert_eq!(
+        per_kind.len(),
+        5,
+        "the mirror must cover every gated kind §5.3 freezes"
+    );
+    for code in COVERAGE_FAILURE_CODES {
         assert!(
             contract.contains(code),
-            "contract does not state reasonCode {code}"
+            "contract does not state coverageFailureCode {code}"
         );
     }
-    for field in FREE_TEXT_FIELDS {
+    for key in ASSESSMENT_ALWAYS.iter().chain(ASSESSMENT_CONDITIONAL) {
         assert!(
-            contract.contains(field),
-            "contract does not declare {field} as free text"
+            contract.contains(key),
+            "contract §9 does not list assessment field {key}"
         );
+    }
+    assert!(
+        contract.contains("no field of an assessment is free text"),
+        "contract must state that V1 has no free text"
+    );
+    for (kind, fields) in LOCATOR_SHAPE {
+        for f in *fields {
+            assert!(
+                contract.contains(f),
+                "contract §7.3 does not state locator field {f} for {kind}"
+            );
+        }
     }
     assert!(
         contract.contains(REDUCED_KIND),

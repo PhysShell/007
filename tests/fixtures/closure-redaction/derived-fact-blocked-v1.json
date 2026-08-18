@@ -4,6 +4,7 @@
     "R6"
   ],
   "synthetic": true,
+  "sourceKind": "github-issue-comment",
   "contract": "docs/architecture/closure-redaction-policy-v1.md",
   "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": [
@@ -13,16 +14,34 @@
     "10"
   ],
   "what": "a semantic fact whose only input was a blocked field, and therefore cannot be emitted",
-  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where /body did not survive \u00a77.1 it appears in no canonical object and no digest here covers it. Where it did survive, it is byte-identical to the retained value, which is what proves nothing normalized it between assessment and retention.",
-  "why": "provenance V1 \u00a718 requires a derived fact to name the source snapshot digest it came from. /body does not resolve to any retained record here, so the requirement cannot be met. Emitting it anyway pairs a retained decision with a deliberately destroyed source.",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "provenance V1 \u00a718 requires a derived fact to name the source snapshot digest it came from. /body resolves to no retained record here.",
   "locator": {
-    "kind": "github-issue-comment",
     "repository": "PhysShell/007",
     "pullRequest": "9101",
     "stableId": "9100000006"
   },
   "gateOutcome": "BLOCK_SECRET",
-  "assessedBody": "I reproduced defect X on a scratch clone.\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\n",
+  "decodedSource": {
+    "/id": 9100000006,
+    "/user/id": 9100000904,
+    "/user/login": "synthetic-external-reviewer",
+    "/user/type": "User",
+    "/author_association": "NONE",
+    "/body": "I reproduced defect X on a scratch clone.\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\n",
+    "/created_at": "2026-08-18T09:44:02Z",
+    "/updated_at": "2026-08-18T09:44:02Z"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/id",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
   "assessment": {
     "schemaVersion": 1,
     "redactionPolicyVersion": 1,
@@ -33,26 +52,26 @@
     },
     "representation": "decoded-source-field-values",
     "assessedFields": [
-      "/id",
-      "/user/id",
-      "/user/login",
-      "/user/type",
       "/author_association",
       "/body",
       "/created_at",
-      "/updated_at"
+      "/id",
+      "/updated_at",
+      "/user/id",
+      "/user/login",
+      "/user/type"
     ],
     "coverageComplete": true,
     "outcome": "BLOCK_SECRET",
     "observedAt": "2026-08-18T09:44:30Z",
     "findings": [
       {
-        "findingId": "SYN-TOKEN-1",
-        "field": "/body"
+        "field": "/body",
+        "findingId": "SYN-TOKEN-1"
       }
     ]
   },
-  "assessmentDigest": "sha256:7480949fe61d04fd32a060d2e6597634df7eabaafef5eb831a28827df05ce40c",
+  "assessmentDigest": "sha256:faec47bf2cedcff843e65bc5fda41aaad88eedd8d881e19c14756350f4071202",
   "retention": {
     "permitted": false,
     "forbidden": [
@@ -66,29 +85,33 @@
       "schemaVersion": 1,
       "sourceKind": "github-reduced-source-record",
       "locatorKind": "github-issue-comment",
-      "stableId": "9100000006",
+      "locator": {
+        "repository": "PhysShell/007",
+        "pullRequest": "9101",
+        "stableId": "9100000006"
+      },
       "redactionPolicyVersion": 1,
       "outcome": "BLOCK_SECRET",
       "coverageComplete": true,
       "retainedFields": {
-        "/id": "9100000006",
-        "/user/id": "9100000904",
-        "/user/login": "synthetic-external-reviewer",
-        "/user/type": "User",
         "/author_association": "NONE",
         "/created_at": "2026-08-18T09:44:02Z",
-        "/updated_at": "2026-08-18T09:44:02Z"
+        "/id": "9100000006",
+        "/updated_at": "2026-08-18T09:44:02Z",
+        "/user/id": "9100000904",
+        "/user/login": "synthetic-external-reviewer",
+        "/user/type": "User"
       },
       "blockedFields": [
         "/body"
       ]
     },
-    "canonicalDigest": "sha256:69549378bc4a6b27ffa24790bd87a8ada286052f264806f7e082b09016ae7c15"
+    "canonicalDigest": "sha256:d50b220f3e9b43a605a0b99630b1bb3d16c7dd71741ee15f6f403a311bb805c6"
   },
   "retentionBinding": {
     "schemaVersion": 1,
-    "recordDigest": "sha256:69549378bc4a6b27ffa24790bd87a8ada286052f264806f7e082b09016ae7c15",
-    "assessmentDigest": "sha256:7480949fe61d04fd32a060d2e6597634df7eabaafef5eb831a28827df05ce40c"
+    "recordDigest": "sha256:d50b220f3e9b43a605a0b99630b1bb3d16c7dd71741ee15f6f403a311bb805c6",
+    "assessmentDigest": "sha256:faec47bf2cedcff843e65bc5fda41aaad88eedd8d881e19c14756350f4071202"
   },
   "candidateDerivedFact": {
     "name": "reproductionClaimed",
@@ -97,6 +120,6 @@
     ],
     "everyInputFieldRetained": false,
     "admissible": false,
-    "note": "a claim to be resolved against the retained record, not an authority. \u00a78 requires the consumer to resolve /body itself and find it absent."
+    "note": "a claim to be resolved against retainedFields, not an authority."
   }
 }

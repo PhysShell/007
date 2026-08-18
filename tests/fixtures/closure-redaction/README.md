@@ -62,16 +62,23 @@ computed the same way as every other digest in this repository.
 
 ## The specimens
 
-| | gate | discriminates |
-|---|---|---|
-| R1 `safe-body-v1.json` | `RETAIN` | full coverage, no finding → normal retention |
-| R2 `explicit-secret-v1.json` | `BLOCK_SECRET` | no snapshot, no digest of the original, no masked form |
-| R3 `whitespace-sensitive-secret-v1.json` | both | one byte flips the **verdict** |
-| R4 `detector-failure-v1.json` | `CANNOT_ASSESS` | did not run ≠ found nothing |
-| R5 `detector-inconclusive-v1.json` | `CANNOT_ASSESS` | partial coverage ≠ partial pass |
-| R6 `derived-fact-blocked-v1.json` | `BLOCK_SECRET` | a fact that read the body cannot be emitted |
-| R7 `safe-metadata-retained-v1.json` | `BLOCK_SECRET` | a fact that read only `commitId` survives |
-| R8 `token-shaped-safe-v1.json` | `RETAIN` | the record is the detector's result, not the reader's hunch |
+| | gate | coverage | retained / blocked | discriminates |
+|---|---|---|---|---|
+| R1 `safe-body-v1.json` | `RETAIN` | complete | full projection | every §5.3 field assessed, no finding |
+| R2 `explicit-secret-v1.json` | `BLOCK_SECRET` | complete | 7 / 1 | no snapshot, no digest of the original, no masked form |
+| R3 `whitespace-sensitive-secret-v1.json` | both | complete | 7 / 1 and full | one byte flips the **outcome** |
+| R4 `detector-failure-v1.json` | `CANNOT_ASSESS` | incomplete | 0 / 8 | nothing assessed means nothing retainable |
+| R5 `detector-inconclusive-v1.json` | `CANNOT_ASSESS` | incomplete | 1 / 7 | partial coverage is neither a pass nor a total loss |
+| R6 `derived-fact-blocked-v1.json` | `BLOCK_SECRET` | complete | 7 / 1 | a fact that read the body cannot be emitted |
+| R7 `safe-metadata-retained-v1.json` | `BLOCK_SECRET` | complete | 8 / 1 | a fact that read only `/commit_id` survives |
+| R8 `token-shaped-safe-v1.json` | `RETAIN` | complete | full projection | the record is the detector's result, not the reader's hunch |
+| R9 `finding-with-incomplete-coverage-v1.json` | `BLOCK_SECRET` | incomplete | 1 / 7 | the §5.1 overlap: a finding **and** an unfinished run |
+| R10 `present-only-field-present-v1.json` | `RETAIN` | complete | full projection | a present present-only field joins the required set |
+| R11 `present-only-field-absent-v1.json` | `RETAIN` | complete | full projection | an absent one stays out of it |
+
+Nothing in that table is taken on the specimen's word. The required field set
+comes from contract §5.3, and coverage, the retained/blocked split, the value
+under each retained pointer, and derived-fact admissibility are computed from it.
 
 ### R3 — the byte-exact discriminator
 
@@ -105,19 +112,49 @@ The line is not how useful the fact is. It is whether **every input still exists
 as retained immutable bytes** — provenance V1 §18 applied to a source that is
 legally forbidden to exist.
 
-### `assessedBody`
+### R9 — the overlap that had no witness
 
-Each specimen shows the exact decoded string the detector saw. It is a
-fixture-visible input, never retained evidence:
+A blocking finding on `/body` **and** a detector that died before reaching the
+rest. Both descriptions apply, and §5.1 gives the finding precedence:
+`BLOCK_SECRET` with `coverageComplete: false`.
+
+Until R9 existed, every `BLOCK_SECRET` specimen had complete coverage, so the
+corpus could not distinguish the frozen precedence from its inverse — a checker
+implementing the rule backwards would have passed. R9 also witnesses §5.4:
+`coverageFailureCode` is required whenever coverage is incomplete, whatever the
+outcome, so the record says *why* the assessment was partial and not only that
+it was.
+
+### R10 and R11 — the present-only pair
+
+Two review comments differing by one optional field. In R10 `/in_reply_to_id` is
+present, so it joins the required set and must be assessed; in R11 it is absent,
+so it is outside the set and a detector claiming to have assessed it would be
+reporting a result about a field that does not exist.
+
+This is what makes §5.3's present-only rule a computation rather than a
+sentence: the two required sets differ by exactly one element, derived from the
+source rather than declared.
+
+### `decodedSource`
+
+Each specimen carries the exact synthetic input the detector saw, keyed by the
+JSON pointers of §5.3. It is a fixture-visible input, never retained evidence,
+and it is what makes §7.2 checkable:
 
 ```text
-gate = RETAIN          assessedBody is byte-identical to the retained
-                       canonical body — which is what proves nothing
-                       normalized it between assessment and projection
+field survives §7.1    the retained value equals what the COMPLETE projection
+                       would carry for that pointer — ids as strings, everything
+                       else exactly as decoded
 
-gate = BLOCK_SECRET    assessedBody appears in no canonical object, and no
-   or CANNOT_ASSESS    digest in this directory covers it
+field blocked          its value appears in no canonical object, and no digest
+                       in this directory covers it
 ```
+
+Note what `decodedSource` holds for `/id`: a JSON **number**, the raw API shape,
+as in the frozen Step 0B fixtures. The retained projection carries a **string**.
+Both readings fit the contract before correction round 3; only one does now, and
+the checker derives the expected value rather than copying it.
 
 ## Recorded honestly, not resolved
 

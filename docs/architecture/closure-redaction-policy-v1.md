@@ -507,9 +507,14 @@ REQUIRED             schemaVersion
                      coverageComplete
                      outcome               RETAIN | BLOCK_SECRET | CANNOT_ASSESS
                      observedAt
-CONDITIONAL          findings              REQUIRED, non-empty, on BLOCK_SECRET
-                     coverageFailureCode   REQUIRED when coverageComplete is false
+CONDITIONAL          findings              present IFF outcome is BLOCK_SECRET
+                     coverageFailureCode   present IFF coverageComplete is false
 ```
+
+The conditionals are **iff**, not "at least". `findings: []` and an absent
+`findings` would be two encodings of one fact, and provenance V1 §8 already
+settled that argument for `null` versus absent: one fact, one canonical form, or
+the digest stops identifying content.
 
 - `representation` names the form the detector actually saw. V1 defines exactly
   one legal value, matching §4. It is a field rather than an assumption so a

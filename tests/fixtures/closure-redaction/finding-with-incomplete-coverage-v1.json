@@ -1,37 +1,36 @@
 {
   "specimenSet": "closure-redaction-v1",
   "specimens": [
-    "R5"
+    "R9"
   ],
   "synthetic": true,
   "sourceKind": "github-issue-comment",
   "contract": "docs/architecture/closure-redaction-policy-v1.md",
   "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": [
-    "5",
-    "5.2",
+    "5.1",
     "5.4",
-    "6.3",
     "7.1"
   ],
-  "what": "the detector completed over part of the required set only, so the object outcome is CANNOT_ASSESS while the one clean field survives",
+  "what": "a blocking finding AND an assessment that never finished \u2014 the overlap \u00a75.1 exists to resolve",
   "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
-  "why": "assessedFields covers /body alone. \u00a75.3 fixes the denominator, so the seven unassessed fields are blocked and /body \u2014 successfully assessed and clean \u2014 is retained. A partial assessment is not a partial pass at the object level, and not a total loss at the field level either.",
+  "why": "both descriptions apply at once: a secret was found in /body, and the detector died before reaching the remaining fields. \u00a75.1 gives the finding precedence, so the outcome is BLOCK_SECRET with coverageComplete false. Without this specimen the corpus could not tell the frozen precedence from its inverse \u2014 every other BLOCK_SECRET case here has complete coverage.",
+  "andTheReasonSurvives": "coverageFailureCode is required whenever coverage is incomplete, whatever the outcome, so this record says why the assessment was partial rather than only that it was.",
   "locator": {
     "repository": "PhysShell/007",
     "pullRequest": "9101",
-    "stableId": "9100000005"
+    "stableId": "9100000009"
   },
-  "gateOutcome": "CANNOT_ASSESS",
+  "gateOutcome": "BLOCK_SECRET",
   "decodedSource": {
-    "/id": 9100000005,
-    "/user/id": 9100000907,
-    "/user/login": "synthetic-operator",
+    "/id": 9100000009,
+    "/user/id": 9100000908,
+    "/user/login": "synthetic-deployer",
     "/user/type": "User",
     "/author_association": "CONTRIBUTOR",
-    "/body": "Reran the enumeration; page two never arrived.\n",
-    "/created_at": "2026-08-18T09:31:12Z",
-    "/updated_at": "2026-08-18T09:31:12Z"
+    "/body": "Deploy notes.\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\nrest of the run log follows.\n",
+    "/created_at": "2026-08-18T11:02:11Z",
+    "/updated_at": "2026-08-18T11:02:11Z"
   },
   "requiredFields": [
     "/author_association",
@@ -53,14 +52,21 @@
     },
     "representation": "decoded-source-field-values",
     "assessedFields": [
-      "/body"
+      "/body",
+      "/id"
     ],
     "coverageComplete": false,
-    "outcome": "CANNOT_ASSESS",
-    "observedAt": "2026-08-18T09:31:40Z",
-    "coverageFailureCode": "INCOMPLETE_COVERAGE"
+    "outcome": "BLOCK_SECRET",
+    "observedAt": "2026-08-18T11:02:40Z",
+    "findings": [
+      {
+        "field": "/body",
+        "findingId": "SYN-TOKEN-1"
+      }
+    ],
+    "coverageFailureCode": "DETECTOR_FAILED"
   },
-  "assessmentDigest": "sha256:b900562903c891a330a29d63744adfaeb678431034fae5d08603645dc4fa7770",
+  "assessmentDigest": "sha256:dcf079c89369e54af16703b0f9f1d12260a13326d5075c5610ee91041e19e0be",
   "retention": {
     "permitted": false,
     "forbidden": [
@@ -77,29 +83,29 @@
       "locator": {
         "repository": "PhysShell/007",
         "pullRequest": "9101",
-        "stableId": "9100000005"
+        "stableId": "9100000009"
       },
       "redactionPolicyVersion": 1,
-      "outcome": "CANNOT_ASSESS",
+      "outcome": "BLOCK_SECRET",
       "coverageComplete": false,
       "retainedFields": {
-        "/body": "Reran the enumeration; page two never arrived.\n"
+        "/id": "9100000009"
       },
       "blockedFields": [
         "/author_association",
+        "/body",
         "/created_at",
-        "/id",
         "/updated_at",
         "/user/id",
         "/user/login",
         "/user/type"
       ]
     },
-    "canonicalDigest": "sha256:1738063b094673a9e675ff56185f2c570f95a245060e671d48ca32f9d44c303c"
+    "canonicalDigest": "sha256:d2795e3d62532cff07de77c9a34a4e4789d45e714cb09c9cde07b4d03c6036fd"
   },
   "retentionBinding": {
     "schemaVersion": 1,
-    "recordDigest": "sha256:1738063b094673a9e675ff56185f2c570f95a245060e671d48ca32f9d44c303c",
-    "assessmentDigest": "sha256:b900562903c891a330a29d63744adfaeb678431034fae5d08603645dc4fa7770"
+    "recordDigest": "sha256:d2795e3d62532cff07de77c9a34a4e4789d45e714cb09c9cde07b4d03c6036fd",
+    "assessmentDigest": "sha256:dcf079c89369e54af16703b0f9f1d12260a13326d5075c5610ee91041e19e0be"
   }
 }

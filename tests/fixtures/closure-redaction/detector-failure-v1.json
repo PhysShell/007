@@ -4,26 +4,47 @@
     "R4"
   ],
   "synthetic": true,
+  "sourceKind": "github-issue-comment",
   "contract": "docs/architecture/closure-redaction-policy-v1.md",
   "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": [
     "5",
-    "5.1",
+    "5.4",
     "6.3",
     "7.1",
-    "9.3"
+    "7.3",
+    "9.4"
   ],
   "what": "the source bytes were obtained but the detector produced no result for any field, so nothing may be retained",
-  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where /body did not survive \u00a77.1 it appears in no canonical object and no digest here covers it. Where it did survive, it is byte-identical to the retained value, which is what proves nothing normalized it between assessment and retention.",
-  "why": "an empty finding list here is identical to R1's. Only the outcome, the reasonCode and an empty assessedFields separate 'inspected, nothing found' from 'never inspected'. Because no field was successfully assessed, \u00a77.1 blocks all of them: an unassessed timestamp is unexamined, not obviously harmless.",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "an empty finding list here is identical to R1's. What separates 'inspected, nothing found' from 'never inspected' is the outcome, an empty assessedFields, and a coverageFailureCode. Because no field was successfully assessed, \u00a77.1 blocks all eight: an unassessed timestamp is unexamined, not obviously harmless.",
+  "andYetFindable": "retainedFields is empty and the record is still identified, because \u00a77.3 carries identity in the locator. /id stays in blockedFields \u2014 the locator does not smuggle it back as surviving evidence.",
   "locator": {
-    "kind": "github-issue-comment",
     "repository": "PhysShell/007",
     "pullRequest": "9101",
     "stableId": "9100000004"
   },
   "gateOutcome": "CANNOT_ASSESS",
-  "assessedBody": "The co-versioning check output is attached below.\n",
+  "decodedSource": {
+    "/id": 9100000004,
+    "/user/id": 9100000903,
+    "/user/login": "synthetic-reporter",
+    "/user/type": "User",
+    "/author_association": "NONE",
+    "/body": "The co-versioning check output is attached below.\n",
+    "/created_at": "2026-08-18T09:20:41Z",
+    "/updated_at": "2026-08-18T09:20:41Z"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/id",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
   "assessment": {
     "schemaVersion": 1,
     "redactionPolicyVersion": 1,
@@ -37,10 +58,9 @@
     "coverageComplete": false,
     "outcome": "CANNOT_ASSESS",
     "observedAt": "2026-08-18T09:21:05Z",
-    "reasonCode": "DETECTOR_FAILED",
-    "reasonDetail": "terminated by a signal before emitting results"
+    "coverageFailureCode": "DETECTOR_FAILED"
   },
-  "assessmentDigest": "sha256:98bd29f53d621066a00e51984a6076c3ce9064bffdb0583bc061e53da1dac8c0",
+  "assessmentDigest": "sha256:df4523ecee298b839b366ebb06a2490e5f4477d7c6d8578d8dd76cad6337fead",
   "retention": {
     "permitted": false,
     "forbidden": [
@@ -54,7 +74,11 @@
       "schemaVersion": 1,
       "sourceKind": "github-reduced-source-record",
       "locatorKind": "github-issue-comment",
-      "stableId": "9100000004",
+      "locator": {
+        "repository": "PhysShell/007",
+        "pullRequest": "9101",
+        "stableId": "9100000004"
+      },
       "redactionPolicyVersion": 1,
       "outcome": "CANNOT_ASSESS",
       "coverageComplete": false,
@@ -70,11 +94,11 @@
         "/user/type"
       ]
     },
-    "canonicalDigest": "sha256:7588e58b0bb7a6e45a5fefb2ac227a01990df06bd497c261a4758fb1f4b2a610"
+    "canonicalDigest": "sha256:f52c2793f95bdae5063db90ab3cdc5fc1637440e4fee7e53d18bba214a9cd851"
   },
   "retentionBinding": {
     "schemaVersion": 1,
-    "recordDigest": "sha256:7588e58b0bb7a6e45a5fefb2ac227a01990df06bd497c261a4758fb1f4b2a610",
-    "assessmentDigest": "sha256:98bd29f53d621066a00e51984a6076c3ce9064bffdb0583bc061e53da1dac8c0"
+    "recordDigest": "sha256:f52c2793f95bdae5063db90ab3cdc5fc1637440e4fee7e53d18bba214a9cd851",
+    "assessmentDigest": "sha256:df4523ecee298b839b366ebb06a2490e5f4477d7c6d8578d8dd76cad6337fead"
   }
 }
