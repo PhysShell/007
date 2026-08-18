@@ -1,0 +1,61 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R1"
+  ],
+  "synthetic": true,
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "4",
+    "5",
+    "6.1",
+    "9"
+  ],
+  "what": "a completed assessment covering every retained field, with no blocking finding, so normal retention proceeds",
+  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where the gate did not return RETAIN, this string appears in no canonical object and no digest anywhere in this directory covers it. Where the gate returned RETAIN, it is byte-identical to the retained canonical body, which is what proves nothing normalized it between assessment and projection.",
+  "gateOutcome": "RETAIN",
+  "assessedBody": "The manifest member is unreachable from the frozen tree.\n\nSee the co-versioning check output.\n",
+  "assessment": {
+    "schemaVersion": 1,
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:f00372ef104d490574feb48d7bc487fed22a1a262aab4277996f57a674c20e43"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [
+      "/body",
+      "/user/login",
+      "/author_association"
+    ],
+    "outcome": "RETAIN",
+    "observedAt": "2026-08-18T09:00:00Z",
+    "findings": []
+  },
+  "locator": {
+    "kind": "github-issue-comment",
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000001"
+  },
+  "retention": {
+    "permitted": true,
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-issue-comment",
+      "stableId": "9100000001",
+      "user": {
+        "id": "9100000900",
+        "login": "synthetic-contributor",
+        "type": "User"
+      },
+      "authorAssociation": "CONTRIBUTOR",
+      "body": "The manifest member is unreachable from the frozen tree.\n\nSee the co-versioning check output.\n",
+      "createdAt": "2026-08-18T08:41:07Z",
+      "updatedAt": "2026-08-18T08:41:07Z"
+    },
+    "canonicalDigest": "sha256:75c995761af92789b6fc3bf27f702266a8860c9044bfa9aa43ac4ee62836fbb8"
+  }
+}
