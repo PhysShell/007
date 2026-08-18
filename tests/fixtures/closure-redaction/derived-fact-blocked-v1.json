@@ -8,13 +8,21 @@
   "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": [
     "6.2",
-    "7",
-    "8"
+    "7.1",
+    "8",
+    "10"
   ],
-  "what": "a semantic fact whose only input was a blocked body, and therefore cannot be emitted",
-  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where the gate did not return RETAIN, this string appears in no canonical object and no digest anywhere in this directory covers it. Where the gate returned RETAIN, it is byte-identical to the retained canonical body, which is what proves nothing normalized it between assessment and projection.",
-  "why": "provenance V1 \u00a718 requires a derived fact to name the source snapshot digest it came from. Here that snapshot may not legally exist, so the requirement cannot be met. Emitting the fact anyway would pair a retained decision with a deliberately destroyed source.",
+  "what": "a semantic fact whose only input was a blocked field, and therefore cannot be emitted",
+  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where /body did not survive \u00a77.1 it appears in no canonical object and no digest here covers it. Where it did survive, it is byte-identical to the retained value, which is what proves nothing normalized it between assessment and retention.",
+  "why": "provenance V1 \u00a718 requires a derived fact to name the source snapshot digest it came from. /body does not resolve to any retained record here, so the requirement cannot be met. Emitting it anyway pairs a retained decision with a deliberately destroyed source.",
+  "locator": {
+    "kind": "github-issue-comment",
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000006"
+  },
   "gateOutcome": "BLOCK_SECRET",
+  "assessedBody": "I reproduced defect X on a scratch clone.\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\n",
   "assessment": {
     "schemaVersion": 1,
     "redactionPolicyVersion": 1,
@@ -25,10 +33,16 @@
     },
     "representation": "decoded-source-field-values",
     "assessedFields": [
-      "/body",
+      "/id",
+      "/user/id",
       "/user/login",
-      "/author_association"
+      "/user/type",
+      "/author_association",
+      "/body",
+      "/created_at",
+      "/updated_at"
     ],
+    "coverageComplete": true,
     "outcome": "BLOCK_SECRET",
     "observedAt": "2026-08-18T09:44:30Z",
     "findings": [
@@ -38,39 +52,43 @@
       }
     ]
   },
-  "assessedBody": "I reproduced defect X on a scratch clone.\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\n",
-  "locator": {
-    "kind": "github-issue-comment",
-    "repository": "PhysShell/007",
-    "pullRequest": "9101",
-    "stableId": "9100000006"
-  },
+  "assessmentDigest": "sha256:7480949fe61d04fd32a060d2e6597634df7eabaafef5eb831a28827df05ce40c",
   "retention": {
-    "permitted": false
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
   },
-  "blockedSourceMetadata": {
+  "reducedSourceRecord": {
     "canonical": {
       "schemaVersion": 1,
-      "sourceKind": "github-blocked-source-metadata",
+      "sourceKind": "github-reduced-source-record",
       "locatorKind": "github-issue-comment",
       "stableId": "9100000006",
       "redactionPolicyVersion": 1,
       "outcome": "BLOCK_SECRET",
+      "coverageComplete": true,
       "retainedFields": {
-        "user": {
-          "id": "9100000904",
-          "login": "synthetic-external-reviewer",
-          "type": "User"
-        },
-        "authorAssociation": "NONE",
-        "createdAt": "2026-08-18T09:44:02Z",
-        "updatedAt": "2026-08-18T09:44:02Z"
+        "/id": "9100000006",
+        "/user/id": "9100000904",
+        "/user/login": "synthetic-external-reviewer",
+        "/user/type": "User",
+        "/author_association": "NONE",
+        "/created_at": "2026-08-18T09:44:02Z",
+        "/updated_at": "2026-08-18T09:44:02Z"
       },
       "blockedFields": [
         "/body"
       ]
     },
-    "canonicalDigest": "sha256:09863dc97a2c2ce7a29951317bada4cbd33b57fe8a7b6b2c837696ca8645b535"
+    "canonicalDigest": "sha256:69549378bc4a6b27ffa24790bd87a8ada286052f264806f7e082b09016ae7c15"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "recordDigest": "sha256:69549378bc4a6b27ffa24790bd87a8ada286052f264806f7e082b09016ae7c15",
+    "assessmentDigest": "sha256:7480949fe61d04fd32a060d2e6597634df7eabaafef5eb831a28827df05ce40c"
   },
   "candidateDerivedFact": {
     "name": "reproductionClaimed",
@@ -79,6 +97,6 @@
     ],
     "everyInputFieldRetained": false,
     "admissible": false,
-    "note": "the body asserted a reproduction next to the synthetic token. The assertion is not retained, not summarized, and not recorded as having been seen."
+    "note": "a claim to be resolved against the retained record, not an authority. \u00a78 requires the consumer to resolve /body itself and find it absent."
   }
 }

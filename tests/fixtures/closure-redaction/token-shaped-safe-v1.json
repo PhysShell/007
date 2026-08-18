@@ -11,8 +11,14 @@
     "9.1"
   ],
   "what": "content a human or a naive regex would call credential-shaped, which the declared detector policy does not block",
-  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where the gate did not return RETAIN, this string appears in no canonical object and no digest anywhere in this directory covers it. Where the gate returned RETAIN, it is byte-identical to the retained canonical body, which is what proves nothing normalized it between assessment and projection.",
-  "why": "the fixture stores the detector's bounded result and its provenance, not a second opinion. If the integrity test were quietly running its own secret heuristic it would fail here, which is the point: the test must hold the preregistration, not compete with the detector.",
+  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where /body did not survive \u00a77.1 it appears in no canonical object and no digest here covers it. Where it did survive, it is byte-identical to the retained value, which is what proves nothing normalized it between assessment and retention.",
+  "why": "the fixture stores the detector's bounded result and its provenance, not a second opinion. A checker quietly running its own secret heuristic fails here.",
+  "locator": {
+    "kind": "github-issue-comment",
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000008"
+  },
   "gateOutcome": "RETAIN",
   "assessedBody": "Build id for the failing run:\n4f1c9a20e7b3d85c6a0f2e19d4b7c3a58e6f0d2b9c1a4e7f3b5d8c0a2e6f1b4d\nNo credential involved.\n",
   "assessment": {
@@ -25,20 +31,21 @@
     },
     "representation": "decoded-source-field-values",
     "assessedFields": [
-      "/body",
+      "/id",
+      "/user/id",
       "/user/login",
-      "/author_association"
+      "/user/type",
+      "/author_association",
+      "/body",
+      "/created_at",
+      "/updated_at"
     ],
+    "coverageComplete": true,
     "outcome": "RETAIN",
     "observedAt": "2026-08-18T10:15:30Z",
     "findings": []
   },
-  "locator": {
-    "kind": "github-issue-comment",
-    "repository": "PhysShell/007",
-    "pullRequest": "9101",
-    "stableId": "9100000008"
-  },
+  "assessmentDigest": "sha256:0008a9432cda84883864f42274fa8c619e0300d2db107930a127458aec5df649",
   "retention": {
     "permitted": true,
     "canonical": {
@@ -56,5 +63,10 @@
       "updatedAt": "2026-08-18T10:15:00Z"
     },
     "canonicalDigest": "sha256:dacc2edc1c78da8a3073488b2c629c2f88a525df47279bc0d2aac910ef742707"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "recordDigest": "sha256:dacc2edc1c78da8a3073488b2c629c2f88a525df47279bc0d2aac910ef742707",
+    "assessmentDigest": "sha256:0008a9432cda84883864f42274fa8c619e0300d2db107930a127458aec5df649"
   }
 }

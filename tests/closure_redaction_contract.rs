@@ -3,26 +3,38 @@
 //! The specimens under `tests/fixtures/closure-redaction/` were authored for
 //! `docs/architecture/closure-redaction-policy-v1.md` and committed with no
 //! consumer. This file is their first consumer, added afterwards on purpose —
-//! the same ordering used for the Step 0B corpus and for the provenance
-//! specimens, so that a failure here is a discovery about the committed
-//! evidence rather than licence to nudge fixture and checker toward agreement.
+//! the same ordering used for the Step 0B corpus and the provenance specimens,
+//! so a failure here is a discovery about committed evidence rather than
+//! licence to nudge fixture and checker toward agreement.
 //!
 //! SCOPE — PREREGISTRATION INTEGRITY ONLY.
 //!
 //! HARD BOUNDARY 1 — this file is NOT a secret scanner. It never decides
-//! whether a body contains a secret; it reads the outcome the specimen records
-//! and checks the contract's structural consequences of that outcome. Specimen
-//! R8 is credential-shaped to a human and carries no blocking finding, so a
-//! checker that quietly grew its own detection heuristic fails there. The one
-//! place this file does pattern-match (`no_live_credential_shapes`) is hygiene
-//! about what was committed to this repository, and feeds into no gate
-//! decision.
+//! whether a body contains a secret; it reads the outcome a specimen records
+//! and checks the contract's structural consequences. Specimen R8 is
+//! credential-shaped and carries no blocking finding, so a checker that quietly
+//! grew its own heuristic fails there. The one place this file pattern-matches
+//! (`no_live_credential_shapes`) is hygiene about what was committed here, and
+//! feeds no gate decision.
 //!
 //! HARD BOUNDARY 2 — it maps no gate outcome to a closure state. There is
-//! deliberately no `PASS`/`FINDING`/`OWED`/`CANNOT_CHECK`/`STALE` vocabulary
-//! here. Contract §10 derives the closure consequence; anticipating it from
-//! inside a hygiene check would recreate the answer-key problem that provenance
-//! V1 §12 forbids.
+//! deliberately no `PASS`/`FINDING`/`OWED`/`CANNOT_CHECK`/`STALE` vocabulary.
+//! Contract §10 derives the closure consequence from the surviving decision
+//! basis; anticipating it here would rebuild the answer key provenance V1 §12
+//! forbids.
+//!
+//! WHAT IT CANNOT CHECK — digest VALUES. Recomputing them needs JCS + SHA-256,
+//! and this slice adds no dependency. Digests are verified out-of-tree by the
+//! generator that produced them (rfc8785 0.1.4). Here they are checked only for
+//! shape and for referential consistency between a record and its binding.
+//!
+//! NOTHING LOAD-BEARING IS TAKEN FROM THE SPECIMEN. The required field set
+//! comes from `REQUIRED_FIELDS` below, mirroring contract §5.3; coverage, the
+//! retained/blocked partition and derived-fact admissibility are all computed.
+//! Where a specimen declares one of these, the declaration is checked against
+//! the computed value rather than used as its source. An earlier revision took
+//! the denominator from the specimen, and the positive control then declared a
+//! set narrower than the projection it retained.
 
 // Same justification as `tests/github_fixture_integrity.rs`: every panic path
 // below is this test's own assertion failing loudly. Nothing runs against
@@ -30,12 +42,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The preregistered specimen set. Adding or removing a file without updating
-/// this list is itself a finding: the corpus is meant to be a fixed matrix.
 const SPECIMENS: &[(&str, &str)] = &[
     ("safe-body-v1.json", "R1"),
     ("explicit-secret-v1.json", "R2"),
@@ -47,12 +57,51 @@ const SPECIMENS: &[(&str, &str)] = &[
     ("token-shaped-safe-v1.json", "R8"),
 ];
 
-/// Every gate outcome the contract defines (§5). All three must be exercised.
 const OUTCOMES: &[&str] = &["RETAIN", "BLOCK_SECRET", "CANNOT_ASSESS"];
 
-/// `sourceKind` values provenance V1 §8 defines for a complete projection. A
-/// blocked source must never produce one, and the blocked-source metadata
-/// record must never wear one (redaction contract §7).
+/// Contract §5.3, mirrored. The authority for "every field the projection would
+/// retain". Specimens do not get a vote.
+const REQUIRED_FIELDS: &[(&str, &[&str])] = &[
+    (
+        "github-issue-comment",
+        &[
+            "/id",
+            "/user/id",
+            "/user/login",
+            "/user/type",
+            "/author_association",
+            "/body",
+            "/created_at",
+            "/updated_at",
+        ],
+    ),
+    (
+        "github-submitted-review",
+        &[
+            "/id",
+            "/user/id",
+            "/user/login",
+            "/user/type",
+            "/author_association",
+            "/state",
+            "/body",
+            "/submitted_at",
+            "/commit_id",
+        ],
+    ),
+];
+
+/// Contract §9.3 closed vocabulary.
+const REASON_CODES: &[&str] = &[
+    "DETECTOR_UNAVAILABLE",
+    "DETECTOR_FAILED",
+    "INCOMPLETE_COVERAGE",
+    "INVALID_RESULT",
+];
+
+/// Contract §9.4: the only free-text field in V1.
+const FREE_TEXT_FIELDS: &[&str] = &["reasonDetail"];
+
 const PROVENANCE_SOURCE_KINDS: &[&str] = &[
     "github-pull-request-head",
     "github-actions-check",
@@ -62,14 +111,8 @@ const PROVENANCE_SOURCE_KINDS: &[&str] = &[
     "github-query-snapshot",
 ];
 
-const BLOCKED_METADATA_KIND: &str = "github-blocked-source-metadata";
+const REDUCED_KIND: &str = "github-reduced-source-record";
 
-/// Closure-state vocabulary that must not appear in a redaction specimen.
-///
-/// Matched as whole words rather than as quoted JSON values. A vacuity probe
-/// caught the narrower form: `"note": "this observation is \"PASS\""` escapes to
-/// `\\"PASS\\"` in the file, so a verdict smuggled into prose walked straight
-/// past a check that only looked for `"PASS"`.
 const CLASSIFIER_VOCABULARY: &[&str] = &[
     "PASS",
     "FINDING",
@@ -79,19 +122,6 @@ const CLASSIFIER_VOCABULARY: &[&str] = &[
     "expectedState",
     "headline",
 ];
-
-/// True when `needle` occurs in `haystack` bounded by non-identifier characters
-/// on both sides, so `STALE` does not fire on `INSTALLED`.
-fn contains_word(haystack: &str, needle: &str) -> bool {
-    let bounded = |c: Option<char>| !c.is_some_and(|c| c.is_alphanumeric() || c == '_');
-    haystack.match_indices(needle).any(|(at, _)| {
-        let before = haystack.get(..at).and_then(|s| s.chars().next_back());
-        let after = haystack
-            .get(at + needle.len()..)
-            .and_then(|s| s.chars().next());
-        bounded(before) && bounded(after)
-    })
-}
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/closure-redaction")
@@ -103,41 +133,96 @@ fn load(file: &str) -> Value {
     serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parsing {path:?}: {e}"))
 }
 
+fn all_docs() -> Vec<(&'static str, Value)> {
+    SPECIMENS.iter().map(|(f, _)| (*f, load(f))).collect()
+}
+
 fn str_at<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key)
         .and_then(Value::as_str)
         .unwrap_or_else(|| panic!("expected string field {key:?} in {v}"))
 }
 
-/// One (outcome, assessment, retention) triple. Most specimens hold exactly
-/// one; R3 holds two variants under a single locator.
+fn strings(v: Option<&Value>) -> BTreeSet<String> {
+    v.and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn required_for(kind: &str) -> BTreeSet<String> {
+    REQUIRED_FIELDS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map(|(_, f)| f.iter().map(|p| (*p).to_owned()).collect())
+        .unwrap_or_else(|| panic!("contract §5.3 has no field set for {kind:?}"))
+}
+
+fn contains_word(haystack: &str, needle: &str) -> bool {
+    let bounded = |c: Option<char>| !c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    haystack.match_indices(needle).any(|(at, _)| {
+        let before = haystack.get(..at).and_then(|s| s.chars().next_back());
+        let after = haystack
+            .get(at + needle.len()..)
+            .and_then(|s| s.chars().next());
+        bounded(before) && bounded(after)
+    })
+}
+
+fn well_formed_digest(d: &str) -> bool {
+    d.strip_prefix("sha256:").is_some_and(|h| {
+        h.len() == 64
+            && h.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase())
+    })
+}
+
+/// One gate evaluation. Most specimens hold exactly one; R3 holds two variants
+/// under a single locator, so a blocked variant is never judged against its
+/// sibling's legitimate retained snapshot.
 struct Unit {
     label: String,
-    /// The subtree this unit owns. For a single-outcome specimen that is the
-    /// whole document; for the two-variant discriminator it is one variant, so
-    /// that a blocked variant is not judged against its sibling's legitimate
-    /// retained snapshot.
+    kind: String,
     scope: Value,
     outcome: String,
     assessment: Value,
     retention: Value,
     assessed_body: String,
-    blocked_metadata: Option<Value>,
+    reduced: Option<Value>,
+    binding: Value,
+    assessment_digest: String,
     derived_fact: Option<Value>,
 }
 
 fn units(file: &str, doc: &Value) -> Vec<Unit> {
-    let build = |label: String, scope: &Value, fallback: &Value| Unit {
+    let kind = doc
+        .pointer("/locator/kind")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("{file}: locator.kind missing"))
+        .to_owned();
+    let build = |label: String, scope: &Value, outer: &Value| Unit {
         label,
+        kind: kind.clone(),
         scope: scope.clone(),
         outcome: str_at(scope, "gateOutcome").to_owned(),
         assessment: scope.get("assessment").expect("assessment").clone(),
         retention: scope.get("retention").expect("retention").clone(),
         assessed_body: str_at(scope, "assessedBody").to_owned(),
-        blocked_metadata: scope.get("blockedSourceMetadata").cloned(),
-        derived_fact: fallback.get("candidateDerivedFact").cloned(),
+        reduced: scope.get("reducedSourceRecord").cloned(),
+        binding: scope
+            .get("retentionBinding")
+            .expect("retentionBinding")
+            .clone(),
+        assessment_digest: str_at(scope, "assessmentDigest").to_owned(),
+        derived_fact: scope
+            .get("candidateDerivedFact")
+            .or_else(|| outer.get("candidateDerivedFact"))
+            .cloned(),
     };
-
     match doc.get("variants").and_then(Value::as_array) {
         Some(variants) => variants
             .iter()
@@ -147,18 +232,63 @@ fn units(file: &str, doc: &Value) -> Vec<Unit> {
     }
 }
 
-/// Every `canonical` object anywhere in the document, paired with the
-/// `canonicalDigest` sitting beside it when there is one.
-fn canonical_objects(v: &Value, out: &mut Vec<(Value, Option<String>)>) {
+impl Unit {
+    fn assessed(&self) -> BTreeSet<String> {
+        strings(self.assessment.get("assessedFields"))
+    }
+
+    fn flagged(&self) -> BTreeSet<String> {
+        self.assessment
+            .get("findings")
+            .and_then(Value::as_array)
+            .map(|fs| {
+                fs.iter()
+                    .filter_map(|f| f.get("field").and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Contract §7.1, computed here rather than read from the record.
+    fn expected_partition(&self) -> (BTreeSet<String>, BTreeSet<String>) {
+        let required = required_for(&self.kind);
+        let assessed = self.assessed();
+        let flagged = self.flagged();
+        let blocked: BTreeSet<String> = required
+            .iter()
+            .filter(|p| flagged.contains(*p) || !assessed.contains(*p))
+            .cloned()
+            .collect();
+        let retained = required.difference(&blocked).cloned().collect();
+        (retained, blocked)
+    }
+
+    /// The pointers that still resolve to a retained record for this locator.
+    fn resolvable(&self) -> BTreeSet<String> {
+        match &self.reduced {
+            None => required_for(&self.kind),
+            Some(r) => r
+                .pointer("/canonical/retainedFields")
+                .and_then(Value::as_object)
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn retained_digest(&self) -> String {
+        match &self.reduced {
+            None => str_at(&self.retention, "canonicalDigest").to_owned(),
+            Some(r) => str_at(r, "canonicalDigest").to_owned(),
+        }
+    }
+}
+
+fn canonical_objects(v: &Value, out: &mut Vec<Value>) {
     match v {
         Value::Object(map) => {
-            if let Some(canonical) = map.get("canonical") {
-                out.push((
-                    canonical.clone(),
-                    map.get("canonicalDigest")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                ));
+            if let Some(c) = map.get("canonical") {
+                out.push(c.clone());
             }
             for value in map.values() {
                 canonical_objects(value, out);
@@ -171,10 +301,6 @@ fn canonical_objects(v: &Value, out: &mut Vec<(Value, Option<String>)>) {
         }
         _ => {}
     }
-}
-
-fn all_docs() -> Vec<(&'static str, Value)> {
-    SPECIMENS.iter().map(|(f, _)| (*f, load(f))).collect()
 }
 
 #[test]
@@ -202,11 +328,6 @@ fn specimen_set_matches_the_preregistered_matrix() {
     for (file, id) in SPECIMENS {
         let doc = load(file);
         assert_eq!(
-            doc.get("specimens").and_then(Value::as_array).map(Vec::len),
-            Some(1),
-            "{file}: expected exactly one specimen id"
-        );
-        assert_eq!(
             doc.pointer("/specimens/0").and_then(Value::as_str),
             Some(*id),
             "{file}: specimen id disagrees with the matrix"
@@ -221,7 +342,7 @@ fn specimen_set_matches_the_preregistered_matrix() {
 
 #[test]
 fn every_gate_outcome_is_exercised() {
-    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut seen = BTreeSet::new();
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
             assert!(
@@ -241,49 +362,95 @@ fn every_gate_outcome_is_exercised() {
 fn every_assessment_carries_detector_provenance() {
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
-            let a = &unit.assessment;
-            let l = &unit.label;
+            let (a, l) = (&unit.assessment, &unit.label);
             for key in ["id", "version", "configDigest"] {
-                let value = a
+                let v = a
                     .pointer(&format!("/detector/{key}"))
                     .and_then(Value::as_str)
                     .unwrap_or_else(|| panic!("{l}: detector.{key} missing"));
-                assert!(!value.is_empty(), "{l}: detector.{key} is empty");
+                assert!(!v.is_empty(), "{l}: detector.{key} is empty");
             }
             assert!(
-                a.get("schemaVersion").and_then(Value::as_u64).is_some(),
-                "{l}: assessment without a schemaVersion"
+                well_formed_digest(
+                    a.pointer("/detector/configDigest")
+                        .and_then(Value::as_str)
+                        .expect("configDigest")
+                ),
+                "{l}: detector.configDigest is not a well-formed digest"
             );
-        }
-    }
-}
-
-#[test]
-fn assessment_records_what_was_assessed() {
-    for (file, doc) in all_docs() {
-        for unit in units(file, &doc) {
-            let a = &unit.assessment;
-            let l = &unit.label;
             assert_eq!(
                 str_at(a, "representation"),
                 "decoded-source-field-values",
                 "{l}: the contract defines exactly one legal representation"
             );
-            let assessed = a
-                .get("assessedFields")
-                .and_then(Value::as_array)
-                .unwrap_or_else(|| panic!("{l}: assessedFields missing"));
-            assert!(!assessed.is_empty(), "{l}: assessedFields is empty");
+            assert_eq!(
+                a.get("redactionPolicyVersion").and_then(Value::as_u64),
+                Some(1),
+                "{l}: redactionPolicyVersion missing or wrong"
+            );
             assert!(
                 a.get("observedAt")
                     .and_then(Value::as_str)
                     .is_some_and(|s| !s.is_empty()),
                 "{l}: observedAt missing"
             );
+        }
+    }
+}
+
+/// Contract §5.2 and §5.3: the denominator comes from the contract. A specimen
+/// may declare it, and the declaration is checked, never trusted.
+#[test]
+fn coverage_is_computed_from_the_normative_field_set() {
+    for (file, doc) in all_docs() {
+        for unit in units(file, &doc) {
+            let l = &unit.label;
+            let required = required_for(&unit.kind);
+            let assessed = unit.assessed();
+            assert!(
+                assessed.is_subset(&required),
+                "{l}: assessed a field the projection does not retain"
+            );
+            let computed = required.is_subset(&assessed);
             assert_eq!(
-                a.get("redactionPolicyVersion").and_then(Value::as_u64),
-                Some(1),
-                "{l}: redactionPolicyVersion missing or wrong"
+                unit.assessment
+                    .get("coverageComplete")
+                    .and_then(Value::as_bool),
+                Some(computed),
+                "{l}: coverageComplete disagrees with the normative field set"
+            );
+            if let Some(declared) = doc.get("declaredRequiredFields") {
+                assert_eq!(
+                    strings(Some(declared)),
+                    required,
+                    "{l}: declaredRequiredFields disagrees with contract §5.3"
+                );
+            }
+        }
+    }
+}
+
+/// Contract §5.1: a blocking finding wins over incomplete coverage.
+#[test]
+fn outcome_follows_the_frozen_precedence() {
+    for (file, doc) in all_docs() {
+        for unit in units(file, &doc) {
+            let l = &unit.label;
+            let complete = unit
+                .assessment
+                .get("coverageComplete")
+                .and_then(Value::as_bool)
+                .expect("coverageComplete");
+            let expected = if !unit.flagged().is_empty() {
+                "BLOCK_SECRET"
+            } else if !complete {
+                "CANNOT_ASSESS"
+            } else {
+                "RETAIN"
+            };
+            assert_eq!(
+                unit.outcome, expected,
+                "{l}: outcome disagrees with the §5.1 precedence"
             );
         }
     }
@@ -293,15 +460,17 @@ fn assessment_records_what_was_assessed() {
 fn a_failed_assessment_cannot_look_safe() {
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
-            let a = &unit.assessment;
-            let l = &unit.label;
+            let (a, l) = (&unit.assessment, &unit.label);
             match unit.outcome.as_str() {
                 "CANNOT_ASSESS" => {
-                    let reason = a
-                        .get("reason")
+                    let code = a
+                        .get("reasonCode")
                         .and_then(Value::as_str)
-                        .unwrap_or_else(|| panic!("{l}: CANNOT_ASSESS without a reason"));
-                    assert!(!reason.trim().is_empty(), "{l}: empty reason");
+                        .unwrap_or_else(|| panic!("{l}: CANNOT_ASSESS without a reasonCode"));
+                    assert!(
+                        REASON_CODES.contains(&code),
+                        "{l}: reasonCode {code:?} is outside the §9.3 vocabulary"
+                    );
                     assert!(
                         a.get("findings").is_none(),
                         "{l}: CANNOT_ASSESS must not carry findings — it measured nothing"
@@ -314,28 +483,24 @@ fn a_failed_assessment_cannot_look_safe() {
                         .unwrap_or_else(|| panic!("{l}: BLOCK_SECRET without findings"));
                     assert!(
                         !findings.is_empty(),
-                        "{l}: BLOCK_SECRET with an empty findings list would be \
-                         indistinguishable from a clean assessment"
+                        "{l}: an empty findings list is indistinguishable from a clean assessment"
                     );
                     for f in findings {
-                        assert!(
-                            f.get("findingId")
-                                .and_then(Value::as_str)
-                                .is_some_and(|s| !s.is_empty()),
-                            "{l}: finding without an identifier"
-                        );
-                        assert!(
-                            f.get("field")
-                                .and_then(Value::as_str)
-                                .is_some_and(|s| !s.is_empty()),
-                            "{l}: finding without a field pointer"
-                        );
-                        // Contract §9: a finding must not quote the secret.
-                        for key in ["match", "matched", "excerpt", "sample", "value", "digest"] {
+                        for key in ["findingId", "field"] {
+                            assert!(
+                                f.get(key)
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|s| !s.is_empty()),
+                                "{l}: finding without {key}"
+                            );
+                        }
+                        for key in [
+                            "match", "matched", "excerpt", "sample", "value", "digest", "length",
+                        ] {
                             assert!(
                                 f.get(key).is_none(),
-                                "{l}: finding carries {key:?} — a findings list must not \
-                                 reproduce the matched bytes in any form"
+                                "{l}: finding carries {key:?} — findings must not reproduce the \
+                                 matched bytes in any form"
                             );
                         }
                     }
@@ -347,7 +512,7 @@ fn a_failed_assessment_cannot_look_safe() {
                         "{l}: RETAIN must record a completed assessment with no findings"
                     );
                     assert!(
-                        a.get("reason").is_none(),
+                        a.get("reasonCode").is_none(),
                         "{l}: RETAIN must not carry a failure reason"
                     );
                 }
@@ -357,35 +522,25 @@ fn a_failed_assessment_cannot_look_safe() {
     }
 }
 
+/// Contract §9.4: only free text is constrained, and it carries no run of eight
+/// or more characters from an assessed value.
 #[test]
-fn retain_requires_coverage_of_every_retained_field() {
+fn free_text_carries_no_assessed_content() {
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
-            let assessed: BTreeSet<String> = unit
-                .assessment
-                .get("assessedFields")
-                .and_then(Value::as_array)
-                .expect("assessedFields")
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect();
-            if let Some(required) = doc
-                .get("fieldsProjectionWouldRetain")
-                .and_then(Value::as_array)
-            {
-                let required: BTreeSet<String> = required
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect();
-                let covered = required.is_subset(&assessed);
-                assert_eq!(
-                    covered,
-                    unit.outcome == "RETAIN",
-                    "{}: coverage and outcome disagree — partial assessment must not RETAIN",
-                    unit.label
-                );
+            let l = &unit.label;
+            for key in FREE_TEXT_FIELDS {
+                let Some(text) = unit.assessment.get(*key).and_then(Value::as_str) else {
+                    continue;
+                };
+                let body: Vec<char> = unit.assessed_body.chars().collect();
+                for window in body.windows(8) {
+                    let frag: String = window.iter().collect();
+                    assert!(
+                        !text.contains(&frag),
+                        "{l}: {key} contains {frag:?} taken from an assessed value"
+                    );
+                }
             }
         }
     }
@@ -409,16 +564,18 @@ fn a_blocked_source_produces_no_provenance_snapshot() {
 
             if permitted {
                 let canonical = unit.retention.get("canonical").expect("canonical");
-                assert!(
-                    PROVENANCE_SOURCE_KINDS.contains(&str_at(canonical, "sourceKind")),
-                    "{l}: a retained snapshot must use a provenance V1 sourceKind"
+                assert_eq!(
+                    str_at(canonical, "sourceKind"),
+                    unit.kind,
+                    "{l}: a retained snapshot must use the locator's provenance kind"
                 );
                 assert!(
-                    unit.retention
-                        .get("canonicalDigest")
-                        .and_then(Value::as_str)
-                        .is_some_and(|d| d.starts_with("sha256:") && d.len() == 71),
+                    well_formed_digest(str_at(&unit.retention, "canonicalDigest")),
                     "{l}: retained snapshot without a well-formed digest"
+                );
+                assert!(
+                    unit.reduced.is_none(),
+                    "{l}: RETAIN needs no reduced record"
                 );
             } else {
                 assert!(
@@ -426,161 +583,211 @@ fn a_blocked_source_produces_no_provenance_snapshot() {
                         && unit.retention.get("canonicalDigest").is_none(),
                     "{l}: a blocked source must not carry a snapshot or its digest"
                 );
+                assert!(
+                    unit.reduced.is_some(),
+                    "{l}: a non-RETAIN outcome needs a reduced source record"
+                );
             }
-        }
-    }
-}
 
-#[test]
-fn blocked_bytes_never_reach_a_snapshot_or_a_digest() {
-    for (file, doc) in all_docs() {
-        for unit in units(file, &doc) {
-            let l = &unit.label;
-            // Containment is checked across the WHOLE document: blocked bytes
-            // must not surface anywhere in the file, including inside a
-            // sibling variant. The sourceKind rule below is per-unit, because
-            // a sibling variant may legitimately hold a retained snapshot.
-            let mut everywhere = Vec::new();
-            canonical_objects(&doc, &mut everywhere);
             let mut in_scope = Vec::new();
             canonical_objects(&unit.scope, &mut in_scope);
-
-            if unit.outcome == "RETAIN" {
-                // The no-normalization invariant: what was assessed is what was kept.
-                let canonical = unit.retention.get("canonical").expect("canonical");
-                assert_eq!(
-                    str_at(canonical, "body"),
-                    unit.assessed_body,
-                    "{l}: the retained body differs from the assessed body — something \
-                     normalized it between the gate and the projection"
-                );
-                continue;
-            }
-
-            for (canonical, _) in &everywhere {
-                assert!(
-                    !canonical.to_string().contains(&unit.assessed_body),
-                    "{l}: the assessed body appears inside a canonical object"
-                );
-            }
-            for (canonical, _) in &in_scope {
-                if let Some(kind) = canonical.get("sourceKind").and_then(Value::as_str) {
-                    assert_eq!(
-                        kind, BLOCKED_METADATA_KIND,
-                        "{l}: a blocked source may only canonicalize a blocked-source \
-                         metadata record"
-                    );
+            for canonical in &in_scope {
+                if let Some(k) = canonical.get("sourceKind").and_then(Value::as_str) {
+                    let legal = if permitted {
+                        unit.kind.as_str()
+                    } else {
+                        REDUCED_KIND
+                    };
+                    assert_eq!(k, legal, "{l}: unexpected canonical sourceKind");
                 }
             }
         }
     }
 }
 
+/// Contract §7.1: the split is computed, and the two sets exhaustively
+/// partition the normative required set.
 #[test]
-fn blocked_source_metadata_is_a_separate_representation() {
+fn the_retained_blocked_split_is_computed_not_nominated() {
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
-            let Some(wrapper) = unit.blocked_metadata else {
-                assert_eq!(
-                    unit.outcome, "RETAIN",
-                    "{}: a non-RETAIN specimen without a metadata record",
-                    unit.label
-                );
+            let Some(reduced) = &unit.reduced else {
                 continue;
             };
             let l = &unit.label;
-            let m = wrapper.get("canonical").expect("canonical");
+            let canonical = reduced.get("canonical").expect("canonical");
 
             assert_eq!(
-                str_at(m, "sourceKind"),
-                BLOCKED_METADATA_KIND,
+                str_at(canonical, "sourceKind"),
+                REDUCED_KIND,
                 "{l}: the reduced record must not wear a complete projection's kind"
             );
             assert!(
-                PROVENANCE_SOURCE_KINDS.contains(&str_at(m, "locatorKind")),
+                PROVENANCE_SOURCE_KINDS.contains(&str_at(canonical, "locatorKind")),
                 "{l}: locatorKind must name the provenance kind that was refused"
             );
             assert_eq!(
-                str_at(m, "outcome"),
+                str_at(canonical, "outcome"),
                 unit.outcome,
-                "{l}: metadata outcome disagrees with the gate"
+                "{l}: reduced record outcome disagrees with the gate"
+            );
+            assert_eq!(
+                canonical.get("coverageComplete"),
+                unit.assessment.get("coverageComplete"),
+                "{l}: reduced record coverage disagrees with the assessment"
             );
 
-            let blocked: Vec<&str> = m
-                .get("blockedFields")
-                .and_then(Value::as_array)
-                .expect("blockedFields")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect();
-            assert!(
-                !blocked.is_empty(),
-                "{l}: a record that blocked nothing is not a blocked-source record"
-            );
-
-            let retained = m
-                .get("retainedFields")
+            let (want_retained, want_blocked) = unit.expected_partition();
+            let got_blocked = strings(canonical.get("blockedFields"));
+            let got_retained: BTreeSet<String> = canonical
+                .pointer("/retainedFields")
                 .and_then(Value::as_object)
-                .expect("retainedFields");
-            for pointer in &blocked {
-                let name = pointer.trim_start_matches('/');
+                .expect("retainedFields")
+                .keys()
+                .cloned()
+                .collect();
+
+            assert_eq!(
+                got_blocked, want_blocked,
+                "{l}: blockedFields is not (findings ∪ unassessed)"
+            );
+            assert_eq!(
+                got_retained, want_retained,
+                "{l}: retainedFields is not (required \\ blocked)"
+            );
+            assert!(
+                !got_blocked.is_empty(),
+                "{l}: a record that blocked nothing is not a reduced record"
+            );
+
+            let required = required_for(&unit.kind);
+            let union: BTreeSet<String> = got_retained.union(&got_blocked).cloned().collect();
+            assert_eq!(
+                union, required,
+                "{l}: the split does not cover the required set"
+            );
+            assert!(
+                got_retained.is_disjoint(&got_blocked),
+                "{l}: a field is retained and blocked at once"
+            );
+            for p in &got_retained {
                 assert!(
-                    !retained.contains_key(name),
-                    "{l}: {pointer:?} is listed as blocked and retained at once"
+                    p.starts_with('/'),
+                    "{l}: retained key {p:?} is not a JSON pointer"
                 );
             }
             assert!(
-                wrapper
-                    .get("canonicalDigest")
-                    .and_then(Value::as_str)
-                    .is_some_and(|d| d.starts_with("sha256:")),
+                well_formed_digest(str_at(reduced, "canonicalDigest")),
                 "{l}: the reduced record is retained evidence and needs its digest"
             );
         }
     }
 }
 
+/// Contract §9.2: the assessment is retained, and every retained record is
+/// bound to the assessment that authorised it.
 #[test]
-fn a_derived_fact_needs_every_input_retained() {
-    let mut admissible = 0;
-    let mut inadmissible = 0;
+fn every_retained_record_is_bound_to_its_assessment() {
     for (file, doc) in all_docs() {
         for unit in units(file, &doc) {
-            let Some(fact) = unit.derived_fact else {
+            let l = &unit.label;
+            assert!(
+                well_formed_digest(&unit.assessment_digest),
+                "{l}: assessmentDigest is not well formed"
+            );
+            assert_eq!(
+                str_at(&unit.binding, "assessmentDigest"),
+                unit.assessment_digest,
+                "{l}: the binding names a different assessment"
+            );
+            assert_eq!(
+                str_at(&unit.binding, "recordDigest"),
+                unit.retained_digest(),
+                "{l}: the binding names a record this unit did not retain"
+            );
+        }
+    }
+}
+
+#[test]
+fn blocked_bytes_never_reach_a_snapshot() {
+    for (file, doc) in all_docs() {
+        for unit in units(file, &doc) {
+            let l = &unit.label;
+            let body_survives = unit.resolvable().contains("/body");
+
+            if body_survives {
+                // §4 and §9: what was assessed is what was kept, byte for byte.
+                let kept = match &unit.reduced {
+                    None => str_at(unit.retention.get("canonical").expect("canonical"), "body")
+                        .to_owned(),
+                    Some(r) => r
+                        .pointer("/canonical/retainedFields/~1body")
+                        .and_then(Value::as_str)
+                        .unwrap_or_else(|| panic!("{l}: /body retained but absent"))
+                        .to_owned(),
+                };
+                assert_eq!(
+                    kept, unit.assessed_body,
+                    "{l}: the retained body differs from the assessed body — something \
+                     normalized it between the gate and retention"
+                );
+                continue;
+            }
+
+            let mut everywhere = Vec::new();
+            canonical_objects(&doc, &mut everywhere);
+            for canonical in &everywhere {
+                assert!(
+                    !canonical.to_string().contains(&unit.assessed_body),
+                    "{l}: a blocked body appears inside a canonical object"
+                );
+            }
+        }
+    }
+}
+
+/// Contract §8: admissibility is resolved against the retained records, never
+/// read from the fixture's own claim.
+#[test]
+fn a_derived_fact_needs_every_input_resolved() {
+    let (mut admissible, mut inadmissible) = (0, 0);
+    for (file, doc) in all_docs() {
+        for unit in units(file, &doc) {
+            let Some(fact) = &unit.derived_fact else {
                 continue;
             };
             let l = &unit.label;
-            let every_input_retained = fact
-                .get("everyInputFieldRetained")
-                .and_then(Value::as_bool)
-                .unwrap_or_else(|| panic!("{l}: everyInputFieldRetained missing"));
-            let claimed = fact
-                .get("admissible")
-                .and_then(Value::as_bool)
-                .unwrap_or_else(|| panic!("{l}: admissible missing"));
-            assert_eq!(
-                claimed, every_input_retained,
-                "{l}: admissibility must follow from whether every input is retained"
-            );
+            let inputs = strings(fact.get("wouldBeDerivedFrom"));
+            assert!(!inputs.is_empty(), "{l}: a derived fact with no inputs");
+            let resolvable = unit.resolvable();
+            let computed = inputs.is_subset(&resolvable);
 
-            if claimed {
+            assert_eq!(
+                fact.get("admissible").and_then(Value::as_bool),
+                Some(computed),
+                "{l}: admissibility disagrees with what actually resolves"
+            );
+            if let Some(claim) = fact.get("everyInputFieldRetained").and_then(Value::as_bool) {
+                assert_eq!(
+                    claim, computed,
+                    "{l}: the fixture's retention claim disagrees with the retained record"
+                );
+            }
+
+            if computed {
                 admissible += 1;
-                let bindings = fact
-                    .get("derivedFrom")
-                    .and_then(Value::as_array)
-                    .unwrap_or_else(|| panic!("{l}: an admissible fact must name its sources"));
-                assert!(!bindings.is_empty(), "{l}: empty derivedFrom");
-                let mut found = Vec::new();
-                canonical_objects(&doc, &mut found);
-                let retained: BTreeSet<String> =
-                    found.iter().filter_map(|(_, d)| d.clone()).collect();
-                for b in bindings {
-                    let d = b.as_str().expect("digest string");
-                    assert!(
-                        retained.contains(d),
-                        "{l}: derivedFrom names {d}, which is not a retained snapshot here"
-                    );
-                }
+                let bindings = strings(fact.get("derivedFrom"));
+                assert!(
+                    !bindings.is_empty(),
+                    "{l}: an admissible fact must name its sources"
+                );
+                let mut retained = BTreeSet::new();
+                retained.insert(unit.retained_digest());
+                assert!(
+                    bindings.is_subset(&retained),
+                    "{l}: derivedFrom names a digest this unit did not retain"
+                );
             } else {
                 inadmissible += 1;
                 assert!(
@@ -631,13 +838,12 @@ fn the_byte_discriminator_isolates_one_field() {
          about normalization before assessment"
     );
 
-    // Everything about the assessment except its result must match, or the pair
-    // would differ for a second reason and discriminate nothing.
     for key in [
         "representation",
         "assessedFields",
         "detector",
         "redactionPolicyVersion",
+        "coverageComplete",
     ] {
         let first = variants
             .first()
@@ -664,8 +870,7 @@ fn specimens_state_no_closure_verdict() {
 }
 
 /// Hygiene about what was committed here, not a gate decision and not an input
-/// to one: no specimen may carry a string shaped like a real provider's
-/// credential, even a revoked one.
+/// to one.
 #[test]
 fn no_live_credential_shapes() {
     const REAL_SHAPES: &[&str] = &[
@@ -705,7 +910,47 @@ fn readme_documents_every_specimen() {
     for outcome in OUTCOMES {
         assert!(
             readme.contains(outcome),
-            "README does not mention the {outcome} outcome"
+            "README omits the {outcome} outcome"
         );
     }
+}
+
+/// The mirror guard: this file must invent no required field the contract does
+/// not state. It proves one direction only, exactly as its Step 0B predecessor
+/// does, and does not claim the converse.
+#[test]
+fn contract_states_every_required_field_this_file_asserts() {
+    let contract = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/architecture/closure-redaction-policy-v1.md"),
+    )
+    .expect("reading the contract");
+    let mut per_kind: BTreeMap<&str, usize> = BTreeMap::new();
+    for (kind, fields) in REQUIRED_FIELDS {
+        assert!(contract.contains(kind), "contract does not mention {kind}");
+        for f in *fields {
+            assert!(
+                contract.contains(f),
+                "contract §5.3 does not state required field {f} for {kind}"
+            );
+            *per_kind.entry(kind).or_default() += 1;
+        }
+    }
+    assert!(per_kind.len() >= 2, "the mirror should cover several kinds");
+    for code in REASON_CODES {
+        assert!(
+            contract.contains(code),
+            "contract does not state reasonCode {code}"
+        );
+    }
+    for field in FREE_TEXT_FIELDS {
+        assert!(
+            contract.contains(field),
+            "contract does not declare {field} as free text"
+        );
+    }
+    assert!(
+        contract.contains(REDUCED_KIND),
+        "contract does not name the reduced record kind"
+    );
 }

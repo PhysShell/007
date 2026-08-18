@@ -9,11 +9,30 @@
   "witnesses": [
     "4",
     "5",
+    "5.3",
     "6.1",
-    "9"
+    "9",
+    "9.2"
   ],
-  "what": "a completed assessment covering every retained field, with no blocking finding, so normal retention proceeds",
-  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where the gate did not return RETAIN, this string appears in no canonical object and no digest anywhere in this directory covers it. Where the gate returned RETAIN, it is byte-identical to the retained canonical body, which is what proves nothing normalized it between assessment and projection.",
+  "what": "a completed assessment covering every field \u00a75.3 requires, no finding, so normal retention proceeds",
+  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where /body did not survive \u00a77.1 it appears in no canonical object and no digest here covers it. Where it did survive, it is byte-identical to the retained value, which is what proves nothing normalized it between assessment and retention.",
+  "locator": {
+    "kind": "github-issue-comment",
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000001"
+  },
+  "declaredRequiredFields": [
+    "/id",
+    "/user/id",
+    "/user/login",
+    "/user/type",
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/updated_at"
+  ],
+  "declaredRequiredFieldsNote": "a declaration checked against \u00a75.3 for exact equality, never the authority for it",
   "gateOutcome": "RETAIN",
   "assessedBody": "The manifest member is unreachable from the frozen tree.\n\nSee the co-versioning check output.\n",
   "assessment": {
@@ -26,20 +45,21 @@
     },
     "representation": "decoded-source-field-values",
     "assessedFields": [
-      "/body",
+      "/id",
+      "/user/id",
       "/user/login",
-      "/author_association"
+      "/user/type",
+      "/author_association",
+      "/body",
+      "/created_at",
+      "/updated_at"
     ],
+    "coverageComplete": true,
     "outcome": "RETAIN",
     "observedAt": "2026-08-18T09:00:00Z",
     "findings": []
   },
-  "locator": {
-    "kind": "github-issue-comment",
-    "repository": "PhysShell/007",
-    "pullRequest": "9101",
-    "stableId": "9100000001"
-  },
+  "assessmentDigest": "sha256:6bd7da9d49dba28b5912a53f5b198dd3a56f5592b6051c9c62b177ab1dd3ef53",
   "retention": {
     "permitted": true,
     "canonical": {
@@ -57,5 +77,10 @@
       "updatedAt": "2026-08-18T08:41:07Z"
     },
     "canonicalDigest": "sha256:75c995761af92789b6fc3bf27f702266a8860c9044bfa9aa43ac4ee62836fbb8"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "recordDigest": "sha256:75c995761af92789b6fc3bf27f702266a8860c9044bfa9aa43ac4ee62836fbb8",
+    "assessmentDigest": "sha256:6bd7da9d49dba28b5912a53f5b198dd3a56f5592b6051c9c62b177ab1dd3ef53"
   }
 }

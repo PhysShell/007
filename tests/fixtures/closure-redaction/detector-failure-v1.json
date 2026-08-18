@@ -8,13 +8,22 @@
   "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": [
     "5",
+    "5.1",
     "6.3",
-    "9"
+    "7.1",
+    "9.3"
   ],
-  "what": "the source bytes were obtained but the detector did not complete, so safety is unknown",
-  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where the gate did not return RETAIN, this string appears in no canonical object and no digest anywhere in this directory covers it. Where the gate returned RETAIN, it is byte-identical to the retained canonical body, which is what proves nothing normalized it between assessment and projection.",
-  "why": "an empty finding list here is identical to R1's empty finding list. Only the outcome and the reason distinguish 'inspected, nothing found' from 'never inspected'. Without that distinction this is the project's oldest failure: failure -> empty set -> green.",
+  "what": "the source bytes were obtained but the detector produced no result for any field, so nothing may be retained",
+  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where /body did not survive \u00a77.1 it appears in no canonical object and no digest here covers it. Where it did survive, it is byte-identical to the retained value, which is what proves nothing normalized it between assessment and retention.",
+  "why": "an empty finding list here is identical to R1's. Only the outcome, the reasonCode and an empty assessedFields separate 'inspected, nothing found' from 'never inspected'. Because no field was successfully assessed, \u00a77.1 blocks all of them: an unassessed timestamp is unexamined, not obviously harmless.",
+  "locator": {
+    "kind": "github-issue-comment",
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000004"
+  },
   "gateOutcome": "CANNOT_ASSESS",
+  "assessedBody": "The co-versioning check output is attached below.\n",
   "assessment": {
     "schemaVersion": 1,
     "redactionPolicyVersion": 1,
@@ -24,47 +33,48 @@
       "configDigest": "sha256:f00372ef104d490574feb48d7bc487fed22a1a262aab4277996f57a674c20e43"
     },
     "representation": "decoded-source-field-values",
-    "assessedFields": [
-      "/body",
-      "/user/login",
-      "/author_association"
-    ],
+    "assessedFields": [],
+    "coverageComplete": false,
     "outcome": "CANNOT_ASSESS",
     "observedAt": "2026-08-18T09:21:05Z",
-    "reason": "detector process exited with signal 9 before emitting a result"
+    "reasonCode": "DETECTOR_FAILED",
+    "reasonDetail": "terminated by a signal before emitting results"
   },
-  "assessedBody": "The co-versioning check output is attached below.\n",
-  "locator": {
-    "kind": "github-issue-comment",
-    "repository": "PhysShell/007",
-    "pullRequest": "9101",
-    "stableId": "9100000004"
-  },
+  "assessmentDigest": "sha256:98bd29f53d621066a00e51984a6076c3ce9064bffdb0583bc061e53da1dac8c0",
   "retention": {
-    "permitted": false
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
   },
-  "blockedSourceMetadata": {
+  "reducedSourceRecord": {
     "canonical": {
       "schemaVersion": 1,
-      "sourceKind": "github-blocked-source-metadata",
+      "sourceKind": "github-reduced-source-record",
       "locatorKind": "github-issue-comment",
       "stableId": "9100000004",
       "redactionPolicyVersion": 1,
       "outcome": "CANNOT_ASSESS",
-      "retainedFields": {
-        "user": {
-          "id": "9100000903",
-          "login": "synthetic-reporter",
-          "type": "User"
-        },
-        "authorAssociation": "NONE",
-        "createdAt": "2026-08-18T09:20:41Z",
-        "updatedAt": "2026-08-18T09:20:41Z"
-      },
+      "coverageComplete": false,
+      "retainedFields": {},
       "blockedFields": [
-        "/body"
+        "/author_association",
+        "/body",
+        "/created_at",
+        "/id",
+        "/updated_at",
+        "/user/id",
+        "/user/login",
+        "/user/type"
       ]
     },
-    "canonicalDigest": "sha256:e178319f3435a2ae070580970a62f31d6c2d6624867263eec00ae3b1dcf9708a"
+    "canonicalDigest": "sha256:7588e58b0bb7a6e45a5fefb2ac227a01990df06bd497c261a4758fb1f4b2a610"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "recordDigest": "sha256:7588e58b0bb7a6e45a5fefb2ac227a01990df06bd497c261a4758fb1f4b2a610",
+    "assessmentDigest": "sha256:98bd29f53d621066a00e51984a6076c3ce9064bffdb0583bc061e53da1dac8c0"
   }
 }

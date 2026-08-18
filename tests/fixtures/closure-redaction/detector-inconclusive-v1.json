@@ -8,13 +8,31 @@
   "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": [
     "5",
+    "5.2",
     "6.3",
-    "9"
+    "7.1"
   ],
-  "what": "the detector completed over part of the input only, which is not a result about the whole",
-  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where the gate did not return RETAIN, this string appears in no canonical object and no digest anywhere in this directory covers it. Where the gate returned RETAIN, it is byte-identical to the retained canonical body, which is what proves nothing normalized it between assessment and projection.",
-  "why": "assessedFields omits /user/login and /author_association, both of which the projection would retain. A RETAIN here would be a green light over fields nobody looked at, so coverage failure is CANNOT_ASSESS rather than a partial pass.",
+  "what": "the detector completed over part of the required set only, so the whole-object outcome is CANNOT_ASSESS while the one clean field survives",
+  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where /body did not survive \u00a77.1 it appears in no canonical object and no digest here covers it. Where it did survive, it is byte-identical to the retained value, which is what proves nothing normalized it between assessment and retention.",
+  "why": "assessedFields covers /body alone. \u00a75.3 fixes the denominator, so the seven unassessed fields are blocked and /body \u2014 successfully assessed and clean \u2014 is retained. A partial assessment is not a partial pass at the object level, and it is not a total loss at the field level either.",
+  "declaredRequiredFields": [
+    "/id",
+    "/user/id",
+    "/user/login",
+    "/user/type",
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/updated_at"
+  ],
+  "locator": {
+    "kind": "github-issue-comment",
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000005"
+  },
   "gateOutcome": "CANNOT_ASSESS",
+  "assessedBody": "Reran the enumeration; page two never arrived.\n",
   "assessment": {
     "schemaVersion": 1,
     "redactionPolicyVersion": 1,
@@ -27,43 +45,48 @@
     "assessedFields": [
       "/body"
     ],
+    "coverageComplete": false,
     "outcome": "CANNOT_ASSESS",
     "observedAt": "2026-08-18T09:31:40Z",
-    "reason": "assessment covered /body only; /user/login and /author_association were not inspected"
+    "reasonCode": "INCOMPLETE_COVERAGE",
+    "reasonDetail": "only one field was inspected"
   },
-  "assessedBody": "Reran the enumeration; page two never arrived.\n",
-  "fieldsProjectionWouldRetain": [
-    "/body",
-    "/user/login",
-    "/author_association"
-  ],
-  "locator": {
-    "kind": "github-issue-comment",
-    "repository": "PhysShell/007",
-    "pullRequest": "9101",
-    "stableId": "9100000005"
-  },
+  "assessmentDigest": "sha256:74864b5cfb7983edbec68f8d0ab661af78de32d6d4161d96f3aabdc2db67117b",
   "retention": {
-    "permitted": false
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
   },
-  "blockedSourceMetadata": {
+  "reducedSourceRecord": {
     "canonical": {
       "schemaVersion": 1,
-      "sourceKind": "github-blocked-source-metadata",
+      "sourceKind": "github-reduced-source-record",
       "locatorKind": "github-issue-comment",
       "stableId": "9100000005",
       "redactionPolicyVersion": 1,
       "outcome": "CANNOT_ASSESS",
+      "coverageComplete": false,
       "retainedFields": {
-        "createdAt": "2026-08-18T09:31:12Z",
-        "updatedAt": "2026-08-18T09:31:12Z"
+        "/body": "Reran the enumeration; page two never arrived.\n"
       },
       "blockedFields": [
-        "/body",
+        "/author_association",
+        "/created_at",
+        "/id",
+        "/updated_at",
+        "/user/id",
         "/user/login",
-        "/author_association"
+        "/user/type"
       ]
     },
-    "canonicalDigest": "sha256:27df3f1eff6530f9ead0935e028ab60641956e1677c1bf66d06a7a859ba083d3"
+    "canonicalDigest": "sha256:911d27b0989492190921500106485eecd6df2bd66305c810cb22c912ba13a970"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "recordDigest": "sha256:911d27b0989492190921500106485eecd6df2bd66305c810cb22c912ba13a970",
+    "assessmentDigest": "sha256:74864b5cfb7983edbec68f8d0ab661af78de32d6d4161d96f3aabdc2db67117b"
   }
 }

@@ -8,14 +8,23 @@
   "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": [
     "6.2",
-    "7",
-    "8"
+    "7.1",
+    "7.2",
+    "8",
+    "10"
   ],
-  "what": "a blocked review body beside retained safe fields, and a derived fact that survives because it never read the body",
-  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where the gate did not return RETAIN, this string appears in no canonical object and no digest anywhere in this directory covers it. Where the gate returned RETAIN, it is byte-identical to the retained canonical body, which is what proves nothing normalized it between assessment and projection.",
-  "why": "R6 and R7 are the pair. Both block a body; R6's fact read the body and dies, R7's fact reads only commitId and lives. The line is not how important the fact is \u2014 it is whether every input still exists as retained immutable bytes.",
+  "what": "a blocked review body beside the fields that individually passed, and a derived fact that survives because it never read the body",
+  "assessedBodyNote": "assessedBody is the exact decoded value the detector saw. It is a fixture-visible input, not retained evidence: where /body did not survive \u00a77.1 it appears in no canonical object and no digest here covers it. Where it did survive, it is byte-identical to the retained value, which is what proves nothing normalized it between assessment and retention.",
+  "why": "R6 and R7 are the pair, and the contract's \u00a710 turns on them. Same gate outcome, same blocked field, opposite admissibility \u2014 because the line is not whether the source was retainable but whether THIS decision's every input still resolves.",
   "contrastWith": "derived-fact-blocked-v1.json",
+  "locator": {
+    "kind": "github-submitted-review",
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000201"
+  },
   "gateOutcome": "BLOCK_SECRET",
+  "assessedBody": "Approving. Deploy key for the mirror is\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\n",
   "assessment": {
     "schemaVersion": 1,
     "redactionPolicyVersion": 1,
@@ -26,12 +35,17 @@
     },
     "representation": "decoded-source-field-values",
     "assessedFields": [
-      "/body",
+      "/id",
+      "/user/id",
       "/user/login",
+      "/user/type",
       "/author_association",
       "/state",
+      "/body",
+      "/submitted_at",
       "/commit_id"
     ],
+    "coverageComplete": true,
     "outcome": "BLOCK_SECRET",
     "observedAt": "2026-08-18T10:03:20Z",
     "findings": [
@@ -41,40 +55,44 @@
       }
     ]
   },
-  "assessedBody": "Approving. Deploy key for the mirror is\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\n",
-  "locator": {
-    "kind": "github-submitted-review",
-    "repository": "PhysShell/007",
-    "pullRequest": "9101",
-    "stableId": "9100000201"
-  },
+  "assessmentDigest": "sha256:939f144b2e93dc2ca8db058af1276af640854355717880a1163d49e510bb3985",
   "retention": {
-    "permitted": false
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
   },
-  "blockedSourceMetadata": {
+  "reducedSourceRecord": {
     "canonical": {
       "schemaVersion": 1,
-      "sourceKind": "github-blocked-source-metadata",
+      "sourceKind": "github-reduced-source-record",
       "locatorKind": "github-submitted-review",
       "stableId": "9100000201",
       "redactionPolicyVersion": 1,
       "outcome": "BLOCK_SECRET",
+      "coverageComplete": true,
       "retainedFields": {
-        "user": {
-          "id": "9100000905",
-          "login": "synthetic-external-auditor",
-          "type": "User"
-        },
-        "authorAssociation": "NONE",
-        "state": "COMMENTED",
-        "commitId": "9d4c1f0b7a6e5c3d2b1a0f9e8d7c6b5a49382716",
-        "submittedAt": "2026-08-18T10:02:55Z"
+        "/id": "9100000201",
+        "/user/id": "9100000905",
+        "/user/login": "synthetic-external-auditor",
+        "/user/type": "User",
+        "/author_association": "NONE",
+        "/state": "COMMENTED",
+        "/submitted_at": "2026-08-18T10:02:55Z",
+        "/commit_id": "9d4c1f0b7a6e5c3d2b1a0f9e8d7c6b5a49382716"
       },
       "blockedFields": [
         "/body"
       ]
     },
-    "canonicalDigest": "sha256:710245b9ee487c6fea4119c3f179b1c23d47dd620b9a0ea7b2e376321504c3ce"
+    "canonicalDigest": "sha256:1f443cac1fb1c343b4ed56a650a7e58959f4d4e058f20171f6eafce7f2f5a552"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "recordDigest": "sha256:1f443cac1fb1c343b4ed56a650a7e58959f4d4e058f20171f6eafce7f2f5a552",
+    "assessmentDigest": "sha256:939f144b2e93dc2ca8db058af1276af640854355717880a1163d49e510bb3985"
   },
   "candidateDerivedFact": {
     "name": "reviewCommitIdObserved",
@@ -84,8 +102,8 @@
     "everyInputFieldRetained": true,
     "admissible": true,
     "derivedFrom": [
-      "sha256:710245b9ee487c6fea4119c3f179b1c23d47dd620b9a0ea7b2e376321504c3ce"
+      "sha256:1f443cac1fb1c343b4ed56a650a7e58959f4d4e058f20171f6eafce7f2f5a552"
     ],
-    "note": "the blocked-source metadata record is a real retained snapshot of a reduced observation, so a fact resting only on commitId remains explainable from retained bytes."
+    "note": "/commit_id was successfully assessed, carries no finding, and therefore survives \u00a77.1 into the reduced record \u2014 so a fact resting only on it stays explainable from retained bytes."
   }
 }
