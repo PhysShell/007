@@ -411,12 +411,21 @@ a synthetic id for it here would contradict the merged schema. An earlier
 revision required `stableId` for every kind and only avoided the contradiction
 because no head specimen existed.
 
-**The normative rule:**
+**The normative rules:**
 
 ```text
 a locator value is NOT surviving source evidence
 and MUST NOT satisfy a decision-basis pointer
+
+locatorKind MUST equal the source kind that was gated
+
+locator MUST equal the acquisition locator of that source
 ```
+
+The second and third exist because shape alone is not identity. A record whose
+locator has the right keys and the wrong values, or the right values under the
+wrong `locatorKind`, is a well-formed pointer at the wrong object — which is
+worse than a missing one, because it resolves.
 
 Without it, `/id` can appear in `blockedFields` while the same source-derived id
 sits permanently in the record as `stableId` — the field-retention gate bypassed
@@ -491,13 +500,20 @@ record's `stableId` even though the two describe the same number.
 "Safe to retain" is itself an observation and must be as auditable as any other,
 or it becomes ambient magic that no later reader can question.
 
-**The assessment schema is closed.** Exactly the fields below, no others. A
-producer that adds one is non-conformant, not "extended" — and §9.4 explains why
-that closure is the whole security argument rather than a tidiness rule.
+**The assessment schema is closed, at every level.** Exactly the fields below,
+no others, and the same for every nested object — §9.5. A producer that adds one
+is non-conformant, not "extended", and §9.4 explains why that closure is the
+whole security argument rather than a tidiness rule.
+
+It carries its own `sourceKind` because provenance V1 §7 requires every canonical
+object to be domain-separated by its own content, and §9.2 sends this object
+through exactly that canonicalization. An earlier revision omitted it, which put
+this contract in direct conflict with the merged one.
 
 ```text
 RetentionAssessment
 REQUIRED             schemaVersion
+                     sourceKind            closure-retention-assessment
                      redactionPolicyVersion
                      detector.id
                      detector.version
@@ -568,6 +584,7 @@ forbids:
 ```text
 RetentionBinding
 REQUIRED   schemaVersion
+           sourceKind         closure-retention-binding
            recordDigest       the retained projection or reduced record
            assessmentDigest   the assessment that authorised it
 ```
@@ -623,6 +640,61 @@ contract needs, and adds one place for the entire secret to appear.
 
 Introducing a free-text field later is therefore a contract change with a
 security argument attached, not an implementation convenience.
+
+### 9.5 Closed means closed at every level
+
+A schema closed only at its top level is not closed. The nested objects below are
+**exact** key sets, and an object carrying anything else is non-conformant:
+
+```text
+RetentionAssessment          the §9 field list
+  detector                   id  version  configDigest
+  findings[]                 field  findingId
+
+RetentionBinding             schemaVersion  sourceKind
+                             recordDigest  assessmentDigest
+
+github-reduced-source-record the §7 field list
+  locator                    the §7.3 shape for locatorKind
+```
+
+The reason is the one §9.4 already gives, one level down. Closing the top level
+and leaving `detector` open means
+
+```json
+"detector": { "id": "...", "version": "1", "configDigest": "...",
+              "debug": "<the secret>" }
+```
+
+satisfies every rule anyone wrote. Untrusted content behaves like water: it finds
+whichever gap is left. The blacklist of obviously-bad finding keys — `excerpt`,
+`match`, `length` and friends — is kept as a redundant guard, but the exact key
+set is what actually holds.
+
+Every object listed above carries `schemaVersion: 1`, and every one that carries
+`redactionPolicyVersion` carries the same value as the assessment that authorised
+it. A version field that is present but unrelated to its neighbours is decoration
+on bytes that are about to be hashed.
+
+### 9.6 The retained assessment is the authority on its own outcome
+
+`outcome` lives in the assessment, and the assessment is what is retained,
+digested and bound. Nothing outside it may carry a competing answer that the
+retention path actually follows.
+
+```text
+assessment.outcome    the authoritative retained fact,
+                      and it MUST equal the §5.1 computation over
+                      this assessment's own findings and coverage
+
+anything else         an expectation, checked against it, never a substitute
+```
+
+Without this the same self-certification returns one layer out: a pipeline can
+retain an assessment reading `BLOCK_SECRET` while executing a `RETAIN` path
+because some outer field said so, and every structural check still passes. The
+retained bytes would then disagree with what was done, which is the one thing
+an evidence record exists to prevent.
 
 ## 10. Consequence for closure state — via the decision basis
 
@@ -780,7 +852,11 @@ retention axis.
 | May a locator stand in for a retained field? | §7.3, §8 — no |
 | How are the set-like arrays ordered? | §5.5 — unique, ascending, no emission order |
 | Why is coverage incomplete? | §5.4 — `coverageFailureCode`, whatever the outcome |
-| Can a producer add a field to an assessment? | §9 — no; the schema is closed |
+| Can a producer add a field to an assessment? | §9, §9.5 — no, at every level |
+| Do the retained objects carry their own `sourceKind`? | §9 — yes, per provenance V1 §7 |
+| Who is authoritative on the outcome? | §9.6 — the retained assessment |
+| Is the locator bound to the gated source? | §7.3 — kind and values both |
+| Are the version fields related to each other? | §9.5 — yes, and checked |
 | Is there any free text in an assessment? | §9.4 — no, and that is the defence |
 | Is an unassessed field retainable? | §7.1 — no |
 | Do retained and blocked cover every field? | §7.1 — exhaustive partition |
@@ -882,3 +958,49 @@ and a small free-text hole that the whole secret eventually fits through.
 6. **"Mirrors §5.3" overstated the mechanical coverage.** §5.3 now separates
    always from present-only sets for all five kinds, and §11 records honestly
    that specimens exercise three of them.
+
+## 17. Correction round 4
+
+Six findings from a third independent review. None reopens the redaction model —
+the chain from decoded values through per-field assessment to a computed
+partition and a decision basis is unchanged. These are binding and schema gaps
+on the layer that model created.
+
+1. **`RetentionAssessment` and `RetentionBinding` had no `sourceKind`**, while
+   §9.2 sends the assessment through provenance V1 §7 canonicalization — which
+   requires every canonical object to be domain-separated by its own content. A
+   direct cross-contract contradiction. Both now carry frozen kinds,
+   `closure-retention-assessment` and `closure-retention-binding`.
+2. **The closed schema was closed only at the top level.** `detector` and each
+   `finding` accepted extra keys, so `"detector": { …, "debug": "<the secret>" }`
+   satisfied every rule §9.4 had written. §9.5 makes every nested object an exact
+   key set. Untrusted content behaves like water; it finds whichever gap is left.
+3. **Nothing bound `outcome` to the record that carries it.** An outer field
+   could say `RETAIN` while the retained assessment said `BLOCK_SECRET`, and the
+   retention path would follow the outer one. §9.6 makes the retained assessment
+   authoritative and requires it to equal the §5.1 computation over its own
+   findings and coverage. This is the same self-certification as the coverage
+   denominator and derived-fact admissibility, one layer further out.
+4. **`locatorKind` and the locator values were unbound.** Shape was checked and
+   identity was not, so a well-formed locator could point at the wrong object —
+   worse than a missing one, because it resolves. §7.3 now requires `locatorKind`
+   to equal the gated source kind and the locator to equal that source's
+   acquisition locator.
+5. **`findings` ordering was frozen in prose and unheld.** §5.5 stated it;
+   nothing checked it, and every specimen carried a single finding, so the corpus
+   could not distinguish canonical order from emission order. A multi-finding
+   witness closes it.
+6. **Version fields existed without relationships.** §9.5 binds them: every
+   retained object at `schemaVersion: 1`, and `redactionPolicyVersion` shared
+   between an assessment and the record it authorised. A version field unrelated
+   to its neighbours is decoration on bytes about to be hashed.
+
+### 17.1 One thing deliberately not changed
+
+`decodedSource` in the specimens is a map from JSON pointer to decoded value, not
+a nested GitHub object, so a consumer reads it by exact pointer rather than by
+RFC 6901 resolution. That is consistent with §4 and §9's `representation`
+identifier, `decoded-source-field-values` — the gate assesses **extracted exact
+field values**, not a document. Real pointer resolution over a live response is
+the acquisition adapter's obligation, and this slice deliberately has no adapter.
+Recorded here so the wording is not mistaken for "the decoded source object".
