@@ -75,6 +75,7 @@ computed the same way as every other digest in this repository.
 | R9 `finding-with-incomplete-coverage-v1.json` | `BLOCK_SECRET` | incomplete | 1 / 7 | the §5.1 overlap: a finding **and** an unfinished run |
 | R10 `present-only-field-present-v1.json` | `RETAIN` | complete | full projection | a present present-only field joins the required set |
 | R11 `present-only-field-absent-v1.json` | `RETAIN` | complete | full projection | an absent one stays out of it |
+| R12 `multiple-findings-v1.json` | `BLOCK_SECRET` | complete | 6 / 2 | two findings on two fields, so §5.5's order is observable |
 
 Nothing in that table is taken on the specimen's word. The required field set
 comes from contract §5.3, and coverage, the retained/blocked split, the value
@@ -136,7 +137,29 @@ This is what makes §5.3's present-only rule a computation rather than a
 sentence: the two required sets differ by exactly one element, derived from the
 source rather than declared.
 
+### R12 — the multi-finding witness
+
+Every other specimen carries exactly one finding, which cannot distinguish
+canonical order from whatever a detector emitted, and cannot show a duplicate
+being rejected. R12 carries two, on `/body` and on `/user/login`, sorting as
+`/body` before `/user/login` per §5.5.
+
+The second finding is deliberately **not** on a body. A login is
+attacker-chosen text, and nothing in this contract says secrets appear only in
+comment bodies — the gate is per field, and R12 is what makes that visible
+rather than merely stated. Both rule ids come from the bound detector
+configuration, so `findingId` remains a closed value.
+
 ### `decodedSource`
+
+`decodedSource` is a map from JSON pointer to decoded value, **not** a nested
+GitHub object. That matches the representation identifier the contract freezes,
+`decoded-source-field-values`: the gate assesses extracted exact field values,
+not a document, so a consumer reads it by exact pointer rather than by RFC 6901
+resolution. Real pointer resolution over a live response belongs to the
+acquisition adapter, which this slice deliberately does not have. Contract §17.1
+records the same thing, so the phrase is not later mistaken for a claim about
+resolving pointers.
 
 Each specimen carries the exact synthetic input the detector saw, keyed by the
 JSON pointers of §5.3. It is a fixture-visible input, never retained evidence,

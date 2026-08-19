@@ -49,11 +49,12 @@
   ],
   "assessment": {
     "schemaVersion": 1,
+    "sourceKind": "closure-retention-assessment",
     "redactionPolicyVersion": 1,
     "detector": {
       "id": "synthetic-fixture-detector",
       "version": "1",
-      "configDigest": "sha256:f00372ef104d490574feb48d7bc487fed22a1a262aab4277996f57a674c20e43"
+      "configDigest": "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d"
     },
     "representation": "decoded-source-field-values",
     "assessedFields": [
@@ -77,7 +78,7 @@
       }
     ]
   },
-  "assessmentDigest": "sha256:c1aa187918faee794b08b5fdc690da6a01baafc3105aec83bd9b4700e130b0dc",
+  "assessmentDigest": "sha256:8167a2b0e551110598354cfd6f24d64c61d3e50012c7b8fe60ca5a971aedeef4",
   "retention": {
     "permitted": false,
     "forbidden": [
@@ -117,8 +118,9 @@
   },
   "retentionBinding": {
     "schemaVersion": 1,
+    "sourceKind": "closure-retention-binding",
     "recordDigest": "sha256:b818aaac14f8fde90d881ac14517948f493038962e275fde0b30605c403c714d",
-    "assessmentDigest": "sha256:c1aa187918faee794b08b5fdc690da6a01baafc3105aec83bd9b4700e130b0dc"
+    "assessmentDigest": "sha256:8167a2b0e551110598354cfd6f24d64c61d3e50012c7b8fe60ca5a971aedeef4"
   },
   "candidateDerivedFact": {
     "name": "reviewCommitIdObserved",

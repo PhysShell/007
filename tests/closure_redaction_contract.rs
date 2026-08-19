@@ -58,6 +58,7 @@ const SPECIMENS: &[(&str, &str)] = &[
     ("finding-with-incomplete-coverage-v1.json", "R9"),
     ("present-only-field-present-v1.json", "R10"),
     ("present-only-field-absent-v1.json", "R11"),
+    ("multiple-findings-v1.json", "R12"),
 ];
 
 const OUTCOMES: &[&str] = &["RETAIN", "BLOCK_SECRET", "CANNOT_ASSESS"];
@@ -204,6 +205,7 @@ const COVERAGE_FAILURE_CODES: &[&str] = &[
 /// security argument is that none of them is free text.
 const ASSESSMENT_ALWAYS: &[&str] = &[
     "schemaVersion",
+    "sourceKind",
     "redactionPolicyVersion",
     "detector",
     "representation",
@@ -215,7 +217,7 @@ const ASSESSMENT_ALWAYS: &[&str] = &[
 const ASSESSMENT_CONDITIONAL: &[&str] = &["findings", "coverageFailureCode"];
 
 /// The rule ids covered by the specimens' bound detector configuration.
-const CONFIGURED_RULE_IDS: &[&str] = &["SYN-TOKEN-1"];
+const CONFIGURED_RULE_IDS: &[&str] = &["SYN-TOKEN-1", "SYN-TOKEN-2"];
 
 const PROVENANCE_SOURCE_KINDS: &[&str] = &[
     "github-pull-request-head",
@@ -227,6 +229,34 @@ const PROVENANCE_SOURCE_KINDS: &[&str] = &[
 ];
 
 const REDUCED_KIND: &str = "github-reduced-source-record";
+const ASSESSMENT_KIND: &str = "closure-retention-assessment";
+const BINDING_KIND: &str = "closure-retention-binding";
+
+/// Contract §9.5: nested objects are exact key sets too. A schema closed only at
+/// its top level is not closed.
+const DETECTOR_KEYS: &[&str] = &["configDigest", "id", "version"];
+const FINDING_KEYS: &[&str] = &["field", "findingId"];
+const BINDING_KEYS: &[&str] = &[
+    "assessmentDigest",
+    "recordDigest",
+    "schemaVersion",
+    "sourceKind",
+];
+
+fn assert_exact_keys(label: &str, what: &str, object: &Value, expected: &[&str]) {
+    let got: BTreeSet<&str> = object
+        .as_object()
+        .unwrap_or_else(|| panic!("{label}: {what} is not an object"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let want: BTreeSet<&str> = expected.iter().copied().collect();
+    assert_eq!(
+        got, want,
+        "{label}: {what} is not the exact key set §9.5 freezes — a schema closed \
+         only at its top level is not closed"
+    );
+}
 
 const CLASSIFIER_VOCABULARY: &[&str] = &[
     "PASS",
@@ -644,6 +674,70 @@ fn coverage_is_computed_from_the_normative_field_set() {
 }
 
 /// Contract §5.1: a blocking finding wins over incomplete coverage.
+/// Contract §5.5: findings are unique on (field, findingId) and sorted by it.
+/// The other two arrays are pointer lists; this one is a list of pairs.
+#[test]
+fn findings_are_canonically_ordered() {
+    let mut multi = 0;
+    for (file, doc) in all_docs() {
+        for unit in units(file, &doc) {
+            let Some(findings) = unit.assessment.get("findings").and_then(Value::as_array) else {
+                continue;
+            };
+            let keys: Vec<(&str, &str)> = findings
+                .iter()
+                .map(|f| {
+                    (
+                        f.get("field").and_then(Value::as_str).expect("field"),
+                        f.get("findingId")
+                            .and_then(Value::as_str)
+                            .expect("findingId"),
+                    )
+                })
+                .collect();
+            let mut sorted = keys.clone();
+            sorted.sort_unstable();
+            assert_eq!(
+                keys, sorted,
+                "{}: findings are not in (field, findingId) order (§5.5)",
+                unit.label
+            );
+            let unique: BTreeSet<&(&str, &str)> = keys.iter().collect();
+            assert_eq!(
+                unique.len(),
+                keys.len(),
+                "{}: findings repeat a (field, findingId) pair (§5.5)",
+                unit.label
+            );
+            if keys.len() > 1 {
+                multi += 1;
+            }
+        }
+    }
+    assert!(
+        multi > 0,
+        "no specimen carries more than one finding, so the corpus cannot tell \
+         canonical order from whatever a detector happened to emit"
+    );
+}
+
+/// Contract §9.6: the retained assessment is the authority on its own outcome.
+/// Anything outside it is an expectation, checked against it.
+#[test]
+fn the_retained_assessment_owns_the_outcome() {
+    for (file, doc) in all_docs() {
+        for unit in units(file, &doc) {
+            let l = &unit.label;
+            assert_eq!(
+                str_at(&unit.assessment, "outcome"),
+                unit.outcome,
+                "{l}: the retained assessment and the specimen disagree about the \
+                 outcome — the retained bytes must be what the path followed"
+            );
+        }
+    }
+}
+
 #[test]
 fn outcome_follows_the_frozen_precedence() {
     for (file, doc) in all_docs() {
@@ -662,8 +756,10 @@ fn outcome_follows_the_frozen_precedence() {
                 "RETAIN"
             };
             assert_eq!(
-                unit.outcome, expected,
-                "{l}: outcome disagrees with the §5.1 precedence"
+                str_at(&unit.assessment, "outcome"),
+                expected,
+                "{l}: the retained assessment's outcome disagrees with the §5.1 \
+                 computation over its own findings and coverage"
             );
         }
     }
@@ -767,6 +863,67 @@ fn the_assessment_schema_is_closed() {
                  nobody constrained is where the secret ends up",
                 keys.difference(&allowed).collect::<Vec<_>>()
             );
+
+            // §9: domain separation, per provenance V1 §7.
+            assert_eq!(
+                str_at(&unit.assessment, "sourceKind"),
+                ASSESSMENT_KIND,
+                "{l}: the assessment must be domain-separated by its own sourceKind"
+            );
+            assert_eq!(
+                str_at(&unit.binding, "sourceKind"),
+                BINDING_KIND,
+                "{l}: the binding must be domain-separated by its own sourceKind"
+            );
+
+            // §9.5: nested objects are exact key sets.
+            assert_exact_keys(
+                l,
+                "detector",
+                unit.assessment.get("detector").expect("detector"),
+                DETECTOR_KEYS,
+            );
+            assert_exact_keys(l, "retentionBinding", &unit.binding, BINDING_KEYS);
+            if let Some(findings) = unit.assessment.get("findings").and_then(Value::as_array) {
+                for f in findings {
+                    assert_exact_keys(l, "finding", f, FINDING_KEYS);
+                }
+            }
+            if let Some(reduced) = &unit.reduced {
+                let canonical = reduced.get("canonical").expect("canonical");
+                assert_exact_keys(
+                    l,
+                    "locator",
+                    canonical.get("locator").expect("locator"),
+                    table(LOCATOR_SHAPE, &unit.kind),
+                );
+            }
+
+            // §9.5: the version fields are related, not merely present.
+            for (what, object) in [
+                ("assessment", &unit.assessment),
+                ("retentionBinding", &unit.binding),
+            ] {
+                assert_eq!(
+                    object.get("schemaVersion").and_then(Value::as_u64),
+                    Some(1),
+                    "{l}: {what} schemaVersion is not 1"
+                );
+            }
+            if let Some(reduced) = &unit.reduced {
+                let canonical = reduced.get("canonical").expect("canonical");
+                assert_eq!(
+                    canonical.get("schemaVersion").and_then(Value::as_u64),
+                    Some(1),
+                    "{l}: reduced record schemaVersion is not 1"
+                );
+                assert_eq!(
+                    canonical.get("redactionPolicyVersion"),
+                    unit.assessment.get("redactionPolicyVersion"),
+                    "{l}: the record and its authorising assessment disagree on the \
+                     policy version"
+                );
+            }
         }
     }
 }
@@ -929,7 +1086,20 @@ fn the_retained_blocked_split_is_computed_not_nominated() {
             );
             assert!(
                 PROVENANCE_SOURCE_KINDS.contains(&str_at(canonical, "locatorKind")),
-                "{l}: locatorKind must name the provenance kind that was refused"
+                "{l}: locatorKind must name a provenance kind"
+            );
+            assert_eq!(
+                str_at(canonical, "locatorKind"),
+                unit.kind,
+                "{l}: locatorKind must be the source kind that was actually gated — \
+                 shape alone is not identity (§7.3)"
+            );
+            assert_eq!(
+                canonical.get("locator"),
+                doc.get("locator"),
+                "{l}: the record's locator is not the acquisition locator of this \
+                 source — a well-formed pointer at the wrong object resolves, which \
+                 is worse than a missing one (§7.3)"
             );
             assert_eq!(
                 str_at(canonical, "outcome"),

@@ -1,37 +1,37 @@
 {
   "specimenSet": "closure-redaction-v1",
   "specimens": [
-    "R2"
+    "R12"
   ],
   "synthetic": true,
   "sourceKind": "github-issue-comment",
   "contract": "docs/architecture/closure-redaction-policy-v1.md",
   "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
   "witnesses": [
-    "1",
-    "5",
-    "6.2",
+    "5.5",
     "7.1",
-    "7.2",
-    "9"
+    "9",
+    "9.5"
   ],
-  "what": "a completed assessment with a blocking finding on /body: no source snapshot, no digest of the original, no masked form",
+  "what": "two blocking findings on two different fields, so \u00a75.5's canonical order over (field, findingId) is observable",
   "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "every other specimen carries exactly one finding, which cannot distinguish canonical order from whatever a detector happened to emit, and cannot show a duplicate being rejected. Here the findings sort as /body before /user/login, and the two rule ids are both drawn from the bound configuration.",
+  "andNotOnlyBodies": "the second finding is on /user/login. A login is attacker-chosen text, so the gate being per-field rather than per-body is the point: nothing here says secrets only appear in comment bodies.",
   "locator": {
     "repository": "PhysShell/007",
     "pullRequest": "9101",
-    "stableId": "9100000002"
+    "stableId": "9100000010"
   },
   "gateOutcome": "BLOCK_SECRET",
   "decodedSource": {
-    "/id": 9100000002,
-    "/user/id": 9100000901,
-    "/user/login": "synthetic-pastebin",
+    "/id": 9100000010,
+    "/user/id": 9100000910,
+    "/user/login": "SYNTHETIC_FAKE_KEY_bot",
     "/user/type": "User",
     "/author_association": "CONTRIBUTOR",
-    "/body": "Here is the failing config.\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\nRe-run after rotating it.\n",
-    "/created_at": "2026-08-18T08:52:30Z",
-    "/updated_at": "2026-08-18T08:52:30Z"
+    "/body": "Rotating both of these:\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\nand the deploy key.\n",
+    "/created_at": "2026-08-18T12:04:00Z",
+    "/updated_at": "2026-08-18T12:04:00Z"
   },
   "requiredFields": [
     "/author_association",
@@ -65,15 +65,19 @@
     ],
     "coverageComplete": true,
     "outcome": "BLOCK_SECRET",
-    "observedAt": "2026-08-18T08:53:00Z",
+    "observedAt": "2026-08-18T12:04:30Z",
     "findings": [
       {
         "field": "/body",
         "findingId": "SYN-TOKEN-1"
+      },
+      {
+        "field": "/user/login",
+        "findingId": "SYN-TOKEN-2"
       }
     ]
   },
-  "assessmentDigest": "sha256:628cb144c85af766693ffba794dafb503efebed8e236c7d66e09a4f5b80394f0",
+  "assessmentDigest": "sha256:99848e5c9f710b2f9580e8ee3345d26b01df93f3b63014aab3a846ffc0d36b6b",
   "retention": {
     "permitted": false,
     "forbidden": [
@@ -90,30 +94,30 @@
       "locator": {
         "repository": "PhysShell/007",
         "pullRequest": "9101",
-        "stableId": "9100000002"
+        "stableId": "9100000010"
       },
       "redactionPolicyVersion": 1,
       "outcome": "BLOCK_SECRET",
       "coverageComplete": true,
       "retainedFields": {
         "/author_association": "CONTRIBUTOR",
-        "/created_at": "2026-08-18T08:52:30Z",
-        "/id": "9100000002",
-        "/updated_at": "2026-08-18T08:52:30Z",
-        "/user/id": "9100000901",
-        "/user/login": "synthetic-pastebin",
+        "/created_at": "2026-08-18T12:04:00Z",
+        "/id": "9100000010",
+        "/updated_at": "2026-08-18T12:04:00Z",
+        "/user/id": "9100000910",
         "/user/type": "User"
       },
       "blockedFields": [
-        "/body"
+        "/body",
+        "/user/login"
       ]
     },
-    "canonicalDigest": "sha256:76a8e4f57c3cfdaf918ba210f7542191545d66d33e7d7c4147bf7f8d3ca68e98"
+    "canonicalDigest": "sha256:16ae7d7035054af9f4e7bbea5f772b28f754e625ded82b595bf2a3a0db98c112"
   },
   "retentionBinding": {
     "schemaVersion": 1,
     "sourceKind": "closure-retention-binding",
-    "recordDigest": "sha256:76a8e4f57c3cfdaf918ba210f7542191545d66d33e7d7c4147bf7f8d3ca68e98",
-    "assessmentDigest": "sha256:628cb144c85af766693ffba794dafb503efebed8e236c7d66e09a4f5b80394f0"
+    "recordDigest": "sha256:16ae7d7035054af9f4e7bbea5f772b28f754e625ded82b595bf2a3a0db98c112",
+    "assessmentDigest": "sha256:99848e5c9f710b2f9580e8ee3345d26b01df93f3b63014aab3a846ffc0d36b6b"
   }
 }
