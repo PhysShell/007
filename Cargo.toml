@@ -12,6 +12,7 @@ members = [
     "crates/o7-verifier",
     "crates/o7-closure-canonical",
     "crates/o7-closure-classifier",
+    "crates/o7-closure-matcher",
     "crates/o7-run",
     "crates/o7-sandbox-protocol",
     "crates/o7-harness-policy",
