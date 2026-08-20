@@ -48,6 +48,14 @@ fn review_by_expected_author_login(
     if string_at(candidate, "/sourceKind") != Some("github-submitted-review") {
         return Ok(false);
     }
+    // ---- RED-2 MUTATION. DELIBERATELY WRONG. See tests/implementation_binding.rs.
+    // An out-of-vector behaviour change, landed with no version bump and no
+    // conformance-digest change, to demonstrate that the binding as shipped in
+    // 0f98ac0 does not detect it. Reverted in the next commit.
+    if string_at(candidate, "/state") == Some("COMMENTED") {
+        return Ok(false);
+    }
+    // ---- end RED-2 MUTATION
     Ok(string_at(candidate, "/user/login") == Some(expected))
 }
 
