@@ -217,7 +217,22 @@ const ASSESSMENT_ALWAYS: &[&str] = &[
 const ASSESSMENT_CONDITIONAL: &[&str] = &["findings", "coverageFailureCode"];
 
 /// The rule ids covered by the specimens' bound detector configuration.
-const CONFIGURED_RULE_IDS: &[&str] = &["SYN-TOKEN-1", "SYN-TOKEN-2"];
+/// The specimens' synthetic detector configuration, and the rule ids it covers.
+/// Keyed by digest so a record cannot claim one configuration and use another's
+/// rules. The production form of this binding is OWED — contract §11 — but a
+/// global list would not even hold the synthetic case.
+const SYNTHETIC_CONFIG_DIGEST: &str =
+    "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d";
+const CONFIGURED_RULES: &[(&str, &[&str])] =
+    &[(SYNTHETIC_CONFIG_DIGEST, &["SYN-TOKEN-1", "SYN-TOKEN-2"])];
+
+fn rules_for(config_digest: &str) -> &'static [&'static str] {
+    CONFIGURED_RULES
+        .iter()
+        .find(|(d, _)| *d == config_digest)
+        .map(|(_, r)| *r)
+        .unwrap_or_else(|| panic!("no rule set is bound to detector configuration {config_digest}"))
+}
 
 const PROVENANCE_SOURCE_KINDS: &[&str] = &[
     "github-pull-request-head",
@@ -236,6 +251,17 @@ const BINDING_KIND: &str = "closure-retention-binding";
 /// its top level is not closed.
 const DETECTOR_KEYS: &[&str] = &["configDigest", "id", "version"];
 const FINDING_KEYS: &[&str] = &["field", "findingId"];
+const REDUCED_RECORD_KEYS: &[&str] = &[
+    "blockedFields",
+    "coverageComplete",
+    "locator",
+    "locatorKind",
+    "outcome",
+    "redactionPolicyVersion",
+    "retainedFields",
+    "schemaVersion",
+    "sourceKind",
+];
 const BINDING_KEYS: &[&str] = &[
     "assessmentDigest",
     "recordDigest",
@@ -799,10 +825,32 @@ fn a_failed_assessment_cannot_look_safe() {
                             .get("findingId")
                             .and_then(Value::as_str)
                             .expect("findingId");
+                        let config = a
+                            .pointer("/detector/configDigest")
+                            .and_then(Value::as_str)
+                            .expect("configDigest");
                         assert!(
-                            CONFIGURED_RULE_IDS.contains(&id),
-                            "{l}: findingId {id:?} is not a rule of the bound configuration — \
-                             an arbitrary string is not a closed value (§9, §9.4)"
+                            rules_for(config).contains(&id),
+                            "{l}: findingId {id:?} is not a rule of the configuration this \
+                             assessment claims — an arbitrary string is not a closed value \
+                             (§9, §9.4)"
+                        );
+
+                        // §9: a detector can only find something in a field it
+                        // looked at. A finding naming an unassessed or
+                        // non-required pointer blocks nothing while making the
+                        // record read BLOCK_SECRET, and the genuinely dangerous
+                        // field stays retainable.
+                        let field = f.get("field").and_then(Value::as_str).expect("field");
+                        assert!(
+                            unit.required().contains(field),
+                            "{l}: finding names {field:?}, which is not in the §5.3 required \
+                             set — it can block nothing"
+                        );
+                        assert!(
+                            unit.assessed().contains(field),
+                            "{l}: finding names {field:?}, which this assessment never \
+                             successfully assessed"
                         );
                         for key in [
                             "match", "matched", "excerpt", "sample", "value", "digest", "length",
@@ -891,6 +939,10 @@ fn the_assessment_schema_is_closed() {
             }
             if let Some(reduced) = &unit.reduced {
                 let canonical = reduced.get("canonical").expect("canonical");
+                // The ROOT of the reduced record, not only its nested objects.
+                // An unknown root property is a way to carry a blocked value into
+                // a durable canonical object without touching retainedFields.
+                assert_exact_keys(l, "reduced source record", canonical, REDUCED_RECORD_KEYS);
                 assert_exact_keys(
                     l,
                     "locator",
@@ -1433,6 +1485,20 @@ fn no_live_credential_shapes() {
 #[test]
 fn readme_documents_every_specimen() {
     let readme = fs::read_to_string(fixtures_dir().join("README.md")).expect("reading README");
+
+    // The stale-description defect, mechanically. Round 4 added a second rule
+    // and this section kept describing one, with the old digest — a stale
+    // account of the very thing configDigest exists to pin down.
+    assert!(
+        readme.contains(SYNTHETIC_CONFIG_DIGEST),
+        "README does not name the detector configuration digest the specimens carry"
+    );
+    for rule in rules_for(SYNTHETIC_CONFIG_DIGEST) {
+        assert!(
+            readme.contains(rule),
+            "README does not describe rule {rule} of that configuration"
+        );
+    }
     for (file, id) in SPECIMENS {
         assert!(readme.contains(file), "README does not mention {file}");
         assert!(readme.contains(id), "README does not mention specimen {id}");

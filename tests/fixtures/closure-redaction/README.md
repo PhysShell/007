@@ -46,19 +46,41 @@ The specimens name a detector that **does not exist and is not proposed**:
 ```text
 id            synthetic-fixture-detector
 version       1
-configDigest  sha256:f00372ef104d490574feb48d7bc487fed22a1a262aab4277996f57a674c20e43
-policy        SYN-TOKEN-1 — a line whose first characters are
-              SYNTHETIC_FAKE_TOKEN_ blocks the field
+configDigest  sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d
 ```
 
-The rule is deliberately trivial and **line-anchored**, so that exactly one byte
-can decide an outcome. That is a fixture requirement, not a suggestion about how
-real detection should work — choosing a real scanner is explicitly out of scope
-for this slice, and §11 of the contract records the binding of a detector
-identity to an implementation as OWED.
+Its configuration, which is what that digest covers:
 
-`configDigest` is a real JCS + SHA-256 digest over the config object above,
-computed the same way as every other digest in this repository.
+```json
+{
+  "policyId": "line-anchored-synthetic-token",
+  "rules": [
+    { "id": "SYN-TOKEN-1",
+      "appliesTo": "each line of each assessed field value",
+      "blocksWhen": "the line begins with SYNTHETIC_FAKE_TOKEN_" },
+    { "id": "SYN-TOKEN-2",
+      "appliesTo": "each line of each assessed field value",
+      "blocksWhen": "the line begins with SYNTHETIC_FAKE_KEY_" }
+  ]
+}
+```
+
+Both rules are deliberately trivial and **line-anchored**, so that exactly one
+byte can decide an outcome. That is a fixture requirement, not a suggestion
+about how real detection should work — choosing a real scanner is explicitly
+out of scope, and contract §11 records binding a detector identity to an
+implementation as OWED.
+
+The second rule exists so that R12 can carry two findings with different rule
+ids. It arrived in correction round 4, and this section described one rule and
+the old digest until round 5 — a stale description of the very thing the
+`configDigest` is supposed to pin down.
+
+`configDigest` is a real JCS + SHA-256 digest over the object above, computed
+the same way as every other digest here. The checker binds the admissible rule
+ids **to that digest** rather than keeping a global list, so a record cannot
+claim one configuration and use another's rules. That binding is synthetic and
+local; the production form stays OWED.
 
 ## The specimens
 
