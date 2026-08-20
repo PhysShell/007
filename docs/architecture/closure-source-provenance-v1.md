@@ -775,8 +775,8 @@ redaction decision (§20)
       ↓         retains the bytes, so acquisition without it stores whatever
       ↓         was pasted into a comment, content-addressed
       ↓
-matcher implementation binding (§13.1)
-      ↓         blocks the first consumer that APPLIES a matcher, which is
+matcher implementation binding (§13.1)          [DONE: o7-closure-matcher]
+      ↓         blocked the first consumer that APPLIES a matcher, which is
       ↓         the acquisition adapter, because it computes
       ↓         matchedSnapshotDigests
       ↓
@@ -793,12 +793,18 @@ verification witness binding (§19)
 
 **Redaction decision.** A precondition for acquisition, not for this contract.
 
-**Matcher implementation binding.** §13.1 obliges `matcher.id` +
-`matcher.version` to resolve to exactly one predicate and does not say how. Until
-that exists, an adapter told to compute `matchedSnapshotDigests` has no choice
-but to pick a matcher implementation itself — which is the behaviour §13.1 was
-written to forbid, arriving through a missing prerequisite rather than through a
-missing rule.
+**Matcher implementation binding.** ~~§13.1 obliges `matcher.id` +
+`matcher.version` to resolve to exactly one predicate and does not say how.~~
+**DISCHARGED** by `crates/o7-closure-matcher`. The mechanism is a flat const
+registry: an identity pair resolves to one `fn`, resolution fails closed on the
+id and on the version separately, and each version carries a digest over its
+behaviour on a frozen vector set, so a behaviour change that did not take a new
+version is refused rather than silently absorbed. Specimen G's contradiction is
+now executed rather than read
+(`crates/o7-closure-matcher/tests/frozen_specimens.rs`).
+
+This paragraph is a status annotation. No normative clause of §13 or §13.1 is
+changed by it, and the binding was built to satisfy them as written.
 
 **Classifier provenance binding.** The merged classifier must learn to carry:
 
@@ -848,7 +854,7 @@ it as open — necessary conditions presented as sufficient ones.
 | What if the second head read failed? | §8.1 — `CANNOT_CHECK`, not "not stale" |
 | What proves a matcher did not simply miss the object? | §13 candidate set + matcher id |
 | What inputs must be retained for matcher re-execution? | §13.1 — id, version, parameters, retained candidates |
-| How does id + version resolve to exactly one predicate? | §23 — **OWED**: matcher implementation binding |
+| How does id + version resolve to exactly one predicate? | §23 — **DISCHARGED**: `crates/o7-closure-matcher`'s const registry |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
 | What order do the digest arrays use? | §13.2 — observation order, duplicates kept |
 | What does a failed head read record? | §8.1 — `reason`, and no `snapshotDigest` |

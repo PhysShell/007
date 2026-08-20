@@ -46,21 +46,21 @@ fn identity_pairs_are_unique() {
 
 #[test]
 fn resolution_fails_closed() {
-    assert!(resolve("submitted-review-by-author", "1").is_ok());
+    assert!(resolve("review-by-expected-author-login", "1").is_ok());
 
     assert!(matches!(
         resolve("no-such-matcher", "1"),
         Err(MatchError::UnknownMatcherId { .. })
     ));
     assert!(matches!(
-        resolve("submitted-review-by-author", "2"),
+        resolve("review-by-expected-author-login", "2"),
         Err(MatchError::UnknownMatcherVersion { .. })
     ));
     // An unknown version is a different fact from an unknown id, and the two must
     // not collapse: one says the rule was never bound, the other that this
     // repository does not have the revision a record was produced by.
     assert!(!matches!(
-        resolve("submitted-review-by-author", "2"),
+        resolve("review-by-expected-author-login", "2"),
         Err(MatchError::UnknownMatcherId { .. })
     ));
 }
@@ -70,7 +70,7 @@ fn resolution_fails_closed() {
 fn parameters_must_be_exactly_what_the_matcher_reads() {
     let candidates: Vec<Candidate> = Vec::new();
     let ok = json!({"expectedAuthorLogin": "a"});
-    assert!(recompute_matched("submitted-review-by-author", "1", &ok, &candidates).is_ok());
+    assert!(recompute_matched("review-by-expected-author-login", "1", &ok, &candidates).is_ok());
 
     for bad in [
         json!({}),
@@ -79,7 +79,7 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
     ] {
         assert!(
             matches!(
-                recompute_matched("submitted-review-by-author", "1", &bad, &candidates),
+                recompute_matched("review-by-expected-author-login", "1", &bad, &candidates),
                 Err(MatchError::ParameterMismatch { .. })
             ),
             "{bad} should be refused"
@@ -87,7 +87,7 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
     }
     assert!(matches!(
         recompute_matched(
-            "submitted-review-by-author",
+            "review-by-expected-author-login",
             "1",
             &json!("nope"),
             &candidates
@@ -123,7 +123,7 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
     let params = json!({"expectedAuthorLogin": "wanted"});
 
     let matched = recompute_matched(
-        "submitted-review-by-author",
+        "review-by-expected-author-login",
         "1",
         &params,
         &[a.clone(), b.clone(), c.clone()],
@@ -137,7 +137,7 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
     // Reversing the candidates reverses the matched order: the selection carries
     // observation order rather than imposing one of its own.
     let reversed = recompute_matched(
-        "submitted-review-by-author",
+        "review-by-expected-author-login",
         "1",
         &params,
         &[c.clone(), b, a.clone()],
@@ -150,7 +150,7 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
 
     // A duplicate in the candidate sequence appears twice in the matched one.
     let twice = recompute_matched(
-        "submitted-review-by-author",
+        "review-by-expected-author-login",
         "1",
         &params,
         &[a.clone(), a.clone()],
@@ -169,7 +169,7 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
 #[test]
 fn an_empty_candidate_sequence_yields_an_empty_match() {
     let matched = recompute_matched(
-        "submitted-review-by-author",
+        "review-by-expected-author-login",
         "1",
         &json!({"expectedAuthorLogin": "wanted"}),
         &[],
@@ -187,7 +187,7 @@ fn a_candidate_whose_digest_does_not_hold_is_refused() {
     tampered.snapshot = review("1", "somebody-else");
     assert!(matches!(
         recompute_matched(
-            "submitted-review-by-author",
+            "review-by-expected-author-login",
             "1",
             &json!({"expectedAuthorLogin": "wanted"}),
             &[tampered],
@@ -208,7 +208,7 @@ fn an_issue_comment_by_the_expected_author_is_not_review_evidence() {
         "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
     }));
     let matched = recompute_matched(
-        "submitted-review-by-author",
+        "review-by-expected-author-login",
         "1",
         &json!({"expectedAuthorLogin": "wanted"}),
         &[comment],
@@ -229,25 +229,26 @@ fn verify_matched_compares_against_the_claim() {
     let cands = [a.clone(), b.clone()];
 
     assert!(verify_matched(
-        "submitted-review-by-author",
+        "review-by-expected-author-login",
         "1",
         &params,
         &cands,
-        &[a.declared_digest.clone()]
+        std::slice::from_ref(&a.declared_digest)
     )
     .expect("verify"));
     // A claim that the non-matching candidate qualified.
     assert!(!verify_matched(
-        "submitted-review-by-author",
+        "review-by-expected-author-login",
         "1",
         &params,
         &cands,
-        &[b.declared_digest.clone()]
+        std::slice::from_ref(&b.declared_digest)
     )
     .expect("verify"));
     // A claim of an empty match where one candidate qualifies — the exact shape
     // §13 exists to make detectable.
     assert!(
-        !verify_matched("submitted-review-by-author", "1", &params, &cands, &[]).expect("verify")
+        !verify_matched("review-by-expected-author-login", "1", &params, &cands, &[])
+            .expect("verify")
     );
 }

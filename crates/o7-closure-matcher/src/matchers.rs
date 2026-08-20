@@ -19,14 +19,15 @@
 //! delivered in an issue comment is not weak review evidence, it is not review
 //! evidence at all, because an issue comment has no field that can carry a
 //! subject binding. Classification follows the API object shape, never the
-//! author's identity — so `submitted-review-by-author` requires the candidate to
+//! author's identity — so `review-by-expected-author-login` requires the candidate to
 //! *be* a submitted review, and an issue comment by the same account is false.
 
 use serde_json::Value;
 
 use crate::{ConformanceVector, MatchError, MatcherEntry};
 
-pub(crate) const ALL: &[MatcherEntry] = &[SUBMITTED_REVIEW_BY_AUTHOR_V1, ACTIONS_CHECK_BY_NAME_V1];
+pub(crate) const ALL: &[MatcherEntry] =
+    &[REVIEW_BY_EXPECTED_AUTHOR_LOGIN_V1, ACTIONS_CHECK_BY_NAME_V1];
 
 fn string_at<'a>(candidate: &'a Value, pointer: &str) -> Option<&'a str> {
     candidate.pointer(pointer).and_then(Value::as_str)
@@ -34,7 +35,10 @@ fn string_at<'a>(candidate: &'a Value, pointer: &str) -> Option<&'a str> {
 
 /// True when the candidate is a submitted review whose author login is the one
 /// the parameters name.
-fn submitted_review_by_author(candidate: &Value, parameters: &Value) -> Result<bool, MatchError> {
+fn review_by_expected_author_login(
+    candidate: &Value,
+    parameters: &Value,
+) -> Result<bool, MatchError> {
     let expected = parameters
         .get("expectedAuthorLogin")
         .and_then(Value::as_str)
@@ -131,13 +135,13 @@ const CHECK_BY_NAME_VECTORS: &[ConformanceVector] = &[
     },
 ];
 
-pub(crate) const SUBMITTED_REVIEW_BY_AUTHOR_V1: MatcherEntry = MatcherEntry {
-    id: "submitted-review-by-author",
+pub(crate) const REVIEW_BY_EXPECTED_AUTHOR_LOGIN_V1: MatcherEntry = MatcherEntry {
+    id: "review-by-expected-author-login",
     version: "1",
     parameter_keys: &["expectedAuthorLogin"],
     vectors: REVIEW_BY_AUTHOR_VECTORS,
-    conformance_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-    predicate: submitted_review_by_author,
+    conformance_digest: "sha256:7ea10c56ced0cc83ac3889750fd2a133584275d39f6f5fe809f744ebf74c5178",
+    predicate: review_by_expected_author_login,
 };
 
 pub(crate) const ACTIONS_CHECK_BY_NAME_V1: MatcherEntry = MatcherEntry {
@@ -145,6 +149,6 @@ pub(crate) const ACTIONS_CHECK_BY_NAME_V1: MatcherEntry = MatcherEntry {
     version: "1",
     parameter_keys: &["checkName"],
     vectors: CHECK_BY_NAME_VECTORS,
-    conformance_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    conformance_digest: "sha256:524e0585621242e6e7a995f952473dd15b01d3da66663c6505fc244a7714d01a",
     predicate: actions_check_by_name,
 };

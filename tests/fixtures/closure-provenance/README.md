@@ -230,7 +230,16 @@ test whose expectations were produced by the code under test proves nothing.
   the contract left open.
 - **No pagination witness exists in Step 0B and none is invented here.** C and D
   are synthetic and say so; they are not evidence that this ever occurred.
-- **The matcher rule is described, not implemented.** `matcher.id`,
+- ~~**The matcher rule is described, not implemented.**~~ **Retired.**
+  `crates/o7-closure-matcher` binds `review-by-expected-author-login` version `1`
+  — the identity pair these specimens already name — and
+  `crates/o7-closure-matcher/tests/frozen_specimens.rs` re-runs it over G's two
+  retained candidates. G's empty matched subset no longer survives, C's does, and
+  D's does while D stays `INCOMPLETE`. The paragraph below is kept because it
+  states the gap that was closed and why it mattered; only its tense is now
+  wrong.
+
+  **The matcher rule is described, not implemented.** `matcher.id`,
   `matcher.version` and `matcher.parameters` are contract-level identity, and
   `review-by-expected-author-login v1` exists only as the prose rule stated in
   the specimen files. Nothing in this repository executes it, so G's
