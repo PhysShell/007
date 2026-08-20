@@ -688,10 +688,23 @@ whichever gap is left. The blacklist of obviously-bad finding keys — `excerpt`
 `match`, `length` and friends — is kept as a redundant guard, but the exact key
 set is what actually holds.
 
-Every object listed above carries `schemaVersion: 1`, and every one that carries
+**Versions belong to the retained objects, not to their components.** The three
+objects that are independently canonicalized, digested and retained —
+`RetentionAssessment`, `RetentionBinding` and `github-reduced-source-record` —
+each carry `schemaVersion: 1`, and every one of them that carries
 `redactionPolicyVersion` carries the same value as the assessment that authorised
-it. A version field that is present but unrelated to its neighbours is decoration
-on bytes that are about to be hashed.
+it. A version field present but unrelated to its neighbours is decoration on
+bytes about to be hashed.
+
+`detector`, a `finding` and a `locator` do **not** carry `schemaVersion`. They
+are components of a retained object rather than retained objects themselves:
+nothing digests them separately, so there is nothing for a version of their own
+to identify, and their exact key sets above deliberately exclude it.
+
+An earlier revision said "every object listed above", which included the nested
+three and made the contract unsatisfiable — adding the field broke the exact-key
+rule, omitting it broke the version rule. The checker had it right and the prose
+did not, which is the reverse of the usual direction and worth recording as such.
 
 ### 9.6 The retained assessment is the authority on its own outcome
 
