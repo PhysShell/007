@@ -1,0 +1,30 @@
+[package]
+name = "o7-closure-canonical"
+version = "0.1.0"
+edition = "2021"
+description = "RFC 8785 JSON canonicalization and SHA-256 digests for closure evidence. One job: turn a JSON value into the exact bytes the closure contracts hash, or refuse. No policy, no schema knowledge, no I/O."
+publish = false
+
+[lib]
+name = "o7_closure_canonical"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = "1"
+# Already a workspace-wide dependency (root package and five crates); this
+# introduces no new vendor into the dependency policy's audit surface.
+sha2 = "0.10"
+
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"

@@ -1051,6 +1051,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "o7-closure-canonical"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "o7-closure-classifier"
 version = "0.1.0"
 dependencies = [
