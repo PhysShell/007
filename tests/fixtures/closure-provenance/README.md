@@ -235,9 +235,17 @@ test whose expectations were produced by the code under test proves nothing.
   — the identity pair these specimens already name — and
   `crates/o7-closure-matcher/tests/frozen_specimens.rs` re-runs it over G's two
   retained candidates. G's empty matched subset no longer survives, C's does, and
-  D's does while D stays `INCOMPLETE`. The paragraph below is kept because it
-  states the gap that was closed and why it mattered; only its tense is now
-  wrong.
+  D's does while D stays `INCOMPLETE`.
+
+  The identity pair is bound to the *bytes* of the file defining the predicate,
+  not to its answers on a sample: §13.1 requires a new version whenever
+  behaviour changes for ANY input, and a finite vector set cannot discharge ANY.
+  The first attempt did rest on the vector set and let a real behaviour change
+  through under an unchanged version; that escape is recorded as an executable
+  commit rather than as a sentence. See §23.
+
+  The paragraph below is kept because it states the gap that was closed and why
+  it mattered; only its tense is now wrong.
 
   **The matcher rule is described, not implemented.** `matcher.id`,
   `matcher.version` and `matcher.parameters` are contract-level identity, and

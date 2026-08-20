@@ -48,8 +48,12 @@ pub struct ConformanceVector {
     pub expected: bool,
 }
 
-/// An entry in the registry: an identity pair bound to one implementation, and a
-/// digest over that implementation's behaviour on the frozen vectors.
+/// An entry in the registry: an identity pair bound to one implementation.
+///
+/// Two digests, deliberately: [`Self::implementation_digest`] is the identity of
+/// `(id, version)`, and [`Self::conformance_digest`] is a behavioural regression
+/// witness over a finite vector set. Conflating them is the defect RED-2
+/// (782cbaf) recorded.
 #[derive(Debug, Clone, Copy)]
 pub struct MatcherEntry {
     pub id: &'static str,

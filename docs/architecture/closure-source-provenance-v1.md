@@ -795,12 +795,9 @@ verification witness binding (§19)
 
 **Matcher implementation binding.** ~~§13.1 obliges `matcher.id` +
 `matcher.version` to resolve to exactly one predicate and does not say how.~~
-**DISCHARGED** by `crates/o7-closure-matcher`. The mechanism is a flat const
-registry: an identity pair resolves to one `fn`, resolution fails closed on the
-id and on the version separately, and each version carries a digest over its
-behaviour on a frozen vector set, so a behaviour change that did not take a new
-version is refused rather than silently absorbed. Specimen G's contradiction is
-now executed rather than read
+**DISCHARGED** by `crates/o7-closure-matcher` — see §23 for the mechanism, for
+the false start that preceded it, and for what it still does not cover. Specimen
+G's contradiction is now executed rather than read
 (`crates/o7-closure-matcher/tests/frozen_specimens.rs`).
 
 This paragraph is a status annotation. No normative clause of §13 or §13.1 is
@@ -854,7 +851,8 @@ it as open — necessary conditions presented as sufficient ones.
 | What if the second head read failed? | §8.1 — `CANNOT_CHECK`, not "not stale" |
 | What proves a matcher did not simply miss the object? | §13 candidate set + matcher id |
 | What inputs must be retained for matcher re-execution? | §13.1 — id, version, parameters, retained candidates |
-| How does id + version resolve to exactly one predicate? | §23 — **DISCHARGED**: `crates/o7-closure-matcher`'s const registry |
+| How does id + version resolve to exactly one predicate? | §23 — **DISCHARGED**: const registry in `crates/o7-closure-matcher` |
+| What stops a version's predicate from changing under it? | §23 — a digest over the implementation's bytes, **not** over its results |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
 | What order do the digest arrays use? | §13.2 — observation order, duplicates kept |
 | What does a failed head read record? | §8.1 — `reason`, and no `snapshotDigest` |
@@ -902,19 +900,48 @@ statements rather than written alongside them.
   the adapter deciding for itself what `Reproduced` means.
 - **Semantic normalization** of bodies (§9). V1 is byte-exact; any
   whitespace-insensitive comparison is a later, separately versioned decision.
-- **Matcher implementation binding** (§13.1). The contract obliges
-  `matcher.id` + `matcher.version` to resolve to exactly one predicate, and says
-  nothing about *how* that resolution happens — a registry file, a crate path
-  plus a version, a digest over the implementation. Until it is decided, a
-  matcher named only in prose is a locator pointing at something mutable, which
-  is what §3 objects to everywhere else. The specimens here name such a matcher
-  and say so rather than implying the binding already exists.
+- ~~**Matcher implementation binding** (§13.1).~~ **DISCHARGED** by
+  `crates/o7-closure-matcher`. The resolution mechanism is a flat const registry
+  — an identity pair resolves to one `fn`, and resolution fails closed on the id
+  and on the version separately. The *immutability* half, which is the half
+  §13.1 actually turns on, is a SHA-256 over the exact bytes of the file that
+  defines the predicate: each version's predicate lives alone in
+  `src/matchers/<id>_v<n>.rs`, the registry embeds that file verbatim at compile
+  time, and the same path is what the compiler builds — so the hashed bytes are
+  the running code. Editing a version's file breaks that version's binding;
+  changing behaviour means adding `_v2.rs` and a new entry. Append-only,
+  enforced by the digest rather than by policy.
 
-  *Blocks the first consumer that applies a matcher*, which is the acquisition
-  adapter, since it computes `matchedSnapshotDigests`. An adapter written before
-  this binding exists has no choice but to select a matcher implementation
-  itself — the behaviour §13.1 forbids, re-entering through a missing
-  prerequisite rather than a missing rule.
+  The original residual text is kept below because it stated the requirement
+  correctly and the first attempt at satisfying it did not.
+
+  > The contract obliges `matcher.id` + `matcher.version` to resolve to exactly
+  > one predicate, and says nothing about *how* that resolution happens — a
+  > registry file, a crate path plus a version, a digest over the
+  > implementation. Until it is decided, a matcher named only in prose is a
+  > locator pointing at something mutable, which is what §3 objects to
+  > everywhere else.
+  >
+  > *Blocks the first consumer that applies a matcher*, which is the acquisition
+  > adapter, since it computes `matchedSnapshotDigests`.
+
+  **The false start is part of the record.** The binding first shipped with a
+  digest over the predicate's *results on a frozen vector set* and was annotated
+  as discharging §13.1. It did not. §13.1 says `version` changes whenever
+  behaviour changes for **ANY** input, and a finite vector set cannot discharge
+  `ANY`: a change gated on a `state` value no vector used passed the entire
+  suite under an unchanged version and an unchanged digest. That escape is
+  recorded as an executable commit (RED-2) rather than as a sentence here, and
+  the conformance digest is now labelled what it always was — a behavioural
+  regression witness, kept because the bytes never state what the rule is
+  *supposed* to do.
+
+  **What remains uncovered, and is not being called discharged.** A behaviour
+  change that leaves the bytes alone: a dependency's semantics shifting beneath
+  them, a compiler change, a target difference. Identical bytes are not
+  identical behaviour across a moving substrate. The conformance vectors are the
+  witness for that residual and are the reason both digests are kept; neither
+  subsumes the other.
 - **Reaction surface** (§8). Still no Step 0B specimen; not added here.
 - **Pagination specimen** (§14). The rule is frozen; the historical witness does
   not exist and the contract vectors for it are synthetic.
