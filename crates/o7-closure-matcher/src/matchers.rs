@@ -1,76 +1,44 @@
-//! The bound matchers. Adding one is a reviewable diff in this file, and its
+//! The registry. Adding a matcher is a reviewable diff in this file, and an
 //! identity pair is meaningless until it appears here.
 //!
-//! Every predicate below is a `fn`, so none of them can capture anything, and
-//! each reads its two arguments only.
+//! TWO DIGESTS, TWO DIFFERENT JOBS. RED-2 (782cbaf) put a wrong matcher through
+//! a fully green suite, because the conformance digest covers results on a
+//! finite vector set and §13.1 requires identity over ANY input. So each entry
+//! now carries both:
 //!
-//! WHY THESE MATCHERS DO NOT LOOK AT A SHA. Selecting by subject SHA is
-//! deliberately not a matcher's job. A wrong-SHA review that the matcher filtered
-//! out would leave an empty matched subsequence, and an empty matched subsequence
-//! after a complete enumeration is exactly what provenance V1 §13 permits to mean
-//! `NotProduced` — so a stale review would become "nobody reviewed", collapsing
-//! the distinction the frozen `stale-review-wrong-sha` fixture exists to preserve.
-//! The matcher selects the candidates a required observation is about; the
-//! classifier decides admissibility, and a wrong SHA has to be *visible* to be
-//! judged.
+//! ```text
+//! implementation_digest   SHA-256 of the exact bytes of the file that defines
+//!                         the predicate. Covers the implementation itself, so
+//!                         no edit escapes it and no enumeration is involved.
+//!                         This is the identity of (id, version).
 //!
-//! WHY THEY LOOK AT `sourceKind` AND NOT ONLY AT AN AUTHOR. Recorded on issue
-//! #147 as the reviewer verdict delivery-surface witness: a positive verdict
-//! delivered in an issue comment is not weak review evidence, it is not review
-//! evidence at all, because an issue comment has no field that can carry a
-//! subject binding. Classification follows the API object shape, never the
-//! author's identity — so `review-by-expected-author-login` requires the candidate to
-//! *be* a submitted review, and an issue comment by the same account is false.
+//! conformance_digest      SHA-256 over the results on the frozen vectors.
+//!                         A behavioural regression witness, and nothing more.
+//!                         Kept because it says what the rule is SUPPOSED to do,
+//!                         which the bytes never state.
+//! ```
+//!
+//! THE BYTES HASHED ARE THE BYTES COMPILED. `include_str!` and `mod` read the
+//! same path in the same build, so `implementation_source` cannot drift from the
+//! code that runs. That link, not a vector set, is what makes the digest an
+//! implementation binding.
+//!
+//! APPEND-ONLY, ENFORCED BY THE DIGEST ITSELF. A version's file is never edited;
+//! a behaviour change adds `..._v2.rs` and a new entry. Editing `..._v1.rs`
+//! breaks v1's binding — the enforcement needs no policy, no CI rule and no
+//! reviewer remembering.
+//!
+//! WHY THE VECTORS LIVE HERE AND NOT BESIDE THE PREDICATE. If they shared a file
+//! with the implementation, changing the witness set and changing the rule would
+//! move the same digest, and the two facts would stop being separable.
 
-use serde_json::Value;
+use crate::{ConformanceVector, MatcherEntry};
 
-use crate::{ConformanceVector, MatchError, MatcherEntry};
+pub(crate) mod actions_check_by_name_v1;
+pub(crate) mod review_by_expected_author_login_v1;
 
 pub(crate) const ALL: &[MatcherEntry] =
     &[REVIEW_BY_EXPECTED_AUTHOR_LOGIN_V1, ACTIONS_CHECK_BY_NAME_V1];
-
-fn string_at<'a>(candidate: &'a Value, pointer: &str) -> Option<&'a str> {
-    candidate.pointer(pointer).and_then(Value::as_str)
-}
-
-/// True when the candidate is a submitted review whose author login is the one
-/// the parameters name.
-fn review_by_expected_author_login(
-    candidate: &Value,
-    parameters: &Value,
-) -> Result<bool, MatchError> {
-    let expected = parameters
-        .get("expectedAuthorLogin")
-        .and_then(Value::as_str)
-        .ok_or(MatchError::MalformedCandidate {
-            why: "expectedAuthorLogin is not a string",
-        })?;
-    if string_at(candidate, "/sourceKind") != Some("github-submitted-review") {
-        return Ok(false);
-    }
-    // ---- RED-2 MUTATION. DELIBERATELY WRONG. See tests/implementation_binding.rs.
-    // An out-of-vector behaviour change, landed with no version bump and no
-    // conformance-digest change, to demonstrate that the binding as shipped in
-    // 0f98ac0 does not detect it. Reverted in the next commit.
-    if string_at(candidate, "/state") == Some("COMMENTED") {
-        return Ok(false);
-    }
-    // ---- end RED-2 MUTATION
-    Ok(string_at(candidate, "/user/login") == Some(expected))
-}
-
-/// True when the candidate is a check run with the named check.
-fn actions_check_by_name(candidate: &Value, parameters: &Value) -> Result<bool, MatchError> {
-    let expected = parameters.get("checkName").and_then(Value::as_str).ok_or(
-        MatchError::MalformedCandidate {
-            why: "checkName is not a string",
-        },
-    )?;
-    if string_at(candidate, "/sourceKind") != Some("github-actions-check") {
-        return Ok(false);
-    }
-    Ok(string_at(candidate, "/name") == Some(expected))
-}
 
 const REVIEW_BY_AUTHOR_VECTORS: &[ConformanceVector] = &[
     ConformanceVector {
@@ -148,8 +116,11 @@ pub(crate) const REVIEW_BY_EXPECTED_AUTHOR_LOGIN_V1: MatcherEntry = MatcherEntry
     version: "1",
     parameter_keys: &["expectedAuthorLogin"],
     vectors: REVIEW_BY_AUTHOR_VECTORS,
+    implementation_source: include_str!("matchers/review_by_expected_author_login_v1.rs"),
+    implementation_digest:
+        "sha256:59ea097cb9ea6705ebff04487a35861af0ea2b1b8e3e7c4980485af52f9567e9",
     conformance_digest: "sha256:7ea10c56ced0cc83ac3889750fd2a133584275d39f6f5fe809f744ebf74c5178",
-    predicate: review_by_expected_author_login,
+    predicate: review_by_expected_author_login_v1::matches,
 };
 
 pub(crate) const ACTIONS_CHECK_BY_NAME_V1: MatcherEntry = MatcherEntry {
@@ -157,6 +128,9 @@ pub(crate) const ACTIONS_CHECK_BY_NAME_V1: MatcherEntry = MatcherEntry {
     version: "1",
     parameter_keys: &["checkName"],
     vectors: CHECK_BY_NAME_VECTORS,
+    implementation_source: include_str!("matchers/actions_check_by_name_v1.rs"),
+    implementation_digest:
+        "sha256:0400752fb274d0ab8e1540ce39b95fb9c122749612560519f54882074618c4c4",
     conformance_digest: "sha256:524e0585621242e6e7a995f952473dd15b01d3da66663c6505fc244a7714d01a",
-    predicate: actions_check_by_name,
+    predicate: actions_check_by_name_v1::matches,
 };

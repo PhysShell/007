@@ -27,7 +27,7 @@
 //! trusted a supplied digest-to-snapshot map would be re-running the selection
 //! over whatever the producer said the candidates were.
 
-use o7_closure_canonical::{digest, CanonicalError, Digest};
+use o7_closure_canonical::{digest, digest_of_canonical_bytes, CanonicalError, Digest};
 use serde_json::Value;
 
 pub mod matchers;
@@ -57,11 +57,36 @@ pub struct MatcherEntry {
     /// What the contract's `matcher.parameters` must contain for this matcher.
     pub parameter_keys: &'static [&'static str],
     pub vectors: &'static [ConformanceVector],
-    /// Frozen digest over `(id, version, vectors, the results f produces now)`.
+    /// The exact bytes of the file that defines `predicate`, embedded at compile
+    /// time by `include_str!`.
     ///
-    /// This is change-detection, not correctness: correctness is asserted by each
-    /// vector's `expected`, which is hand-authored. The digest additionally covers
-    /// the vector set itself, so quietly weakening a vector trips it too.
+    /// `include_str!` and `mod` read the same path in the same build, so this is
+    /// the source of the code that actually runs — not a copy that can drift
+    /// from it. That is what lets a digest over these bytes be an identity
+    /// rather than an observation.
+    pub implementation_source: &'static str,
+    /// SHA-256 of [`Self::implementation_source`]. **This is the identity of
+    /// `(id, version)`.**
+    ///
+    /// §13.1 requires a new version whenever behaviour changes for ANY input.
+    /// No finite vector set discharges `ANY`; RED-2 (782cbaf) is the recorded
+    /// proof, where a change gated on a `state` value no vector used passed a
+    /// fully green suite. Hashing the implementation instead of a sample of its
+    /// behaviour needs no enumeration: every edit moves these bytes.
+    ///
+    /// What it does NOT cover: a behaviour change that leaves the bytes alone —
+    /// a dependency's semantics shifting under it, or a compiler change. The
+    /// conformance vectors are the witness for that residual, which is the
+    /// division of labour between the two digests.
+    pub implementation_digest: &'static str,
+    /// Frozen digest over `(id, version, parameterKeys, vectors, the results f
+    /// produces now)`.
+    ///
+    /// A **behavioural regression witness**, not an identity — see
+    /// [`Self::implementation_digest`] for why the distinction is load-bearing.
+    /// It is kept because the bytes never state what the rule is *supposed* to
+    /// do, and each vector's hand-authored `expected` does; and because it
+    /// covers the vector set itself, so quietly weakening a vector trips it too.
     pub conformance_digest: &'static str,
     pub predicate: MatcherFn,
 }
@@ -77,9 +102,20 @@ pub enum MatchError {
         version: String,
         known: Vec<String>,
     },
+    /// The bytes of the file defining this version's predicate are not the bytes
+    /// bound to it. §13.1 requires a new version for any behaviour change, and
+    /// this is the check that enforces it: an implementation edit under an
+    /// unchanged `(id, version)` is refused whether or not any frozen vector
+    /// notices. Fixing it means adding a version, never updating this digest.
+    ImplementationDigestMismatch {
+        id: String,
+        version: String,
+        expected: String,
+        computed: String,
+    },
     /// The implementation's behaviour on the frozen vectors no longer matches the
-    /// digest bound to this version. §13.1 requires a new version for any
-    /// behaviour change; this is the mechanism that notices one was not taken.
+    /// digest bound to this version. A regression witness — weaker than
+    /// [`Self::ImplementationDigestMismatch`] and not a substitute for it.
     ConformanceDigestMismatch {
         id: String,
         version: String,
@@ -118,6 +154,18 @@ impl std::fmt::Display for MatchError {
                 f,
                 "matcher {id:?} has no version {version:?}; bound versions: {known:?}"
             ),
+            Self::ImplementationDigestMismatch {
+                id,
+                version,
+                expected,
+                computed,
+            } => write!(
+                f,
+                "matcher {id:?} version {version:?} is not the implementation bound to \
+                 it: the source file hashes to {computed}, the version is bound to \
+                 {expected}. §13.1 requires a new version for any behaviour change, so \
+                 the fix is a new version entry, never a new digest on this one"
+            ),
             Self::ConformanceDigestMismatch {
                 id,
                 version,
@@ -125,9 +173,9 @@ impl std::fmt::Display for MatchError {
                 computed,
             } => write!(
                 f,
-                "matcher {id:?} version {version:?} no longer behaves as the version \
-                 bound to it: expected {expected}, computed {computed}. §13.1 requires a \
-                 new version whenever behaviour changes"
+                "matcher {id:?} version {version:?} no longer produces the results \
+                 bound to it: expected {expected}, computed {computed}. This is the \
+                 behavioural witness; the implementation digest is the identity"
             ),
             Self::ConformanceVectorFailed {
                 id,
@@ -192,9 +240,42 @@ pub fn resolve(id: &str, version: &str) -> Result<&'static MatcherEntry, MatchEr
         })
 }
 
-/// Run the frozen vectors and check both halves of the binding: each vector's
-/// hand-authored expectation, and the digest over the whole behaviour.
+/// The whole obligation: implementation identity first, then behaviour.
+///
+/// Returns the **conformance** digest, so existing callers are unchanged. The
+/// order matters — a matcher whose implementation is not the bound one must be
+/// refused before any of its answers are consulted, because those answers are
+/// then answers from something else.
 pub fn verify_binding(entry: &MatcherEntry) -> Result<Digest, MatchError> {
+    verify_implementation(entry)?;
+    verify_conformance(entry)
+}
+
+/// Check the implementation binding: the bytes of the file defining this
+/// version's predicate against the digest the version is bound to.
+///
+/// This is the check §13.1 actually needs, and the one RED-2 (782cbaf) showed
+/// was missing. It is separate from [`verify_binding`] so the two failures never
+/// masquerade as each other: this one says *the implementation moved*, the other
+/// says *a result moved*.
+pub fn verify_implementation(entry: &MatcherEntry) -> Result<Digest, MatchError> {
+    let computed = digest_of_canonical_bytes(entry.implementation_source.as_bytes());
+    if computed.as_str() != entry.implementation_digest {
+        return Err(MatchError::ImplementationDigestMismatch {
+            id: entry.id.to_owned(),
+            version: entry.version.to_owned(),
+            expected: entry.implementation_digest.to_owned(),
+            computed: computed.as_str().to_owned(),
+        });
+    }
+    Ok(computed)
+}
+
+/// Run the frozen vectors and check the behavioural half of the binding.
+///
+/// Callers wanting the whole obligation should use [`verify_binding`], which
+/// checks the implementation identity first.
+pub fn verify_conformance(entry: &MatcherEntry) -> Result<Digest, MatchError> {
     let mut results = Vec::with_capacity(entry.vectors.len());
     for vector in entry.vectors {
         let parameters: Value = serde_json::from_str(vector.parameters).map_err(|_| {

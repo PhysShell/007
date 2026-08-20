@@ -1,55 +1,177 @@
-//! RED-2. The witness that `conformance_digest` is not an implementation binding.
+//! GREEN-2. `(id, version)` is bound to an immutable implementation, and the
+//! conformance vectors go back to being what they were correctly named.
 //!
-//! WHAT IS WRONG WITH THIS COMMIT. `src/matchers.rs` currently contains a
-//! deliberately wrong `review-by-expected-author-login`: a submitted review by
-//! the expected author whose `state` is `COMMENTED` no longer matches. Its
-//! `version` is still `"1"` and its `conformance_digest` is unchanged from
-//! 0f98ac0. Do not build on this commit; the next one reverts the mutation.
+//! WHAT RED-2 (782cbaf) ESTABLISHED. A wrong `review-by-expected-author-login`
+//! — one that dropped `COMMENTED` reviews — passed the entire suite under an
+//! unchanged version and an unchanged conformance digest, because every frozen
+//! vector used `APPROVED`. §13.1 requires a new version whenever behaviour
+//! changes for **ANY** input, and a digest over results on a finite vector set
+//! cannot discharge `ANY`. The finite witness set had been promoted to the
+//! identity of a total function.
 //!
-//! WHY IT IS HERE. §13.1 froze:
-//!
-//! > `matcher.version` changes whenever `f`'s behaviour changes for ANY input
-//!
-//! and 0f98ac0 claimed the conformance digest enforced it. It does not. The
-//! digest covers `(id, version, parameterKeys, vectors, results on those
-//! vectors)` — a finite observation of `f`, not `f`. Every frozen review vector
-//! uses `APPROVED`, so a change gated on `COMMENTED` moves no result, moves no
-//! digest, and passes.
+//! WHAT REPLACES IT.
 //!
 //! ```text
-//! behaviour changed for an admissible input
-//!         ↓
-//! no frozen vector covers that input
-//!         ↓
-//! all vector results unchanged
-//!         ↓
-//! conformance_digest unchanged
-//!         ↓
-//! verify_binding() PASS, version still "1"      <- exactly what §13.1 forbids
+//! implementation_digest = SHA-256(bytes of the file defining the predicate)
 //! ```
 //!
-//! The tests below PASS in this commit, and their passing is the defect. A
-//! finite witness set was quietly promoted to the identity of a total function
-//! — the same substitution this whole effort is named after, wearing a new hat:
-//! an artifact certifying the very thing it is being checked against.
+//! No enumeration is involved, so there is no input it can miss. Each version's
+//! predicate lives alone in `src/matchers/<id>_v<n>.rs`; the registry embeds that
+//! file verbatim at compile time and pins its digest.
 //!
-//! NO FINITE VECTOR SET FIXES THIS. Adding a `COMMENTED` vector defeats this
-//! particular mutation and nothing else; the next one gates on `DISMISSED`.
-//! `ANY input` is not provable by enumeration, so the next commit stops trying
-//! and binds the implementation's *bytes* instead, leaving the vectors as what
-//! they were correctly named all along: a finite witness set for behavioural
-//! regression.
+//! WHY THE HASHED BYTES ARE THE RUNNING CODE. The registry embeds the file and
+//! `mod` compiles it, from the same path in the same build. They cannot drift.
+//! That link — not a vector set — is what makes the digest an identity, and
+//! `the_bound_bytes_are_the_bytes_on_disk` checks the remaining seam.
+//!
+//! APPEND-ONLY WITHOUT A POLICY. Editing `..._v1.rs` breaks v1's binding; a
+//! behaviour change adds `..._v2.rs` and a new entry. Nothing here relies on CI
+//! configuration or on a reviewer remembering the rule — the mechanism is the
+//! enforcement, which is the only kind that survives.
+//!
+//! WHAT THIS STILL DOES NOT COVER, STATED PLAINLY. A behaviour change that leaves
+//! the bytes alone: `serde_json`'s `pointer()` semantics shifting under it, a
+//! compiler change, a target difference. Identical bytes are not identical
+//! behaviour across a moving substrate. The conformance vectors are the witness
+//! for exactly that residual, which is why they are kept and why they are no
+//! longer called an identity. Neither digest subsumes the other and neither is
+//! sufficient alone.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use o7_closure_matcher::{resolve, verify_binding};
-use serde_json::json;
+use o7_closure_canonical::{digest, digest_of_canonical_bytes};
+use o7_closure_matcher::{
+    resolve, verify_binding, verify_conformance, verify_implementation, MatchError, REGISTRY,
+};
+use serde_json::{json, Value};
 
-/// The mutation is real: the predicate's answer for an admissible input is not
-/// what it was in 0f98ac0.
+/// Every entry's implementation digest holds over its own embedded bytes.
 #[test]
-fn red2_the_behaviour_of_version_1_has_changed_for_an_admissible_input() {
+fn every_version_is_bound_to_its_implementation() {
+    for entry in REGISTRY {
+        verify_implementation(entry)
+            .unwrap_or_else(|e| panic!("{}/{}: {e}", entry.id, entry.version));
+        verify_binding(entry).unwrap_or_else(|e| panic!("{}/{}: {e}", entry.id, entry.version));
+    }
+}
+
+/// The seam the compile-time embed leaves open: a stale build. If the file on
+/// disk is not the file that was compiled in, this catches it — and if it ever
+/// fires, the digest constants must not be touched until the build is clean,
+/// because a rebuilt binary and a stale one would disagree about identity.
+#[test]
+fn the_bound_bytes_are_the_bytes_on_disk() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/matchers");
+    for entry in REGISTRY {
+        let file = entry.id.replace('-', "_") + "_v" + entry.version + ".rs";
+        let on_disk = std::fs::read_to_string(dir.join(&file))
+            .unwrap_or_else(|e| panic!("{}/{}: reading {file}: {e}", entry.id, entry.version));
+        assert_eq!(
+            on_disk, entry.implementation_source,
+            "{}/{}: the embedded source is not {file} as it is on disk",
+            entry.id, entry.version
+        );
+        // The naming convention is load-bearing, not cosmetic: it is what lets
+        // this check find the file at all.
+        assert!(
+            digest_of_canonical_bytes(on_disk.as_bytes()).as_str() == entry.implementation_digest,
+            "{}/{}: {file} does not hash to the bound digest",
+            entry.id,
+            entry.version
+        );
+    }
+}
+
+/// No edit escapes the digest, because it covers the whole file. Asserted rather
+/// than argued: perturbing any single byte position moves it.
+///
+/// This is the property a vector set can never have, and it is why the fix was
+/// to stop enumerating rather than to enumerate harder.
+#[test]
+fn any_edit_to_a_bound_implementation_moves_its_digest() {
+    for entry in REGISTRY {
+        let source = entry.implementation_source;
+        let bound = entry.implementation_digest;
+
+        // A byte appended, a byte removed, and a byte flipped at each of a
+        // spread of positions across the file.
+        let mut mutants = vec![
+            format!("{source} "),
+            source
+                .get(..source.len() - 1)
+                .expect("non-empty")
+                .to_owned(),
+        ];
+        for k in 1..8 {
+            let at = source.len() * k / 8;
+            let at = (0..=at)
+                .rev()
+                .find(|i| source.is_char_boundary(*i))
+                .unwrap_or(0);
+            let (head, tail) = source.split_at(at);
+            mutants.push(format!("{head}\u{20}{tail}"));
+        }
+
+        for mutant in mutants {
+            assert_ne!(
+                digest_of_canonical_bytes(mutant.as_bytes()).as_str(),
+                bound,
+                "{}/{}: an edited implementation hashes to the bound digest",
+                entry.id,
+                entry.version
+            );
+        }
+    }
+}
+
+/// Distinct entries are distinct implementations. Two versions sharing one file
+/// would make the digest bind neither of them.
+#[test]
+fn no_two_versions_share_an_implementation() {
+    for (i, a) in REGISTRY.iter().enumerate() {
+        for b in REGISTRY.iter().skip(i + 1) {
+            assert_ne!(
+                a.implementation_digest, b.implementation_digest,
+                "{}/{} and {}/{} are bound to the same implementation",
+                a.id, a.version, b.id, b.version
+            );
+        }
+    }
+}
+
+/// RED-2's escape, preserved as a permanent measurement rather than as a claim
+/// about a commit nobody will check out.
+///
+/// The mutant is defined here, in the test, and put through the *same*
+/// conformance statement as the real predicate. Both digests come out equal
+/// while the two functions disagree on an admissible input. That is the exact
+/// shape of the defect, and it stays true forever — which is the point: it is
+/// not a bug that got fixed, it is a limit of what a finite witness set can
+/// mean. What changed is that identity no longer rests on it.
+#[test]
+fn the_conformance_digest_is_still_blind_to_out_of_vector_changes() {
     let entry = resolve("review-by-expected-author-login", "1").expect("resolve");
+
+    // The real rule, plus a gate on a `state` value no frozen vector uses.
+    fn mutant(candidate: &Value, parameters: &Value) -> Result<bool, MatchError> {
+        if candidate.pointer("/state").and_then(Value::as_str) == Some("COMMENTED") {
+            return Ok(false);
+        }
+        let expected = parameters
+            .get("expectedAuthorLogin")
+            .and_then(Value::as_str)
+            .ok_or(MatchError::MalformedCandidate {
+                why: "expectedAuthorLogin is not a string",
+            })?;
+        if candidate.pointer("/sourceKind").and_then(Value::as_str)
+            != Some("github-submitted-review")
+        {
+            return Ok(false);
+        }
+        Ok(candidate.pointer("/user/login").and_then(Value::as_str) == Some(expected))
+    }
+
+    // The two disagree on an input the matcher is squarely for.
     let parameters = json!({ "expectedAuthorLogin": "expected-reviewer" });
     let commented = json!({
         "schemaVersion": 1,
@@ -62,50 +184,80 @@ fn red2_the_behaviour_of_version_1_has_changed_for_an_admissible_input() {
         "submittedAt": "2026-01-01T00:00:00Z",
         "commitId": "1111111111111111111111111111111111111111"
     });
+    assert!((entry.predicate)(&commented, &parameters).expect("real"));
+    assert!(!mutant(&commented, &parameters).expect("mutant"));
 
-    let got = (entry.predicate)(&commented, &parameters).expect("evaluate");
-    assert!(
-        !got,
-        "the RED-2 mutation is not present; this commit is only meaningful with it"
-    );
-    // In 0f98ac0 this input returned true. A submitted review by the expected
-    // author is exactly what this matcher is for, whatever verdict it carries —
-    // and §13's whole point is that the classifier, not the matcher, judges it.
-}
+    // And yet the conformance statement is byte-identical.
+    let statement = |f: o7_closure_matcher::MatcherFn| {
+        let results: Vec<Value> = entry
+            .vectors
+            .iter()
+            .map(|v| {
+                let p: Value = serde_json::from_str(v.parameters).expect("params");
+                let c: Value = serde_json::from_str(v.candidate).expect("candidate");
+                let got = f(&c, &p).expect("evaluate");
+                assert_eq!(got, v.expected, "vector {:?} disagrees", v.name);
+                json!({ "name": v.name, "parameters": p, "candidate": c, "result": got })
+            })
+            .collect();
+        digest(&json!({
+            "schemaVersion": 1,
+            "sourceKind": "closure-matcher-conformance",
+            "matcher": { "id": entry.id, "version": entry.version },
+            "parameterKeys": entry.parameter_keys,
+            "vectors": results,
+        }))
+        .expect("digest")
+    };
 
-/// And the binding does not notice. Same id, same version, same conformance
-/// digest, changed behaviour — green.
-#[test]
-fn red2_the_conformance_binding_stays_green_anyway() {
-    let entry = resolve("review-by-expected-author-login", "1").expect("resolve");
-    assert!(
-        verify_binding(entry).is_ok(),
-        "if this now fails, the mechanism was fixed and this RED-2 witness is spent"
-    );
-    assert_eq!(entry.version, "1", "no version bump was taken");
     assert_eq!(
+        statement(entry.predicate).as_str(),
+        statement(mutant).as_str(),
+        "the frozen vectors now separate these two; that is an improvement, and it \
+         makes this measurement stale rather than wrong — restate it with an input \
+         the vector set genuinely misses, because one always exists"
+    );
+    assert_eq!(
+        statement(entry.predicate).as_str(),
         entry.conformance_digest,
-        "sha256:7ea10c56ced0cc83ac3889750fd2a133584275d39f6f5fe809f744ebf74c5178",
-        "and the digest is byte-identical to the one 0f98ac0 froze"
+        "and it is the digest actually bound to version 1"
     );
 }
 
-/// Not one frozen vector is disturbed — which is the mechanism of the escape,
-/// not an incidental fact about it.
+/// The two checks fail separately, so a moved implementation and a moved result
+/// can never be mistaken for each other — or silenced by the same fix.
 #[test]
-fn red2_no_frozen_vector_covers_the_changed_input() {
+fn the_two_digests_fail_as_two_different_facts() {
     let entry = resolve("review-by-expected-author-login", "1").expect("resolve");
-    for vector in entry.vectors {
-        let candidate: serde_json::Value =
-            serde_json::from_str(vector.candidate).expect("vector is JSON");
-        assert_ne!(
-            candidate
-                .pointer("/state")
-                .and_then(serde_json::Value::as_str),
-            Some("COMMENTED"),
-            "vector {:?} covers the mutated input, so this witness would not \
-             discriminate — pick an input the frozen set genuinely misses",
-            vector.name
-        );
-    }
+
+    let wrong_implementation = o7_closure_matcher::MatcherEntry {
+        implementation_digest: "sha256:\
+            0000000000000000000000000000000000000000000000000000000000000000",
+        ..*entry
+    };
+    assert!(matches!(
+        verify_implementation(&wrong_implementation),
+        Err(MatchError::ImplementationDigestMismatch { .. })
+    ));
+    assert!(
+        matches!(
+            verify_binding(&wrong_implementation),
+            Err(MatchError::ImplementationDigestMismatch { .. })
+        ),
+        "verify_binding must refuse an unbound implementation BEFORE consulting \
+         its answers — those answers are answers from something else"
+    );
+    // Conformance is unaffected: the behaviour did not move, the binding did.
+    assert!(verify_conformance(&wrong_implementation).is_ok());
+
+    let wrong_conformance = o7_closure_matcher::MatcherEntry {
+        conformance_digest: "sha256:\
+            0000000000000000000000000000000000000000000000000000000000000000",
+        ..*entry
+    };
+    assert!(matches!(
+        verify_conformance(&wrong_conformance),
+        Err(MatchError::ConformanceDigestMismatch { .. })
+    ));
+    assert!(verify_implementation(&wrong_conformance).is_ok());
 }

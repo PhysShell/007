@@ -273,61 +273,75 @@ fn vectors_hold_under_a_perturbed_environment() {
     );
 }
 
-/// A source-text lint over the module that holds every predicate.
+/// A source-text lint over each predicate's own file.
 ///
-/// This is the check that costs nothing and catches the spelling of the problem
-/// rather than its behaviour. It is scoped to `matchers.rs` because that is the
-/// only file a new matcher is added to, and it is stated as a denylist of exact
-/// paths — so it is defeated by an alias, a macro, or a helper in another
-/// module. It is a tripwire on the obvious route, not a sandbox.
+/// It reads `implementation_source` — the exact bytes `implementation_digest`
+/// binds and `include_str!` compiles — so what is linted is what runs. Scoping
+/// it to the predicate files is why the registry may use `include_str!` while a
+/// predicate may not.
+///
+/// It is a denylist of exact spellings, so it is defeated by an alias or a macro.
+/// It is a tripwire on the obvious route, not a sandbox.
 #[test]
 fn no_predicate_reaches_for_ambient_state_by_name() {
-    let source = include_str!("../src/matchers.rs");
-    for forbidden in [
-        "std::env",
-        "env::var",
-        "std::fs",
-        "std::time",
-        "SystemTime",
-        "Instant",
-        "static mut",
-        "OnceLock",
-        "lazy_static",
-        "Cell",
-        "thread_local",
-        "Mutex",
-        "RwLock",
-        "AtomicUsize",
-        "AtomicU64",
-        "AtomicBool",
-        "thread_rng",
-        "random",
-        "std::process",
-        "std::net",
-        "include_str",
-        "include_bytes",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "matchers.rs mentions {forbidden:?}. A matcher reads its two arguments \
-             and nothing else (§13.1); if this is a false positive, the fix is to \
-             move the code out of this module, not to weaken this list"
+    for entry in REGISTRY {
+        let source = entry.implementation_source;
+        for forbidden in [
+            "std::env",
+            "env::var",
+            "std::fs",
+            "std::time",
+            "SystemTime",
+            "Instant",
+            "static mut",
+            "OnceLock",
+            "lazy_static",
+            "Cell",
+            "thread_local",
+            "Mutex",
+            "RwLock",
+            "Atomic",
+            "thread_rng",
+            "random",
+            "std::process",
+            "std::net",
+            "include_str",
+            "include_bytes",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{}/{}'s implementation mentions {forbidden:?}. A matcher reads its \
+                 two arguments and nothing else (§13.1); if this is a false positive, \
+                 the fix is a new matcher version, not a weaker list",
+                entry.id,
+                entry.version
+            );
+        }
+
+        // The file's whole import surface. Two imports, fixed: anything else is
+        // implementation this file's digest does not cover, which is the RED-2
+        // hole reopened one level down.
+        let imports: Vec<&str> = source
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("use "))
+            .collect();
+        assert_eq!(
+            imports,
+            vec!["use serde_json::Value;", "use crate::MatchError;"],
+            "{}/{} imports something new; ambient state arrives through imports, and \
+             a shared helper is implementation the digest does not bind",
+            entry.id,
+            entry.version
+        );
+
+        // Exactly one function, so the bound bytes define exactly one predicate.
+        assert_eq!(
+            source.matches("fn ").count(),
+            1,
+            "{}/{}'s file must define exactly one function",
+            entry.id,
+            entry.version
         );
     }
-
-    // The module's whole import surface, asserted so a new `use` line is a
-    // deliberate change to this test rather than an unnoticed one.
-    let imports: Vec<&str> = source
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with("use "))
-        .collect();
-    assert_eq!(
-        imports,
-        vec![
-            "use serde_json::Value;",
-            "use crate::{ConformanceVector, MatchError, MatcherEntry};",
-        ],
-        "matchers.rs imports something new; ambient state arrives through imports"
-    );
 }
