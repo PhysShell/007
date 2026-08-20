@@ -1,0 +1,106 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R4"
+  ],
+  "synthetic": true,
+  "sourceKind": "github-issue-comment",
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "5",
+    "5.4",
+    "6.3",
+    "7.1",
+    "7.3",
+    "9.4"
+  ],
+  "what": "the source bytes were obtained but the detector produced no result for any field, so nothing may be retained",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "an empty finding list here is identical to R1's. What separates 'inspected, nothing found' from 'never inspected' is the outcome, an empty assessedFields, and a coverageFailureCode. Because no field was successfully assessed, \u00a77.1 blocks all eight: an unassessed timestamp is unexamined, not obviously harmless.",
+  "andYetFindable": "retainedFields is empty and the record is still identified, because \u00a77.3 carries identity in the locator. /id stays in blockedFields \u2014 the locator does not smuggle it back as surviving evidence.",
+  "locator": {
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000004"
+  },
+  "gateOutcome": "CANNOT_ASSESS",
+  "decodedSource": {
+    "/id": 9100000004,
+    "/user/id": 9100000903,
+    "/user/login": "synthetic-reporter",
+    "/user/type": "User",
+    "/author_association": "NONE",
+    "/body": "The co-versioning check output is attached below.\n",
+    "/created_at": "2026-08-18T09:20:41Z",
+    "/updated_at": "2026-08-18T09:20:41Z"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/id",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
+  "assessment": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-assessment",
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [],
+    "coverageComplete": false,
+    "outcome": "CANNOT_ASSESS",
+    "observedAt": "2026-08-18T09:21:05Z",
+    "coverageFailureCode": "DETECTOR_FAILED"
+  },
+  "assessmentDigest": "sha256:64568fb2fbf90dca7a39086f26a5e26b8ddec851a8b13d425adf9218cdaa0ab0",
+  "retention": {
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
+  },
+  "reducedSourceRecord": {
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-reduced-source-record",
+      "locatorKind": "github-issue-comment",
+      "locator": {
+        "repository": "PhysShell/007",
+        "pullRequest": "9101",
+        "stableId": "9100000004"
+      },
+      "redactionPolicyVersion": 1,
+      "outcome": "CANNOT_ASSESS",
+      "coverageComplete": false,
+      "retainedFields": {},
+      "blockedFields": [
+        "/author_association",
+        "/body",
+        "/created_at",
+        "/id",
+        "/updated_at",
+        "/user/id",
+        "/user/login",
+        "/user/type"
+      ]
+    },
+    "canonicalDigest": "sha256:f52c2793f95bdae5063db90ab3cdc5fc1637440e4fee7e53d18bba214a9cd851"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-binding",
+    "recordDigest": "sha256:f52c2793f95bdae5063db90ab3cdc5fc1637440e4fee7e53d18bba214a9cd851",
+    "assessmentDigest": "sha256:64568fb2fbf90dca7a39086f26a5e26b8ddec851a8b13d425adf9218cdaa0ab0"
+  }
+}

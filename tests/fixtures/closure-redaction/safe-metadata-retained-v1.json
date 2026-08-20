@@ -1,0 +1,137 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R7"
+  ],
+  "synthetic": true,
+  "sourceKind": "github-submitted-review",
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "6.2",
+    "7.1",
+    "7.2",
+    "7.4",
+    "8",
+    "10"
+  ],
+  "what": "a blocked review body beside the fields that individually passed, and a derived fact that survives because it never read the body",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "R6 and R7 are the pair \u00a710 turns on. Same gate outcome, same blocked field, opposite admissibility \u2014 the line is not whether the source was retainable but whether THIS decision's every input still resolves.",
+  "contrastWith": "derived-fact-blocked-v1.json",
+  "locator": {
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000201"
+  },
+  "gateOutcome": "BLOCK_SECRET",
+  "decodedSource": {
+    "/id": 9100000201,
+    "/user/id": 9100000905,
+    "/user/login": "synthetic-external-auditor",
+    "/user/type": "User",
+    "/author_association": "NONE",
+    "/state": "COMMENTED",
+    "/body": "Approving. Deploy key for the mirror is\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\n",
+    "/submitted_at": "2026-08-18T10:02:55Z",
+    "/commit_id": "9d4c1f0b7a6e5c3d2b1a0f9e8d7c6b5a49382716"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/commit_id",
+    "/id",
+    "/state",
+    "/submitted_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
+  "assessment": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-assessment",
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [
+      "/author_association",
+      "/body",
+      "/commit_id",
+      "/id",
+      "/state",
+      "/submitted_at",
+      "/user/id",
+      "/user/login",
+      "/user/type"
+    ],
+    "coverageComplete": true,
+    "outcome": "BLOCK_SECRET",
+    "observedAt": "2026-08-18T10:03:20Z",
+    "findings": [
+      {
+        "field": "/body",
+        "findingId": "SYN-TOKEN-1"
+      }
+    ]
+  },
+  "assessmentDigest": "sha256:8167a2b0e551110598354cfd6f24d64c61d3e50012c7b8fe60ca5a971aedeef4",
+  "retention": {
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
+  },
+  "reducedSourceRecord": {
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-reduced-source-record",
+      "locatorKind": "github-submitted-review",
+      "locator": {
+        "repository": "PhysShell/007",
+        "pullRequest": "9101",
+        "stableId": "9100000201"
+      },
+      "redactionPolicyVersion": 1,
+      "outcome": "BLOCK_SECRET",
+      "coverageComplete": true,
+      "retainedFields": {
+        "/author_association": "NONE",
+        "/commit_id": "9d4c1f0b7a6e5c3d2b1a0f9e8d7c6b5a49382716",
+        "/id": "9100000201",
+        "/state": "COMMENTED",
+        "/submitted_at": "2026-08-18T10:02:55Z",
+        "/user/id": "9100000905",
+        "/user/login": "synthetic-external-auditor",
+        "/user/type": "User"
+      },
+      "blockedFields": [
+        "/body"
+      ]
+    },
+    "canonicalDigest": "sha256:b818aaac14f8fde90d881ac14517948f493038962e275fde0b30605c403c714d"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-binding",
+    "recordDigest": "sha256:b818aaac14f8fde90d881ac14517948f493038962e275fde0b30605c403c714d",
+    "assessmentDigest": "sha256:8167a2b0e551110598354cfd6f24d64c61d3e50012c7b8fe60ca5a971aedeef4"
+  },
+  "candidateDerivedFact": {
+    "name": "reviewCommitIdObserved",
+    "wouldBeDerivedFrom": [
+      "/commit_id"
+    ],
+    "everyInputFieldRetained": true,
+    "admissible": true,
+    "derivedFrom": [
+      "sha256:b818aaac14f8fde90d881ac14517948f493038962e275fde0b30605c403c714d"
+    ],
+    "note": "/commit_id was assessed, carries no finding, and survives \u00a77.1 into retainedFields."
+  }
+}

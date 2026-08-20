@@ -1,0 +1,127 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R6"
+  ],
+  "synthetic": true,
+  "sourceKind": "github-issue-comment",
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "6.2",
+    "7.1",
+    "8",
+    "10"
+  ],
+  "what": "a semantic fact whose only input was a blocked field, and therefore cannot be emitted",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "provenance V1 \u00a718 requires a derived fact to name the source snapshot digest it came from. /body resolves to no retained record here.",
+  "locator": {
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000006"
+  },
+  "gateOutcome": "BLOCK_SECRET",
+  "decodedSource": {
+    "/id": 9100000006,
+    "/user/id": 9100000904,
+    "/user/login": "synthetic-external-reviewer",
+    "/user/type": "User",
+    "/author_association": "NONE",
+    "/body": "I reproduced defect X on a scratch clone.\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\n",
+    "/created_at": "2026-08-18T09:44:02Z",
+    "/updated_at": "2026-08-18T09:44:02Z"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/id",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
+  "assessment": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-assessment",
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [
+      "/author_association",
+      "/body",
+      "/created_at",
+      "/id",
+      "/updated_at",
+      "/user/id",
+      "/user/login",
+      "/user/type"
+    ],
+    "coverageComplete": true,
+    "outcome": "BLOCK_SECRET",
+    "observedAt": "2026-08-18T09:44:30Z",
+    "findings": [
+      {
+        "field": "/body",
+        "findingId": "SYN-TOKEN-1"
+      }
+    ]
+  },
+  "assessmentDigest": "sha256:3ab74760032110dbd0474eba96381e06fab5a9ca2bf2c1f39d9379a0b5576a19",
+  "retention": {
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
+  },
+  "reducedSourceRecord": {
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-reduced-source-record",
+      "locatorKind": "github-issue-comment",
+      "locator": {
+        "repository": "PhysShell/007",
+        "pullRequest": "9101",
+        "stableId": "9100000006"
+      },
+      "redactionPolicyVersion": 1,
+      "outcome": "BLOCK_SECRET",
+      "coverageComplete": true,
+      "retainedFields": {
+        "/author_association": "NONE",
+        "/created_at": "2026-08-18T09:44:02Z",
+        "/id": "9100000006",
+        "/updated_at": "2026-08-18T09:44:02Z",
+        "/user/id": "9100000904",
+        "/user/login": "synthetic-external-reviewer",
+        "/user/type": "User"
+      },
+      "blockedFields": [
+        "/body"
+      ]
+    },
+    "canonicalDigest": "sha256:d50b220f3e9b43a605a0b99630b1bb3d16c7dd71741ee15f6f403a311bb805c6"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-binding",
+    "recordDigest": "sha256:d50b220f3e9b43a605a0b99630b1bb3d16c7dd71741ee15f6f403a311bb805c6",
+    "assessmentDigest": "sha256:3ab74760032110dbd0474eba96381e06fab5a9ca2bf2c1f39d9379a0b5576a19"
+  },
+  "candidateDerivedFact": {
+    "name": "reproductionClaimed",
+    "wouldBeDerivedFrom": [
+      "/body"
+    ],
+    "everyInputFieldRetained": false,
+    "admissible": false,
+    "note": "a claim to be resolved against retainedFields, not an authority."
+  }
+}

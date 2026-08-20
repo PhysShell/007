@@ -1,0 +1,118 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R11"
+  ],
+  "synthetic": true,
+  "sourceKind": "github-review-comment",
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "5.3",
+    "5.5",
+    "7.2"
+  ],
+  "what": "the same shape with /in_reply_to_id absent, so it is outside the required set and assessing it would be assessing nothing",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "absent means nothing to assess. A detector that claimed to have assessed /in_reply_to_id here would be reporting a result about a field that does not exist.",
+  "contrastWith": "present-only-field-present-v1.json",
+  "locator": {
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000402"
+  },
+  "gateOutcome": "RETAIN",
+  "decodedSource": {
+    "/id": 9100000402,
+    "/pull_request_review_id": 9100000301,
+    "/user/id": 9100000909,
+    "/user/login": "synthetic-line-reviewer",
+    "/user/type": "Bot",
+    "/author_association": "NONE",
+    "/body": "This branch is unreachable from the frozen tree.\n",
+    "/commit_id": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+    "/original_commit_id": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+    "/path": "docs/architecture/closure-redaction-policy-v1.md",
+    "/created_at": "2026-08-18T11:31:00Z",
+    "/updated_at": "2026-08-18T11:31:00Z",
+    "/line": 42,
+    "/side": "RIGHT"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/commit_id",
+    "/created_at",
+    "/id",
+    "/line",
+    "/original_commit_id",
+    "/path",
+    "/pull_request_review_id",
+    "/side",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
+  "assessment": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-assessment",
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [
+      "/author_association",
+      "/body",
+      "/commit_id",
+      "/created_at",
+      "/id",
+      "/line",
+      "/original_commit_id",
+      "/path",
+      "/pull_request_review_id",
+      "/side",
+      "/updated_at",
+      "/user/id",
+      "/user/login",
+      "/user/type"
+    ],
+    "coverageComplete": true,
+    "outcome": "RETAIN",
+    "observedAt": "2026-08-18T11:31:30Z"
+  },
+  "assessmentDigest": "sha256:1a47edec82760e715efba0451633a6005b898ea6320e8af41f93723ea54ee7bc",
+  "retention": {
+    "permitted": true,
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-review-comment",
+      "authorAssociation": "NONE",
+      "body": "This branch is unreachable from the frozen tree.\n",
+      "commitId": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+      "createdAt": "2026-08-18T11:31:00Z",
+      "stableId": "9100000402",
+      "line": 42,
+      "originalCommitId": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+      "path": "docs/architecture/closure-redaction-policy-v1.md",
+      "pullRequestReviewId": "9100000301",
+      "side": "RIGHT",
+      "updatedAt": "2026-08-18T11:31:00Z",
+      "user": {
+        "id": "9100000909",
+        "login": "synthetic-line-reviewer",
+        "type": "Bot"
+      }
+    },
+    "canonicalDigest": "sha256:4a33e68a2614e8de439ede3b01635014b491e1fff4b5c0146eeea67a4115f9b2"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-binding",
+    "recordDigest": "sha256:4a33e68a2614e8de439ede3b01635014b491e1fff4b5c0146eeea67a4115f9b2",
+    "assessmentDigest": "sha256:1a47edec82760e715efba0451633a6005b898ea6320e8af41f93723ea54ee7bc"
+  }
+}

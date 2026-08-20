@@ -1,0 +1,107 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R5"
+  ],
+  "synthetic": true,
+  "sourceKind": "github-issue-comment",
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "5",
+    "5.2",
+    "5.4",
+    "6.3",
+    "7.1"
+  ],
+  "what": "the detector completed over part of the required set only, so the object outcome is CANNOT_ASSESS while the one clean field survives",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "assessedFields covers /body alone. \u00a75.3 fixes the denominator, so the seven unassessed fields are blocked and /body \u2014 successfully assessed and clean \u2014 is retained. A partial assessment is not a partial pass at the object level, and not a total loss at the field level either.",
+  "locator": {
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000005"
+  },
+  "gateOutcome": "CANNOT_ASSESS",
+  "decodedSource": {
+    "/id": 9100000005,
+    "/user/id": 9100000907,
+    "/user/login": "synthetic-operator",
+    "/user/type": "User",
+    "/author_association": "CONTRIBUTOR",
+    "/body": "Reran the enumeration; page two never arrived.\n",
+    "/created_at": "2026-08-18T09:31:12Z",
+    "/updated_at": "2026-08-18T09:31:12Z"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/id",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
+  "assessment": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-assessment",
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [
+      "/body"
+    ],
+    "coverageComplete": false,
+    "outcome": "CANNOT_ASSESS",
+    "observedAt": "2026-08-18T09:31:40Z",
+    "coverageFailureCode": "INCOMPLETE_COVERAGE"
+  },
+  "assessmentDigest": "sha256:2e83098df4a18a5ff6edf1aec37c958db1313ede67cc9aa5e6d0c2333999e8df",
+  "retention": {
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
+  },
+  "reducedSourceRecord": {
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-reduced-source-record",
+      "locatorKind": "github-issue-comment",
+      "locator": {
+        "repository": "PhysShell/007",
+        "pullRequest": "9101",
+        "stableId": "9100000005"
+      },
+      "redactionPolicyVersion": 1,
+      "outcome": "CANNOT_ASSESS",
+      "coverageComplete": false,
+      "retainedFields": {
+        "/body": "Reran the enumeration; page two never arrived.\n"
+      },
+      "blockedFields": [
+        "/author_association",
+        "/created_at",
+        "/id",
+        "/updated_at",
+        "/user/id",
+        "/user/login",
+        "/user/type"
+      ]
+    },
+    "canonicalDigest": "sha256:1738063b094673a9e675ff56185f2c570f95a245060e671d48ca32f9d44c303c"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-binding",
+    "recordDigest": "sha256:1738063b094673a9e675ff56185f2c570f95a245060e671d48ca32f9d44c303c",
+    "assessmentDigest": "sha256:2e83098df4a18a5ff6edf1aec37c958db1313ede67cc9aa5e6d0c2333999e8df"
+  }
+}

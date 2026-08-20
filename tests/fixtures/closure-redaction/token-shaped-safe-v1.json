@@ -1,0 +1,92 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R8"
+  ],
+  "synthetic": true,
+  "sourceKind": "github-issue-comment",
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "5",
+    "9.1"
+  ],
+  "what": "content a human or a naive regex would call credential-shaped, which the declared detector policy does not block",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "the fixture stores the detector's bounded result and its provenance, not a second opinion. A checker quietly running its own secret heuristic fails here.",
+  "locator": {
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000008"
+  },
+  "gateOutcome": "RETAIN",
+  "decodedSource": {
+    "/id": 9100000008,
+    "/user/id": 9100000906,
+    "/user/login": "synthetic-ci-bot",
+    "/user/type": "User",
+    "/author_association": "CONTRIBUTOR",
+    "/body": "Build id for the failing run:\n4f1c9a20e7b3d85c6a0f2e19d4b7c3a58e6f0d2b9c1a4e7f3b5d8c0a2e6f1b4d\nNo credential involved.\n",
+    "/created_at": "2026-08-18T10:15:00Z",
+    "/updated_at": "2026-08-18T10:15:00Z"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/id",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
+  "assessment": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-assessment",
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [
+      "/author_association",
+      "/body",
+      "/created_at",
+      "/id",
+      "/updated_at",
+      "/user/id",
+      "/user/login",
+      "/user/type"
+    ],
+    "coverageComplete": true,
+    "outcome": "RETAIN",
+    "observedAt": "2026-08-18T10:15:30Z"
+  },
+  "assessmentDigest": "sha256:bd3b43560dc811de5c971f7b1091b126e2a800f700c6ae17b9b95cdd461c91f1",
+  "retention": {
+    "permitted": true,
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-issue-comment",
+      "authorAssociation": "CONTRIBUTOR",
+      "body": "Build id for the failing run:\n4f1c9a20e7b3d85c6a0f2e19d4b7c3a58e6f0d2b9c1a4e7f3b5d8c0a2e6f1b4d\nNo credential involved.\n",
+      "createdAt": "2026-08-18T10:15:00Z",
+      "stableId": "9100000008",
+      "updatedAt": "2026-08-18T10:15:00Z",
+      "user": {
+        "id": "9100000906",
+        "login": "synthetic-ci-bot",
+        "type": "User"
+      }
+    },
+    "canonicalDigest": "sha256:dacc2edc1c78da8a3073488b2c629c2f88a525df47279bc0d2aac910ef742707"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-binding",
+    "recordDigest": "sha256:dacc2edc1c78da8a3073488b2c629c2f88a525df47279bc0d2aac910ef742707",
+    "assessmentDigest": "sha256:bd3b43560dc811de5c971f7b1091b126e2a800f700c6ae17b9b95cdd461c91f1"
+  }
+}

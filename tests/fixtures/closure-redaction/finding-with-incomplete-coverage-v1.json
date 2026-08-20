@@ -1,0 +1,113 @@
+{
+  "specimenSet": "closure-redaction-v1",
+  "specimens": [
+    "R9"
+  ],
+  "synthetic": true,
+  "sourceKind": "github-issue-comment",
+  "contract": "docs/architecture/closure-redaction-policy-v1.md",
+  "dependsOn": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "5.1",
+    "5.4",
+    "7.1"
+  ],
+  "what": "a blocking finding AND an assessment that never finished \u2014 the overlap \u00a75.1 exists to resolve",
+  "decodedSourceNote": "decodedSource is the exact synthetic input the detector saw, keyed by the JSON pointers of \u00a75.3. It is a fixture-visible input, not retained evidence. A consumer derives every retained value from it per \u00a77.2 and compares; where a pointer did not survive \u00a77.1 its value appears in no canonical object.",
+  "why": "both descriptions apply at once: a secret was found in /body, and the detector died before reaching the remaining fields. \u00a75.1 gives the finding precedence, so the outcome is BLOCK_SECRET with coverageComplete false. Without this specimen the corpus could not tell the frozen precedence from its inverse \u2014 every other BLOCK_SECRET case here has complete coverage.",
+  "andTheReasonSurvives": "coverageFailureCode is required whenever coverage is incomplete, whatever the outcome, so this record says why the assessment was partial rather than only that it was.",
+  "locator": {
+    "repository": "PhysShell/007",
+    "pullRequest": "9101",
+    "stableId": "9100000009"
+  },
+  "gateOutcome": "BLOCK_SECRET",
+  "decodedSource": {
+    "/id": 9100000009,
+    "/user/id": 9100000908,
+    "/user/login": "synthetic-deployer",
+    "/user/type": "User",
+    "/author_association": "CONTRIBUTOR",
+    "/body": "Deploy notes.\nSYNTHETIC_FAKE_TOKEN_AAAA0000BBBB1111CCCC2222\nrest of the run log follows.\n",
+    "/created_at": "2026-08-18T11:02:11Z",
+    "/updated_at": "2026-08-18T11:02:11Z"
+  },
+  "requiredFields": [
+    "/author_association",
+    "/body",
+    "/created_at",
+    "/id",
+    "/updated_at",
+    "/user/id",
+    "/user/login",
+    "/user/type"
+  ],
+  "assessment": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-assessment",
+    "redactionPolicyVersion": 1,
+    "detector": {
+      "id": "synthetic-fixture-detector",
+      "version": "1",
+      "configDigest": "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d"
+    },
+    "representation": "decoded-source-field-values",
+    "assessedFields": [
+      "/body",
+      "/id"
+    ],
+    "coverageComplete": false,
+    "outcome": "BLOCK_SECRET",
+    "observedAt": "2026-08-18T11:02:40Z",
+    "findings": [
+      {
+        "field": "/body",
+        "findingId": "SYN-TOKEN-1"
+      }
+    ],
+    "coverageFailureCode": "DETECTOR_FAILED"
+  },
+  "assessmentDigest": "sha256:66520efb54079a0b51f2fd05f7261cba2568f0ab8cb70276c97454b796a25c6f",
+  "retention": {
+    "permitted": false,
+    "forbidden": [
+      "normal source snapshot of any provenance-V1 sourceKind",
+      "digest of the original bytes with the bytes discarded",
+      "any masked form of a blocked field, and any digest over it"
+    ]
+  },
+  "reducedSourceRecord": {
+    "canonical": {
+      "schemaVersion": 1,
+      "sourceKind": "github-reduced-source-record",
+      "locatorKind": "github-issue-comment",
+      "locator": {
+        "repository": "PhysShell/007",
+        "pullRequest": "9101",
+        "stableId": "9100000009"
+      },
+      "redactionPolicyVersion": 1,
+      "outcome": "BLOCK_SECRET",
+      "coverageComplete": false,
+      "retainedFields": {
+        "/id": "9100000009"
+      },
+      "blockedFields": [
+        "/author_association",
+        "/body",
+        "/created_at",
+        "/updated_at",
+        "/user/id",
+        "/user/login",
+        "/user/type"
+      ]
+    },
+    "canonicalDigest": "sha256:d2795e3d62532cff07de77c9a34a4e4789d45e714cb09c9cde07b4d03c6036fd"
+  },
+  "retentionBinding": {
+    "schemaVersion": 1,
+    "sourceKind": "closure-retention-binding",
+    "recordDigest": "sha256:d2795e3d62532cff07de77c9a34a4e4789d45e714cb09c9cde07b4d03c6036fd",
+    "assessmentDigest": "sha256:66520efb54079a0b51f2fd05f7261cba2568f0ab8cb70276c97454b796a25c6f"
+  }
+}
