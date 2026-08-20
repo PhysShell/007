@@ -538,8 +538,25 @@ the digest stops identifying content.
 - `assessedFields` means **successfully assessed**: the detector produced a
   result for that field. A field it started and abandoned is not assessed, and
   listing it would convert a crash into coverage.
-- `findings` carry `field` and `findingId`, and every field they name must appear
-  in `blockedFields` per §7.1.
+- `findings` carry `field` and `findingId`. Every field a finding names MUST be
+  in the §5.3 required set **and** in `assessedFields`, and it then appears in
+  `blockedFields` per §7.1.
+
+  The first two are not pedantry about well-formedness. A detector can only find
+  something in a field it actually looked at, so a finding naming an unassessed
+  or non-required pointer is malformed output — and accepting it is a way to
+  block nothing while reporting `BLOCK_SECRET`:
+
+```text
+finding.field = /made-up-field    not in the required set, so blocked nothing
+/body          assessed, unflagged, therefore RETAINED
+outcome        BLOCK_SECRET, because findings is non-empty
+```
+
+  Every other rule still holds in that record: the partition is exhaustive, the
+  locator matches, coverage is honest, the rule id is configured. The secret is
+  retained anyway. A checker must not scan bodies — that is §9.1's boundary — but
+  it must reject a finding that could not have been produced.
 - **`findingId` is a rule identifier from the bound detector configuration** —
   one of the rule ids covered by `detector.configDigest`. It is not an arbitrary
   opaque string. That is what makes it a closed value in the sense of §9.4: its
@@ -1004,3 +1021,27 @@ identifier, `decoded-source-field-values` — the gate assesses **extracted exac
 field values**, not a document. Real pointer resolution over a live response is
 the acquisition adapter's obligation, and this slice deliberately has no adapter.
 Recorded here so the wording is not mistaken for "the decoded source object".
+
+## 18. Correction round 5
+
+Three findings from a fourth independent review. Narrow: no conceptual change,
+and two of the three are the contract failing to be held rather than failing to
+be stated.
+
+1. **`finding.field` was unbound to what was assessed.** §9 now requires it to be
+   in the required set and in `assessedFields`. Without that, a finding naming a
+   pointer that does not exist blocks nothing while making the record read
+   `BLOCK_SECRET`, and the genuinely dangerous field — assessed, unflagged —
+   becomes retainable. Every other rule survives that record intact, which is
+   what makes it worth stating rather than assuming.
+2. **The reduced record's root schema was closed in prose and not mechanically.**
+   §9.5 already listed it; nothing checked it, so an unknown root property could
+   carry a blocked value into a durable canonical object without touching
+   `retainedFields`. The contract text is unchanged; the checker is where this is
+   fixed.
+3. **The specimens' synthetic detector configuration drifted from its
+   description.** A second rule was added in round 4 and the fixture README still
+   described one, with the old digest. Repaired there, and the checker now binds
+   the admissible rule ids to `detector.configDigest` rather than keeping a
+   global list — so a record cannot claim one configuration and use another's
+   rules. The production form of that binding stays OWED in §11.
