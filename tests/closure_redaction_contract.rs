@@ -221,6 +221,8 @@ const ASSESSMENT_CONDITIONAL: &[&str] = &["findings", "coverageFailureCode"];
 /// Keyed by digest so a record cannot claim one configuration and use another's
 /// rules. The production form of this binding is OWED — contract §11 — but a
 /// global list would not even hold the synthetic case.
+const SYNTHETIC_DETECTOR_ID: &str = "synthetic-fixture-detector";
+const SYNTHETIC_DETECTOR_VERSION: &str = "1";
 const SYNTHETIC_CONFIG_DIGEST: &str =
     "sha256:191198e7a0b1017c1bba28dda161fc26973e7810333a323beeba8a7df12b9d7d";
 const CONFIGURED_RULES: &[(&str, &[&str])] =
@@ -644,6 +646,28 @@ fn every_assessment_carries_detector_provenance() {
                 ),
                 "{l}: detector.configDigest is not a well-formed digest"
             );
+
+            // The whole preregistered corpus is authored against ONE synthetic
+            // detector, so the exact triple is part of the fixture device. Two
+            // facts asserted separately — "the README names this digest" and
+            // "an assessment carries some well-formed digest" — is not the same
+            // as the relation between them, and only the relation is load
+            // bearing. An assessment with no findings never reaches the
+            // rules_for() lookup, so without this it could name any digest at
+            // all. (This binds the corpus, not production: §11's detector
+            // implementation binding stays OWED.)
+            for (field, want) in [
+                ("id", SYNTHETIC_DETECTOR_ID),
+                ("version", SYNTHETIC_DETECTOR_VERSION),
+                ("configDigest", SYNTHETIC_CONFIG_DIGEST),
+            ] {
+                assert_eq!(
+                    a.pointer(&format!("/detector/{field}"))
+                        .and_then(Value::as_str),
+                    Some(want),
+                    "{l}: detector.{field} is not the corpus's preregistered detector"
+                );
+            }
             assert_eq!(
                 str_at(a, "representation"),
                 "decoded-source-field-values",
