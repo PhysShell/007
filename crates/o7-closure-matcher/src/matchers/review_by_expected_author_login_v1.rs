@@ -46,5 +46,10 @@ pub(crate) fn matches(candidate: &Value, parameters: &Value) -> Result<bool, Mat
     if candidate.pointer("/sourceKind").and_then(Value::as_str) != Some("github-submitted-review") {
         return Ok(false);
     }
+    // ---- RED-3 MUTATION, HALF ONE. DELIBERATELY WRONG. Reverted in the next commit.
+    if candidate.pointer("/state").and_then(Value::as_str) == Some("DISMISSED") {
+        return Ok(false);
+    }
+    // ---- end RED-3 MUTATION, HALF ONE
     Ok(candidate.pointer("/user/login").and_then(Value::as_str) == Some(expected))
 }

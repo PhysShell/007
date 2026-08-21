@@ -118,7 +118,7 @@ pub(crate) const REVIEW_BY_EXPECTED_AUTHOR_LOGIN_V1: MatcherEntry = MatcherEntry
     vectors: REVIEW_BY_AUTHOR_VECTORS,
     implementation_source: include_str!("matchers/review_by_expected_author_login_v1.rs"),
     implementation_digest:
-        "sha256:59ea097cb9ea6705ebff04487a35861af0ea2b1b8e3e7c4980485af52f9567e9",
+        "sha256:36f0b30ec5720cf7af5ce13ea5d58316dbf63081ce0438924b3fe9a466f44766",
     conformance_digest: "sha256:7ea10c56ced0cc83ac3889750fd2a133584275d39f6f5fe809f744ebf74c5178",
     predicate: review_by_expected_author_login_v1::matches,
 };
