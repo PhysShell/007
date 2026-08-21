@@ -37,6 +37,11 @@
 //! longer called an identity. Neither digest subsumes the other and neither is
 //! sufficient alone.
 
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4 and the
+// precedent in `crates/o7-closure-classifier/tests/frozen_fixtures.rs`: every
+// panic path below is this test's own assertion failing, or its own parsing of a
+// conformance vector that is a `&'static str` literal in this workspace. Nothing
+// here runs against production input.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::{digest, digest_of_canonical_bytes};

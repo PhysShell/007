@@ -48,6 +48,13 @@
 //!   emitted. Within the tree the mechanism catches drift, which is the failure
 //!   that actually happens; it does not catch an author who means it.
 
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4 and the
+// precedent in `crates/o7-closure-classifier/tests/frozen_fixtures.rs`: every
+// panic path below is this test's own assertion failing, or its own reading of
+// specimen I, which is checked into this repository. A specimen that will not
+// parse, or that has lost the `implementationDigest` this file exists to check,
+// is a corpus defect that must fail loudly — silently skipping it would turn this
+// test into the vacuous green it was written to prevent.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_matcher::{

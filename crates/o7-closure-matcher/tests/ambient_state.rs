@@ -38,6 +38,11 @@
 //! the cheap and likely violations fail loudly; they do not make the expensive
 //! ones impossible.
 
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4 and the
+// precedent in `crates/o7-closure-classifier/tests/frozen_fixtures.rs`: every
+// panic path below is this test's own assertion failing, or its own construction
+// of a candidate from a literal it wrote in the same function. Nothing here runs
+// against production input.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_matcher::{

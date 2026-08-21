@@ -18,6 +18,12 @@
 //! vectors that discriminate, because the corpus's own claim about what it
 //! validates is exactly the kind of statement this project does not take on trust.
 
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4 and the
+// precedent in `tests/github_fixture_integrity.rs`: every panic path below is
+// this test's own assertion failing, or its own reading and parsing of fixture
+// files that ship in this repository and are checked into it. Nothing here runs
+// against production input, and a malformed fixture is a defect this test exists
+// to report loudly rather than a condition it should recover from.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::{canonicalize, digest, Digest};

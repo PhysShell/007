@@ -15,6 +15,10 @@
 //! recording what it did. An expectation generated from the code under test
 //! proves the code is self-consistent and nothing else.
 
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4 and the
+// precedent in `tests/github_fixture_integrity.rs`: every panic path below is
+// this test's own assertion failing, or a `char::from_u32` on a literal code
+// point that is valid by inspection. Nothing here runs against production input.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::{canonicalize, digest, CanonicalError};

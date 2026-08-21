@@ -23,6 +23,12 @@
 //! is evidence that the binding executes the rule the contract froze; it is not
 //! evidence that anything in the specimens ever happened.
 
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4 and the
+// precedent in `crates/o7-closure-classifier/tests/frozen_fixtures.rs`: every
+// panic path below is this test's own assertion failing, or its own reading of a
+// frozen specimen checked into this repository. A specimen that will not parse,
+// or that lists a digest with no retained candidate, is a corpus defect this test
+// exists to report rather than to tolerate.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::fs;
