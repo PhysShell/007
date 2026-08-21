@@ -4,7 +4,8 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{
-    recompute_matched, resolve, verify_binding, verify_matched, Candidate, MatchError, REGISTRY,
+    recompute_matched, resolve, verify_binding, verify_matched, Candidate, MatchError,
+    RecordedImplementation, RecordedMatcher, REGISTRY,
 };
 use serde_json::{json, Value};
 
@@ -70,7 +71,11 @@ fn resolution_fails_closed() {
 fn parameters_must_be_exactly_what_the_matcher_reads() {
     let candidates: Vec<Candidate> = Vec::new();
     let ok = json!({"expectedAuthorLogin": "a"});
-    assert!(recompute_matched("review-by-expected-author-login", "1", &ok, &candidates).is_ok());
+    assert!(recompute_matched(
+        &named("review-by-expected-author-login", "1", &ok),
+        &candidates
+    )
+    .is_ok());
 
     for bad in [
         json!({}),
@@ -79,7 +84,10 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
     ] {
         assert!(
             matches!(
-                recompute_matched("review-by-expected-author-login", "1", &bad, &candidates),
+                recompute_matched(
+                    &named("review-by-expected-author-login", "1", &bad),
+                    &candidates
+                ),
                 Err(MatchError::ParameterMismatch { .. })
             ),
             "{bad} should be refused"
@@ -87,13 +95,30 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
     }
     assert!(matches!(
         recompute_matched(
-            "review-by-expected-author-login",
-            "1",
-            &json!("nope"),
+            &named("review-by-expected-author-login", "1", &json!("nope")),
             &candidates
         ),
         Err(MatchError::MalformedCandidate { .. })
     ));
+}
+
+/// A recorded matcher block that agrees with this tree by construction.
+///
+/// These tests are about selection — order, duplicates, parameters, surface —
+/// not about implementation drift, so the recorded digest is taken from the
+/// resolved entry. That makes it useless as a drift check, which is exactly why
+/// the drift checks live in `recorded_implementation.rs` and read their expected
+/// digest out of a frozen fixture instead of out of the registry.
+fn named(id: &str, version: &str, parameters: &Value) -> RecordedMatcher {
+    RecordedMatcher {
+        id: id.to_owned(),
+        version: version.to_owned(),
+        parameters: parameters.clone(),
+        implementation: match resolve(id, version) {
+            Ok(entry) => RecordedImplementation::Bound(entry.implementation_digest.to_owned()),
+            Err(_) => RecordedImplementation::Unrecorded,
+        },
+    }
 }
 
 fn review(stable_id: &str, login: &str) -> Value {
@@ -123,41 +148,35 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
     let params = json!({"expectedAuthorLogin": "wanted"});
 
     let matched = recompute_matched(
-        "review-by-expected-author-login",
-        "1",
-        &params,
+        &named("review-by-expected-author-login", "1", &params),
         &[a.clone(), b.clone(), c.clone()],
     )
     .expect("recompute");
     assert_eq!(
-        matched,
+        matched.matched,
         vec![a.declared_digest.clone(), c.declared_digest.clone()]
     );
 
     // Reversing the candidates reverses the matched order: the selection carries
     // observation order rather than imposing one of its own.
     let reversed = recompute_matched(
-        "review-by-expected-author-login",
-        "1",
-        &params,
+        &named("review-by-expected-author-login", "1", &params),
         &[c.clone(), b, a.clone()],
     )
     .expect("recompute");
     assert_eq!(
-        reversed,
+        reversed.matched,
         vec![c.declared_digest.clone(), a.declared_digest.clone()]
     );
 
     // A duplicate in the candidate sequence appears twice in the matched one.
     let twice = recompute_matched(
-        "review-by-expected-author-login",
-        "1",
-        &params,
+        &named("review-by-expected-author-login", "1", &params),
         &[a.clone(), a.clone()],
     )
     .expect("recompute");
     assert_eq!(
-        twice.len(),
+        twice.matched.len(),
         2,
         "§13.2 retains duplicates rather than collapsing them"
     );
@@ -169,13 +188,15 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
 #[test]
 fn an_empty_candidate_sequence_yields_an_empty_match() {
     let matched = recompute_matched(
-        "review-by-expected-author-login",
-        "1",
-        &json!({"expectedAuthorLogin": "wanted"}),
+        &named(
+            "review-by-expected-author-login",
+            "1",
+            &json!({"expectedAuthorLogin": "wanted"}),
+        ),
         &[],
     )
     .expect("recompute");
-    assert!(matched.is_empty());
+    assert!(matched.matched.is_empty());
 }
 
 /// The candidate binding is derived. A snapshot that does not hash to the digest
@@ -187,9 +208,11 @@ fn a_candidate_whose_digest_does_not_hold_is_refused() {
     tampered.snapshot = review("1", "somebody-else");
     assert!(matches!(
         recompute_matched(
-            "review-by-expected-author-login",
-            "1",
-            &json!({"expectedAuthorLogin": "wanted"}),
+            &named(
+                "review-by-expected-author-login",
+                "1",
+                &json!({"expectedAuthorLogin": "wanted"}),
+            ),
             &[tampered],
         ),
         Err(MatchError::CandidateDigestMismatch { .. })
@@ -208,14 +231,16 @@ fn an_issue_comment_by_the_expected_author_is_not_review_evidence() {
         "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
     }));
     let matched = recompute_matched(
-        "review-by-expected-author-login",
-        "1",
-        &json!({"expectedAuthorLogin": "wanted"}),
+        &named(
+            "review-by-expected-author-login",
+            "1",
+            &json!({"expectedAuthorLogin": "wanted"}),
+        ),
         &[comment],
     )
     .expect("recompute");
     assert!(
-        matched.is_empty(),
+        matched.matched.is_empty(),
         "a positive verdict in a comment is not weak review evidence, it is not \
          review evidence — classification follows the API object shape"
     );
@@ -228,27 +253,34 @@ fn verify_matched_compares_against_the_claim() {
     let params = json!({"expectedAuthorLogin": "wanted"});
     let cands = [a.clone(), b.clone()];
 
-    assert!(verify_matched(
-        "review-by-expected-author-login",
-        "1",
-        &params,
-        &cands,
-        std::slice::from_ref(&a.declared_digest)
-    )
-    .expect("verify"));
+    assert!(
+        verify_matched(
+            &named("review-by-expected-author-login", "1", &params),
+            &cands,
+            std::slice::from_ref(&a.declared_digest)
+        )
+        .expect("verify")
+        .reproduced
+    );
     // A claim that the non-matching candidate qualified.
-    assert!(!verify_matched(
-        "review-by-expected-author-login",
-        "1",
-        &params,
-        &cands,
-        std::slice::from_ref(&b.declared_digest)
-    )
-    .expect("verify"));
+    assert!(
+        !verify_matched(
+            &named("review-by-expected-author-login", "1", &params),
+            &cands,
+            std::slice::from_ref(&b.declared_digest)
+        )
+        .expect("verify")
+        .reproduced
+    );
     // A claim of an empty match where one candidate qualifies — the exact shape
     // §13 exists to make detectable.
     assert!(
-        !verify_matched("review-by-expected-author-login", "1", &params, &cands, &[])
-            .expect("verify")
+        !verify_matched(
+            &named("review-by-expected-author-login", "1", &params),
+            &cands,
+            &[]
+        )
+        .expect("verify")
+        .reproduced
     );
 }

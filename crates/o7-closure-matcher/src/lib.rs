@@ -144,6 +144,25 @@ pub enum MatchError {
     },
     /// A candidate's declared digest is not the digest of the snapshot beside it.
     CandidateDigestMismatch { declared: String, computed: String },
+    /// A durable artifact recorded one implementation digest for this
+    /// `(id, version)` and the registry now resolves it to another.
+    ///
+    /// This is the half of the binding that this source tree cannot rewrite.
+    /// [`Self::ImplementationDigestMismatch`] compares two fields that a single
+    /// commit can edit together; this compares the running code against a record
+    /// written by a different act, at a different time, whose own digest is
+    /// covered by whatever retained it. An attestation already emitted is beyond
+    /// reach entirely.
+    RecordedImplementationDrift {
+        id: String,
+        version: String,
+        recorded: String,
+        resolved: String,
+    },
+    /// A query snapshot's matcher block does not match its `schemaVersion`.
+    /// Version 1 has no `implementationDigest`; version 2 requires one. The two
+    /// shapes are closed, so neither may borrow a field from the other.
+    MalformedRecordedMatcher { why: &'static str },
     /// A candidate snapshot cannot be canonicalized at all.
     Canonical { message: String },
     /// The candidate is not shaped like a canonical source snapshot.
@@ -170,6 +189,22 @@ impl std::fmt::Display for MatchError {
                  {expected}. §13.1 requires a new version for any behaviour change, so \
                  the fix is a new version entry, never a new digest on this one"
             ),
+            Self::RecordedImplementationDrift {
+                id,
+                version,
+                recorded,
+                resolved,
+            } => write!(
+                f,
+                "a durable artifact recorded matcher {id:?} version {version:?} as \
+                 {recorded}, and this tree resolves that pair to {resolved}. The record \
+                 is not editable from here, so the disagreement is real: either the \
+                 artifact was produced by different code under the same version, or \
+                 this version's implementation changed without taking a new one"
+            ),
+            Self::MalformedRecordedMatcher { why } => {
+                write!(f, "the recorded matcher block is malformed: {why}")
+            }
             Self::ConformanceDigestMismatch {
                 id,
                 version,
@@ -328,6 +363,139 @@ pub fn verify_conformance(entry: &MatcherEntry) -> Result<Digest, MatchError> {
     Ok(computed)
 }
 
+/// What a durable artifact recorded about the implementation that produced it.
+///
+/// The distinction this type exists to keep is between *no drift* and *no
+/// check*. A snapshot written before `implementationDigest` existed cannot
+/// witness anything about the code that ran; collapsing that into "fine" is how
+/// an unchecked axis starts reading as a passed one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordedImplementation {
+    /// Query-snapshot `schemaVersion` 2: the artifact names the implementation.
+    Bound(String),
+    /// Query-snapshot `schemaVersion` 1: the field did not exist when this was
+    /// written. Replay CANNOT check implementation identity, and says so.
+    Unrecorded,
+}
+
+/// The outcome of comparing the running implementation against the recorded one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use = "an unread implementation check is an unchecked axis reported as a passed one"]
+pub enum ImplementationCheck {
+    /// The artifact's digest is the resolved implementation's.
+    Bound { digest: String },
+    /// The artifact predates the field. Nothing about the implementation was
+    /// established — not that it drifted, and not that it did not.
+    CannotCheck,
+}
+
+/// A matcher block as some durable artifact recorded it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedMatcher {
+    pub id: String,
+    pub version: String,
+    pub parameters: Value,
+    pub implementation: RecordedImplementation,
+}
+
+impl RecordedMatcher {
+    /// Read the matcher block out of a canonical `github-query-snapshot`.
+    ///
+    /// `schemaVersion` 1 yields [`RecordedImplementation::Unrecorded`];
+    /// `schemaVersion` 2 REQUIRES `implementationDigest`. A version-2 snapshot
+    /// missing the field and a version-1 snapshot carrying it are both refused:
+    /// §8 schemas are closed key sets, and a shape that can borrow a field from
+    /// its neighbour is not closed.
+    pub fn from_query_snapshot(snapshot: &Value) -> Result<Self, MatchError> {
+        let schema_version = snapshot
+            .get("schemaVersion")
+            .and_then(Value::as_u64)
+            .ok_or(MatchError::MalformedRecordedMatcher {
+                why: "schemaVersion is not an integer",
+            })?;
+        let matcher = snapshot
+            .get("matcher")
+            .ok_or(MatchError::MalformedRecordedMatcher {
+                why: "no matcher block",
+            })?;
+        let string = |key: &'static str| -> Result<String, MatchError> {
+            matcher
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or(MatchError::MalformedRecordedMatcher {
+                    why: "matcher.id or matcher.version is not a string",
+                })
+        };
+        let declared = matcher.get("implementationDigest");
+        let implementation = match (schema_version, declared) {
+            (1, None) => RecordedImplementation::Unrecorded,
+            (2, Some(Value::String(digest))) => RecordedImplementation::Bound(digest.clone()),
+            (1, Some(_)) => {
+                return Err(MatchError::MalformedRecordedMatcher {
+                    why: "a version-1 query snapshot carries implementationDigest, which \
+                          version 1 does not define",
+                })
+            }
+            (2, _) => {
+                return Err(MatchError::MalformedRecordedMatcher {
+                    why: "a version-2 query snapshot has no implementationDigest string, \
+                          which version 2 requires",
+                })
+            }
+            _ => {
+                return Err(MatchError::MalformedRecordedMatcher {
+                    why: "unknown query-snapshot schemaVersion",
+                })
+            }
+        };
+        Ok(Self {
+            id: string("id")?,
+            version: string("version")?,
+            parameters: matcher.get("parameters").cloned().ok_or(
+                MatchError::MalformedRecordedMatcher {
+                    why: "no matcher.parameters",
+                },
+            )?,
+            implementation,
+        })
+    }
+}
+
+/// Compare the implementation the registry resolves against the one an artifact
+/// recorded.
+pub fn check_recorded_implementation(
+    entry: &MatcherEntry,
+    recorded: &RecordedImplementation,
+) -> Result<ImplementationCheck, MatchError> {
+    let resolved = verify_implementation(entry)?;
+    match recorded {
+        RecordedImplementation::Unrecorded => Ok(ImplementationCheck::CannotCheck),
+        RecordedImplementation::Bound(digest) => {
+            if digest == resolved.as_str() {
+                Ok(ImplementationCheck::Bound {
+                    digest: digest.clone(),
+                })
+            } else {
+                Err(MatchError::RecordedImplementationDrift {
+                    id: entry.id.to_owned(),
+                    version: entry.version.to_owned(),
+                    recorded: digest.clone(),
+                    resolved: resolved.as_str().to_owned(),
+                })
+            }
+        }
+    }
+}
+
+/// A replay of a recorded selection: what the matcher produces now, and whether
+/// the code that produced it is the code the artifact named.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replay {
+    pub matched: Vec<String>,
+    pub implementation: ImplementationCheck,
+}
+
 /// One retained candidate: the digest a query snapshot listed, and the snapshot
 /// the evidence bundle resolved it to.
 #[derive(Debug, Clone)]
@@ -338,22 +506,28 @@ pub struct Candidate {
 
 /// §13.1's conformance obligation, executed.
 ///
-/// Given the identity pair, the parameters and the candidates in
-/// `allReturnedSnapshotDigests` order, produce the matched subsequence — same
-/// members, same relative order, duplicates preserved, per §13.2.
+/// Given a matcher block as some durable artifact recorded it, and the
+/// candidates in `allReturnedSnapshotDigests` order, produce the matched
+/// subsequence — same members, same relative order, duplicates preserved, per
+/// §13.2 — together with the verdict on whether the implementation that just ran
+/// is the one that artifact named.
+///
+/// The recorded matcher is taken whole rather than as loose id/version/parameter
+/// arguments, because a caller who can supply the identity pair without the
+/// recorded implementation is a caller who can skip the drift check. There is no
+/// lower-level entry point that omits it.
 ///
 /// Every candidate's digest is recomputed from its own snapshot first. A
 /// selection re-run over a producer-declared digest-to-snapshot map would
 /// reproduce the producer's opinion of what the candidates were.
 pub fn recompute_matched(
-    id: &str,
-    version: &str,
-    parameters: &Value,
+    recorded: &RecordedMatcher,
     candidates: &[Candidate],
-) -> Result<Vec<String>, MatchError> {
-    let entry = resolve(id, version)?;
+) -> Result<Replay, MatchError> {
+    let entry = resolve(&recorded.id, &recorded.version)?;
     verify_binding(entry)?;
-    check_parameters(entry, parameters)?;
+    let implementation = check_recorded_implementation(entry, &recorded.implementation)?;
+    check_parameters(entry, &recorded.parameters)?;
 
     let mut matched = Vec::new();
     for candidate in candidates {
@@ -364,23 +538,37 @@ pub fn recompute_matched(
                 computed: computed.as_str().to_owned(),
             });
         }
-        if (entry.predicate)(&candidate.snapshot, parameters)? {
+        if (entry.predicate)(&candidate.snapshot, &recorded.parameters)? {
             matched.push(candidate.declared_digest.clone());
         }
     }
-    Ok(matched)
+    Ok(Replay {
+        matched,
+        implementation,
+    })
+}
+
+/// A replay compared against what the artifact claimed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchedVerdict {
+    pub replay: Replay,
+    /// Whether the recomputed subsequence equals the claimed one. False is a
+    /// finding about the artifact, not an error — unlike drift, which is refused
+    /// outright, because a claim that does not reproduce is exactly what §13
+    /// exists to surface.
+    pub reproduced: bool,
 }
 
 /// The obligation as a verdict: recompute, and compare against what a query
 /// snapshot claimed.
 pub fn verify_matched(
-    id: &str,
-    version: &str,
-    parameters: &Value,
+    recorded: &RecordedMatcher,
     candidates: &[Candidate],
     claimed: &[String],
-) -> Result<bool, MatchError> {
-    Ok(recompute_matched(id, version, parameters, candidates)? == claimed)
+) -> Result<MatchedVerdict, MatchError> {
+    let replay = recompute_matched(recorded, candidates)?;
+    let reproduced = replay.matched == claimed;
+    Ok(MatchedVerdict { replay, reproduced })
 }
 
 /// §13.1: parameters are exactly what the matcher reads. Not a superset, so a

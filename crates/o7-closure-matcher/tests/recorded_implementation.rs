@@ -1,152 +1,306 @@
-//! RED-3. The witness that `implementation_digest` is not yet an *immutable*
-//! binding — only a consistency check between two fields that move together.
+//! GREEN-3. The implementation binding's authority moves out of this source tree.
 //!
-//! WHAT IS WRONG WITH THIS COMMIT. `review-by-expected-author-login/1` has been
-//! changed to refuse a `DISMISSED` review by the expected author, and the
-//! `implementation_digest` constant beside it has been recomputed to match. The
-//! version is still `"1"`. Do not build on this commit; the next one reverts it.
-//!
-//! WHY RED-2 DID NOT COVER THIS. RED-2 showed a one-field edit escaping a digest
-//! over a finite vector set, and 48548ef fixed that by hashing the implementation
-//! bytes. But the authoritative expected value lives in `src/matchers.rs`,
-//! two lines from the `include_str!` that supplies the bytes it judges:
+//! THE PROBLEM RED-3 LANDED. 48548ef bound `(id, version)` to a SHA-256 of the
+//! predicate file's bytes. That fixed *what* the certificate covers. It left the
+//! certificate where it was — in `src/matchers.rs`, two lines from the
+//! `include_str!` that supplies the bytes it judges:
 //!
 //! ```text
-//! implementation_source: include_str!("matchers/review_..._v1.rs"),   <- the bytes
-//! implementation_digest: "sha256:59ea...",                            <- the verdict
+//! implementation_source: include_str!("matchers/review_..._v1.rs"),
+//! implementation_digest: "sha256:59ea...",
 //! ```
 //!
-//! `verify_implementation()` hashes the first and compares it to the second. Both
-//! are editable in one commit, so the check confirms that two current fields agree
-//! and says nothing about whether `/1` still means what `/1` meant. The claim in
-//! 48548ef that this was "append-only, enforced by the digest rather than by
-//! policy" was stronger than the mechanism: the digest refuses an implementation
-//! edit that forgets to update the digest, and permits one that remembers.
+//! One commit edits both, and `verify_implementation()` is satisfied. So it
+//! establishes that two current fields agree, not that `/1` still means what
+//! `/1` meant — an artifact certifying the thing it is checked against, third
+//! time, one level up each time.
+//!
+//! WHAT CHANGED. `github-query-snapshot` gains `matcher.implementationDigest` at
+//! `schemaVersion` 2, so a durable artifact records which implementation
+//! produced its matched subsequence. The expected value is then written by a
+//! different act, at a different time, and covered by the artifact's own digest.
+//! Specimen I is that record, and the tests below read their expectation out of
+//! it — never out of `REGISTRY`.
 //!
 //! ```text
-//! artifact:  "my implementation digest is D"
-//! checker:   hash(bytes) == artifact.D
-//!         ↓
-//! two current fields agree            <- established
-//! this version is what it always was  <- NOT established
+//! before:  hash(bytes in tree) == constant in tree
+//! after:   hash(bytes in tree) == digest in an artifact this tree did not write
 //! ```
 //!
-//! Which is the effort's own recurring defect, third hat: an artifact certifying
-//! the very thing it is being checked against. RED-2 moved the certificate from
-//! a sample of behaviour to the bytes; it did not move the *authority* anywhere.
+//! WHAT THIS DOES AND DOES NOT ESTABLISH. It is not tamper-proofing, and calling
+//! it that would repeat the overclaim in 48548ef that RED-3 had to demolish. A
+//! commit that edits the predicate, the registry constant, specimen I's
+//! `implementationDigest` and specimen I's `canonicalDigest` still passes, and no
+//! arrangement of files inside one repository can prevent that — the tree is
+//! writable by whoever writes the tree. Three things are true instead, and they
+//! are the whole claim:
 //!
-//! WHERE THE AUTHORITY HAS TO LIVE. Not in a second copy of the constant in this
-//! tree — that is the same file one directory over. It has to be a record written
-//! by a different act at a different time: a durable artifact that says which
-//! implementation it actually ran. The next commit puts `implementationDigest`
-//! into the query snapshot's matcher block, so a closure artifact carries the
-//! identity of the code that produced it and cannot be re-blessed by later code
-//! claiming the same `/1`.
+//! - The record and the implementation are no longer edited by the same act.
+//!   Drift is now a four-file diff in a fixture reviewers read, not two adjacent
+//!   lines.
+//! - Specimen I's digest was computed by rfc8785 0.1.4 outside this workspace,
+//!   per the corpus rule, so re-blessing it means going back to the external
+//!   tool rather than running the code under test.
+//! - The part that actually leaves reach: an emitted closure artifact — an
+//!   attestation, a snapshot already handed to someone — carries the digest of
+//!   the code that produced it and is not in this repository at all. Specimen I
+//!   is that situation's stand-in; the real binding starts when artifacts are
+//!   emitted. Within the tree the mechanism catches drift, which is the failure
+//!   that actually happens; it does not catch an author who means it.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use o7_closure_matcher::{resolve, verify_binding, REGISTRY};
-use serde_json::{json, Value};
+use o7_closure_matcher::{
+    check_recorded_implementation, recompute_matched, resolve, Candidate, ImplementationCheck,
+    MatchError, RecordedImplementation, RecordedMatcher,
+};
+use serde_json::Value;
+use std::fs;
+use std::path::PathBuf;
 
-fn dismissed_review_by_expected_author() -> Value {
-    json!({
-        "schemaVersion": 1,
-        "sourceKind": "github-submitted-review",
-        "stableId": "88",
-        "user": { "id": "88", "login": "expected-reviewer", "type": "User" },
-        "authorAssociation": "NONE",
-        "state": "DISMISSED",
-        "body": "",
-        "submittedAt": "2026-01-01T00:00:00Z",
-        "commitId": "2222222222222222222222222222222222222222"
-    })
+fn fixture(name: &str) -> Value {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/closure-provenance")
+        .join(name);
+    serde_json::from_str(&fs::read_to_string(&path).expect("reading a frozen specimen"))
+        .expect("a frozen specimen is JSON")
 }
 
-/// Half one of the mutation is real: `/1` answers differently than it did at
-/// a82f065 for an input the matcher is squarely responsible for.
+const SPECIMEN_I: &str = "recorded-implementation-v1.json";
+
+fn specimen_i_snapshot() -> Value {
+    fixture(SPECIMEN_I)
+        .get("canonical")
+        .expect("canonical query snapshot")
+        .clone()
+}
+
+fn specimen_i_candidates() -> Vec<Candidate> {
+    let doc = fixture(SPECIMEN_I);
+    let listed: Vec<String> = doc
+        .pointer("/canonical/allReturnedSnapshotDigests")
+        .and_then(Value::as_array)
+        .expect("allReturnedSnapshotDigests")
+        .iter()
+        .map(|d| d.as_str().expect("digest").to_owned())
+        .collect();
+    let retained = doc
+        .get("candidates")
+        .and_then(Value::as_array)
+        .expect("candidates")
+        .clone();
+    listed
+        .into_iter()
+        .map(|digest| {
+            let found = retained
+                .iter()
+                .find(|c| c.get("canonicalDigest").and_then(Value::as_str) == Some(&digest))
+                .unwrap_or_else(|| panic!("no candidate retained for {digest}"));
+            Candidate {
+                declared_digest: digest,
+                snapshot: found.get("canonical").expect("canonical").clone(),
+            }
+        })
+        .collect()
+}
+
+/// The expected digest is a literal in a JSON file that this crate does not
+/// write. If it ever starts coming from `REGISTRY`, every test below reverts to
+/// checking that the tree agrees with itself.
 #[test]
-fn red3_the_behaviour_of_version_1_has_changed_again() {
-    let entry = resolve("review-by-expected-author-login", "1").expect("resolve");
-    let got = (entry.predicate)(
-        &dismissed_review_by_expected_author(),
-        &json!({ "expectedAuthorLogin": "expected-reviewer" }),
-    )
-    .expect("evaluate");
+fn the_expectation_is_a_literal_in_the_frozen_corpus() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/closure-provenance")
+        .join(SPECIMEN_I);
+    let raw = fs::read_to_string(&path).expect("read");
+    let recorded = fixture(SPECIMEN_I)
+        .pointer("/canonical/matcher/implementationDigest")
+        .and_then(Value::as_str)
+        .expect("specimen I records an implementation digest")
+        .to_owned();
     assert!(
-        !got,
-        "the RED-3 mutation is not present; this commit is only meaningful with it"
+        raw.contains(&recorded),
+        "the recorded digest must be present as text in the fixture"
+    );
+    assert!(
+        recorded.starts_with("sha256:") && recorded.len() == 71,
+        "recorded digest has the frozen syntax: {recorded}"
     );
 }
 
-/// Half two: the digest was recomputed, so the implementation binding agrees
-/// with the implementation it is supposed to be freezing.
+/// Replaying specimen I: the selection reproduces AND the implementation that
+/// reproduced it is the one the artifact named.
 #[test]
-fn red3_the_whole_binding_stays_green_anyway() {
-    let entry = resolve("review-by-expected-author-login", "1").expect("resolve");
-    assert!(
-        verify_binding(entry).is_ok(),
-        "if this now fails, the mechanism was fixed and this RED-3 witness is spent"
+fn replaying_the_recorded_snapshot_binds_the_implementation_that_ran() {
+    let snapshot = specimen_i_snapshot();
+    let recorded = RecordedMatcher::from_query_snapshot(&snapshot).expect("recorded matcher");
+    let claimed: Vec<String> = snapshot
+        .get("matchedSnapshotDigests")
+        .and_then(Value::as_array)
+        .expect("matchedSnapshotDigests")
+        .iter()
+        .map(|d| d.as_str().expect("digest").to_owned())
+        .collect();
+
+    let replay = recompute_matched(&recorded, &specimen_i_candidates()).expect("replay");
+    assert_eq!(
+        replay.matched, claimed,
+        "specimen I's claim reproduces, so a failure here can only be the binding"
     );
-    assert_eq!(entry.version, "1", "no version bump was taken");
+    let RecordedImplementation::Bound(expected) = &recorded.implementation else {
+        panic!("specimen I is a version-2 snapshot and must record an implementation");
+    };
+    assert_eq!(
+        replay.implementation,
+        ImplementationCheck::Bound {
+            digest: expected.clone()
+        }
+    );
 }
 
-/// The reason it stays green: nothing outside `src/matchers.rs` has an opinion
-/// about what `/1`'s implementation digest is. The corpus records a matcher's
-/// name, version and parameters — never the implementation it ran.
+/// The discriminating case, and the one RED-3 walks through today: the artifact
+/// names an implementation this tree does not resolve to.
+///
+/// A mutant moves the tree while the record stays put; this test moves the
+/// record while the tree stays put. Those are the same comparison approached
+/// from opposite sides, and only the first is what actually happens — which is
+/// why the RED-3 commit exists as history rather than as an assertion here.
 #[test]
-fn red3_no_durable_artifact_records_which_implementation_ran() {
-    use std::fs;
-    use std::path::Path;
+fn a_recorded_digest_this_tree_does_not_resolve_to_is_refused() {
+    let recorded = RecordedMatcher::from_query_snapshot(&specimen_i_snapshot()).expect("recorded");
+    let entry = resolve(&recorded.id, &recorded.version).expect("resolve");
 
-    let base =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/closure-provenance");
-    let mut matcher_blocks = 0;
-    for entry in fs::read_dir(base).expect("corpus") {
+    let drifted = RecordedImplementation::Bound(
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+    );
+    match check_recorded_implementation(entry, &drifted) {
+        Err(MatchError::RecordedImplementationDrift {
+            recorded, resolved, ..
+        }) => {
+            assert_ne!(recorded, resolved);
+        }
+        other => panic!("drift must be refused, got {other:?}"),
+    }
+}
+
+/// And drift is refused through the replay path too, not only when called
+/// directly — a caller cannot recompute a matched subsequence while ignoring
+/// which code recomputed it, because there is no entry point that omits it.
+#[test]
+fn replay_refuses_drift_rather_than_reporting_it_alongside_a_result() {
+    let mut recorded =
+        RecordedMatcher::from_query_snapshot(&specimen_i_snapshot()).expect("recorded");
+    recorded.implementation = RecordedImplementation::Bound(
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+    );
+    assert!(matches!(
+        recompute_matched(&recorded, &specimen_i_candidates()),
+        Err(MatchError::RecordedImplementationDrift { .. })
+    ));
+}
+
+/// A version-1 snapshot predates the field. That is CANNOT_CHECK — an axis with
+/// no evidence — and must never read as a passed one. C, D and G stay at version
+/// 1 precisely so this case keeps a witness.
+#[test]
+fn a_version_one_snapshot_cannot_check_the_implementation() {
+    for name in [
+        "matcher-candidate-set-v1.json",
+        "complete-empty-query-v1.json",
+        "incomplete-query-v1.json",
+    ] {
+        let snapshot = fixture(name).get("canonical").expect("canonical").clone();
+        let recorded = RecordedMatcher::from_query_snapshot(&snapshot)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            recorded.implementation,
+            RecordedImplementation::Unrecorded,
+            "{name} is a version-1 snapshot"
+        );
+        let entry = resolve(&recorded.id, &recorded.version).expect("resolve");
+        assert_eq!(
+            check_recorded_implementation(entry, &recorded.implementation).expect("check"),
+            ImplementationCheck::CannotCheck,
+            "{name} carries no implementation evidence, so nothing about the \
+             implementation is established — including that it did not drift"
+        );
+    }
+}
+
+/// Corpus-wide rather than specimen-wide: every version-2 query snapshot the
+/// corpus holds must bind to an implementation this tree resolves. A future v2
+/// specimen extends this check by existing, and deleting the one specimen that
+/// currently drives it is visible as coverage going to zero rather than as a
+/// test quietly passing over an empty set.
+#[test]
+fn every_recorded_implementation_in_the_corpus_binds() {
+    let dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/closure-provenance");
+    let mut bound = 0;
+    for entry in fs::read_dir(&dir).expect("corpus") {
         let path = entry.expect("dir entry").path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
         let doc: Value =
             serde_json::from_str(&fs::read_to_string(&path).expect("read")).expect("parse");
-        let mut stack = vec![doc];
-        while let Some(node) = stack.pop() {
-            match node {
-                Value::Object(map) => {
-                    if let Some(Value::Object(m)) = map.get("matcher") {
-                        matcher_blocks += 1;
-                        assert!(
-                            !m.contains_key("implementationDigest"),
-                            "{path:?} records an implementation digest, so this RED-3 \
-                             witness is spent and the gap it documents is closed"
-                        );
-                    }
-                    stack.extend(map.into_iter().map(|(_, v)| v));
-                }
-                Value::Array(items) => stack.extend(items),
-                _ => {}
-            }
+        let Some(snapshot) = doc.get("canonical") else {
+            continue;
+        };
+        if snapshot.get("sourceKind").and_then(Value::as_str) != Some("github-query-snapshot") {
+            continue;
         }
+        let recorded = RecordedMatcher::from_query_snapshot(snapshot)
+            .unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        let RecordedImplementation::Bound(_) = recorded.implementation else {
+            continue;
+        };
+        let resolved =
+            resolve(&recorded.id, &recorded.version).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        let check = check_recorded_implementation(resolved, &recorded.implementation)
+            .unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        assert!(
+            matches!(check, ImplementationCheck::Bound { .. }),
+            "{path:?} records an implementation, so the check must bind it"
+        );
+        bound += 1;
     }
     assert!(
-        matcher_blocks >= 3,
-        "expected the corpus's query snapshots, saw {matcher_blocks} matcher blocks"
+        bound >= 1,
+        "no version-2 query snapshot in the corpus records an implementation, so \
+         nothing outside this tree has an opinion about what /1 is"
     );
 }
 
-/// And no frozen vector covers `DISMISSED`, so the conformance half is quiet too
-/// — the mutation clears both digests, not just the weaker one.
+/// §8's schemas are closed key sets. A shape that can borrow a field from its
+/// neighbour is not closed, so both directions are refused.
 #[test]
-fn red3_no_frozen_vector_covers_the_changed_input() {
-    for entry in REGISTRY {
-        for vector in entry.vectors {
-            let candidate: Value = serde_json::from_str(vector.candidate).expect("vector is JSON");
-            assert_ne!(
-                candidate.pointer("/state").and_then(Value::as_str),
-                Some("DISMISSED"),
-                "vector {:?} covers the mutated input, so this witness would not \
-                 discriminate — pick an input the frozen set genuinely misses",
-                vector.name
-            );
-        }
-    }
+fn the_two_snapshot_shapes_do_not_borrow_fields_from_each_other() {
+    let mut v1_with_digest = fixture("matcher-candidate-set-v1.json")
+        .get("canonical")
+        .expect("canonical")
+        .clone();
+    v1_with_digest
+        .pointer_mut("/matcher")
+        .and_then(Value::as_object_mut)
+        .expect("matcher object")
+        .insert(
+            "implementationDigest".to_owned(),
+            Value::String("sha256:00".to_owned()),
+        );
+    assert!(matches!(
+        RecordedMatcher::from_query_snapshot(&v1_with_digest),
+        Err(MatchError::MalformedRecordedMatcher { .. })
+    ));
+
+    let mut v2_without_digest = specimen_i_snapshot();
+    v2_without_digest
+        .pointer_mut("/matcher")
+        .and_then(Value::as_object_mut)
+        .expect("matcher object")
+        .remove("implementationDigest");
+    assert!(matches!(
+        RecordedMatcher::from_query_snapshot(&v2_without_digest),
+        Err(MatchError::MalformedRecordedMatcher { .. })
+    ));
 }

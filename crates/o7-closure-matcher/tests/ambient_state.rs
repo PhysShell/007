@@ -40,7 +40,20 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use o7_closure_matcher::{recompute_matched, verify_binding, Candidate, MatcherEntry, REGISTRY};
+use o7_closure_matcher::{
+    recompute_matched, verify_binding, Candidate, MatcherEntry, RecordedImplementation,
+    RecordedMatcher, REGISTRY,
+};
+
+/// A recorded matcher block for an entry already in hand. Purity, not drift.
+fn bound(entry: &MatcherEntry, parameters: &Value) -> RecordedMatcher {
+    RecordedMatcher {
+        id: entry.id.to_owned(),
+        version: entry.version.to_owned(),
+        parameters: parameters.clone(),
+        implementation: RecordedImplementation::Bound(entry.implementation_digest.to_owned()),
+    }
+}
 use serde_json::Value;
 
 /// Set on the subprocess by `vectors_hold_under_a_perturbed_environment`.
@@ -173,10 +186,10 @@ fn a_candidate_is_judged_without_reference_to_its_neighbours() {
             .map(|(_, c)| c.declared_digest.clone())
             .collect();
 
-        let matched = recompute_matched(entry.id, entry.version, &parameters, &candidates)
-            .expect("recompute");
+        let matched =
+            recompute_matched(&bound(entry, &parameters), &candidates).expect("recompute");
         assert_eq!(
-            matched, expected,
+            matched.matched, expected,
             "{}/{}: the matched list is not the standalone-true candidates in order",
             entry.id, entry.version
         );
@@ -186,7 +199,9 @@ fn a_candidate_is_judged_without_reference_to_its_neighbours() {
         let doubled: Vec<Candidate> = candidates.iter().chain(&candidates).cloned().collect();
         let doubled_expected: Vec<String> = expected.iter().chain(&expected).cloned().collect();
         assert_eq!(
-            recompute_matched(entry.id, entry.version, &parameters, &doubled).expect("recompute"),
+            recompute_matched(&bound(entry, &parameters), &doubled)
+                .expect("recompute")
+                .matched,
             doubled_expected,
             "{}/{}: duplicated candidates do not duplicate the matches",
             entry.id,
@@ -212,7 +227,9 @@ fn a_candidate_is_judged_without_reference_to_its_neighbours() {
             .chain(expected.iter().cloned())
             .collect();
         assert_eq!(
-            recompute_matched(entry.id, entry.version, &parameters, &prefixed).expect("recompute"),
+            recompute_matched(&bound(entry, &parameters), &prefixed)
+                .expect("recompute")
+                .matched,
             prefixed_expected,
             "{}/{}: a prefixed candidate changed the verdicts after it",
             entry.id,

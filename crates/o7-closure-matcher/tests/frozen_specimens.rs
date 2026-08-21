@@ -28,7 +28,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use o7_closure_matcher::{recompute_matched, resolve, verify_matched, Candidate};
+use o7_closure_matcher::{recompute_matched, resolve, verify_matched, Candidate, RecordedMatcher};
 use serde_json::Value;
 
 fn fixture(name: &str) -> Value {
@@ -39,12 +39,10 @@ fn fixture(name: &str) -> Value {
         .expect("a frozen specimen is JSON")
 }
 
-/// `(id, version, parameters, candidates in observation order, claimed matched)`
-/// read out of a specimen's own canonical query snapshot.
+/// The matcher block, the candidates in observation order and the claimed
+/// matched subsequence, read out of a specimen's own canonical query snapshot.
 struct Query {
-    id: String,
-    version: String,
-    parameters: Value,
+    recorded: RecordedMatcher,
     candidates: Vec<Candidate>,
     claimed: Vec<String>,
 }
@@ -52,7 +50,6 @@ struct Query {
 fn query_of(name: &str) -> Query {
     let doc = fixture(name);
     let canonical = doc.get("canonical").expect("canonical query snapshot");
-    let matcher = canonical.get("matcher").expect("matcher");
 
     // Candidate snapshots come from the specimen's `candidates` array; the
     // order asserted below is the query snapshot's `allReturnedSnapshotDigests`,
@@ -88,17 +85,8 @@ fn query_of(name: &str) -> Query {
         .collect();
 
     Query {
-        id: matcher
-            .get("id")
-            .and_then(Value::as_str)
-            .expect("id")
-            .to_owned(),
-        version: matcher
-            .get("version")
-            .and_then(Value::as_str)
-            .expect("version")
-            .to_owned(),
-        parameters: matcher.get("parameters").expect("parameters").clone(),
+        recorded: RecordedMatcher::from_query_snapshot(canonical)
+            .unwrap_or_else(|e| panic!("{name}: reading the recorded matcher block: {e}")),
         candidates,
         claimed: canonical
             .get("matchedSnapshotDigests")
@@ -119,10 +107,12 @@ fn the_matcher_the_specimens_name_now_resolves() {
         "matcher-candidate-set-v1.json",
         "complete-empty-query-v1.json",
         "incomplete-query-v1.json",
+        "recorded-implementation-v1.json",
     ] {
         let q = query_of(name);
-        resolve(&q.id, &q.version)
-            .unwrap_or_else(|e| panic!("{name} names {}/{}: {e}", q.id, q.version));
+        resolve(&q.recorded.id, &q.recorded.version).unwrap_or_else(|e| {
+            panic!("{name} names {}/{}: {e}", q.recorded.id, q.recorded.version)
+        });
     }
 }
 
@@ -136,16 +126,18 @@ fn specimen_g_s_empty_matched_subset_does_not_survive_re_execution() {
     assert_eq!(q.candidates.len(), 2, "G retains two candidates");
     assert!(q.claimed.is_empty(), "G claims an empty matched subset");
 
-    let recomputed = recompute_matched(&q.id, &q.version, &q.parameters, &q.candidates)
+    let recomputed = recompute_matched(&q.recorded, &q.candidates)
         .expect("re-executing the bound matcher over G's retained candidates");
     assert_eq!(
-        recomputed.len(),
+        recomputed.matched.len(),
         1,
-        "exactly one of G's candidates is by the expected author; got {recomputed:?}"
+        "exactly one of G's candidates is by the expected author; got {:?}",
+        recomputed.matched
     );
     assert!(
-        !verify_matched(&q.id, &q.version, &q.parameters, &q.candidates, &q.claimed)
-            .expect("verify"),
+        !verify_matched(&q.recorded, &q.candidates, &q.claimed)
+            .expect("verify")
+            .reproduced,
         "G's empty matched subset must not verify"
     );
 
@@ -167,7 +159,7 @@ fn specimen_g_s_empty_matched_subset_does_not_survive_re_execution() {
         })
         .collect();
     assert_eq!(
-        recomputed, annotated,
+        recomputed.matched, annotated,
         "the bound matcher and specimen G's prose annotation disagree about which \
          candidate qualifies — one of them is wrong and the specimen is frozen"
     );
@@ -194,13 +186,15 @@ fn the_c_g_pair_is_separated_by_re_execution_not_by_the_claimed_value() {
     assert!(!g.candidates.is_empty());
 
     assert!(
-        verify_matched(&c.id, &c.version, &c.parameters, &c.candidates, &c.claimed)
-            .expect("verify"),
+        verify_matched(&c.recorded, &c.candidates, &c.claimed)
+            .expect("verify")
+            .reproduced,
         "C's empty matched subset is reproduced by the bound matcher"
     );
     assert!(
-        !verify_matched(&g.id, &g.version, &g.parameters, &g.candidates, &g.claimed)
-            .expect("verify"),
+        !verify_matched(&g.recorded, &g.candidates, &g.claimed)
+            .expect("verify")
+            .reproduced,
         "G's is not"
     );
 }
@@ -217,8 +211,9 @@ fn the_c_g_pair_is_separated_by_re_execution_not_by_the_claimed_value() {
 fn re_execution_is_silent_about_whether_the_enumeration_finished() {
     let d = query_of("incomplete-query-v1.json");
     assert!(
-        verify_matched(&d.id, &d.version, &d.parameters, &d.candidates, &d.claimed)
-            .expect("verify"),
+        verify_matched(&d.recorded, &d.candidates, &d.claimed)
+            .expect("verify")
+            .reproduced,
         "D's matched subset is faithful to the candidates it retained"
     );
     assert_eq!(
