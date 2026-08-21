@@ -503,10 +503,19 @@ REQUIRED             schemaVersion  sourceKind
                      pagination.nextPagePresent
                      enumeration
                      matcher.id  matcher.version  matcher.parameters
+                     matcher.implementationDigest   (schemaVersion 2 only)
                      allReturnedSnapshotDigests
                      matchedSnapshotDigests
 OPTIONAL-IF-PRESENT  incompleteReason  binding.sha
 ```
+
+**`schemaVersion` 2 adds `matcher.implementationDigest`.** The two shapes are
+closed key sets and neither may borrow from the other: a version-1 snapshot
+carrying the field and a version-2 snapshot missing it are both malformed.
+Version-1 snapshots remain valid records of what the contract required when they
+were written; replaying one yields CANNOT_CHECK on the implementation axis — an
+axis with no evidence, never a pass. The reason the field exists is §13.1's
+second half, below.
 
 `allReturnedSnapshotDigests` is the **complete candidate set** — every object the
 enumeration returned, each retained as a source snapshot under §11, including the
@@ -547,7 +556,42 @@ matcher.id          names a deterministic, total, pure predicate
                     f(candidate canonical snapshot, parameters) -> bool
 matcher.version     changes whenever f's behaviour changes for ANY input
 matcher.parameters  every value f reads that is not the candidate snapshot
+matcher.implementationDigest
+                    which implementation actually ran (schemaVersion 2)
 ```
+
+`matcher.version` is a **semantic name**: it says which rule was intended.
+`matcher.implementationDigest` is the **replay binding**: it says which code
+carried that intention out. The two are different obligations and the second
+does not follow from the first, because `version` is a string an implementer
+chooses and `ANY input` is not provable by any finite check that implementer can
+run. The triple
+
+```text
+(matcher.id, matcher.version, matcher.implementationDigest)
+```
+
+is what a replay is entitled to rely on. An implementation whose digest differs
+from the one a snapshot recorded is a *different* implementation regardless of
+what version it claims, and MUST be refused rather than reconciled.
+
+The digest MUST be over the implementation itself — bytes that the running code
+is built from — and MUST NOT be over a sample of the implementation's behaviour.
+A digest over results on a finite vector set binds a finite observation of `f`
+and not `f`, so a behaviour change on any input outside that set passes it
+unchanged. Behavioural vectors remain useful as regression witnesses and are not
+a substitute for this.
+
+The expected value MUST be recoverable from something other than the tree that
+holds the implementation. A constant sitting beside the implementation is edited
+by the same act that edits the implementation, so it establishes that two current
+fields agree and not that a version is what it was. That is why the digest is
+carried in the **snapshot** — an artifact written at acquisition time, whose own
+canonical digest is covered by whatever retained it — rather than only in a
+registry. This does not make an implementation unforgeable by whoever controls
+both the code and the corpus; it makes drift a change to a durable record instead
+of a change to a neighbouring line, and it makes an artifact already emitted
+unreplayable under changed code.
 
 The rules that make re-execution possible:
 
@@ -775,7 +819,8 @@ redaction decision (§20)
       ↓         retains the bytes, so acquisition without it stores whatever
       ↓         was pasted into a comment, content-addressed
       ↓
-matcher implementation binding (§13.1)          [DONE: o7-closure-matcher]
+matcher implementation binding (§13.1)          [DONE: o7-closure-matcher,
+                                                 incl. §13 schemaVersion 2]
       ↓         blocked the first consumer that APPLIES a matcher, which is
       ↓         the acquisition adapter, because it computes
       ↓         matchedSnapshotDigests
@@ -852,6 +897,8 @@ it as open — necessary conditions presented as sufficient ones.
 | What proves a matcher did not simply miss the object? | §13 candidate set + matcher id |
 | What inputs must be retained for matcher re-execution? | §13.1 — id, version, parameters, retained candidates |
 | How does id + version resolve to exactly one predicate? | §23 — **DISCHARGED**: const registry in `crates/o7-closure-matcher` |
+| What binds that pair to the code that actually ran? | §13.1 — `matcher.implementationDigest`, recorded in the snapshot |
+| What does a snapshot written before that field prove about the implementation? | §13 — nothing; CANNOT_CHECK, not a pass |
 | What stops a version's predicate from changing under it? | §23 — a digest over the implementation's bytes, **not** over its results |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
 | What order do the digest arrays use? | §13.2 — observation order, duplicates kept |
@@ -909,8 +956,13 @@ statements rather than written alongside them.
   `src/matchers/<id>_v<n>.rs`, the registry embeds that file verbatim at compile
   time, and the same path is what the compiler builds — so the hashed bytes are
   the running code. Editing a version's file breaks that version's binding;
-  changing behaviour means adding `_v2.rs` and a new entry. Append-only,
-  enforced by the digest rather than by policy.
+  changing behaviour means adding `_v2.rs` and a new entry.
+
+  That digest is recorded in the durable artifact, not only in the registry:
+  `github-query-snapshot` `schemaVersion` 2 carries
+  `matcher.implementationDigest` (§13, §13.1), so a replay compares the running
+  code against a record written at acquisition time rather than against a
+  constant beside the code. Version-1 snapshots yield CANNOT_CHECK on that axis.
 
   The original residual text is kept below because it stated the requirement
   correctly and the first attempt at satisfying it did not.
@@ -936,12 +988,35 @@ statements rather than written alongside them.
   regression witness, kept because the bytes never state what the rule is
   *supposed* to do.
 
-  **What remains uncovered, and is not being called discharged.** A behaviour
-  change that leaves the bytes alone: a dependency's semantics shifting beneath
-  them, a compiler change, a target difference. Identical bytes are not
-  identical behaviour across a moving substrate. The conformance vectors are the
-  witness for that residual and are the reason both digests are kept; neither
-  subsumes the other.
+  **The second false start is also part of the record.** The bytes digest first
+  shipped with its expected value as a constant in `src/matchers.rs`, two lines
+  from the `include_str!` that supplied the bytes it judged, and was annotated
+  "append-only, enforced by the digest rather than by policy". It was not. One
+  commit edits both fields, and a matcher that had changed behaviour under an
+  unchanged version passed the entire suite — recorded as an executable commit
+  (RED-3) rather than as a sentence here. The correction was not a better digest
+  but a different **authority**: the expected value now lives in the snapshot.
+  The pattern across both false starts is the same one this document names
+  everywhere else — an artifact certifying the very thing it is checked against —
+  and it survived two rounds by moving up a level each time rather than by being
+  wrong in a new way.
+
+  **What remains uncovered, and is not being called discharged.**
+
+  1. A behaviour change that leaves the bytes alone: a dependency's semantics
+     shifting beneath them, a compiler change, a target difference. Identical
+     bytes are not identical behaviour across a moving substrate. The conformance
+     vectors are the witness for that residual and are the reason both digests
+     are kept; neither subsumes the other.
+  2. An author who edits the implementation, the registry constant and the
+     recorded digest in one commit. Nothing inside a single repository prevents
+     this, and claiming otherwise is how the previous two annotations went wrong.
+     What the mechanism buys is that drift stops being a local edit: the record
+     is a fixture whose digest comes from an independent canonicalizer, and an
+     artifact **already emitted** — an attestation, a snapshot handed to someone
+     — is outside the tree entirely and cannot be re-blessed at all. The binding
+     that holds against intent begins when artifacts leave; specimen I stands in
+     for that case until they do.
 - **Reaction surface** (§8). Still no Step 0B specimen; not added here.
 - **Pagination specimen** (§14). The rule is frozen; the historical witness does
   not exist and the contract vectors for it are synthetic.
@@ -1039,3 +1114,42 @@ document was already making about itself.
   defect class in this document: the normative text is fixed and a downstream
   summary keeps living in the previous version. Each cross-reference now points
   at the authoritative section rather than restating it.
+
+### 24.4 Added in the implementation-binding correction round
+
+This round is unusual: it corrects the document **after** the slice that was
+supposed to discharge one of its residuals, because two successive attempts at
+that discharge were annotated as complete while each was still short of what
+§13.1 requires. Both attempts failed the same way, one level apart.
+
+- **§13 — `github-query-snapshot` `schemaVersion` 2 adds
+  `matcher.implementationDigest`.** The two shapes are closed and neither may
+  borrow from the other. Version-1 snapshots stay valid and yield CANNOT_CHECK
+  on the implementation axis; specimens C, D and G are untouched and are the
+  witness for that case.
+- **§13.1 — `version` and `implementationDigest` are separate obligations.**
+  `version` is a semantic name for the rule intended; `implementationDigest` is
+  the replay binding for the code that carried it out. The second does not follow
+  from the first, because `version` is a string an implementer chooses and `ANY
+  input` is not provable by any finite check that implementer can run.
+  Additionally: the digest MUST be over the implementation, not over a sample of
+  its behaviour; and the expected value MUST be recoverable from something other
+  than the tree holding the implementation.
+- **§22 — two rows added.** What binds the identity pair to the code that ran,
+  and what a pre-field snapshot proves about it. The existing row answered
+  resolution and was, once again, being read as answering immutability.
+- **§23 — the residual keeps its full history.** Both false starts are recorded
+  with the executable commits that demonstrate them (RED-2, RED-3), and the
+  uncovered part is now enumerated as two distinct items rather than one, since
+  a moving substrate and a determined author are different gaps with different
+  answers. The word "append-only" is withdrawn.
+
+The generalisation worth keeping. Every round of this document has found the
+same defect wearing a different hat — an artifact certifying the very thing it
+is being checked against — and this round found it twice more in the code that
+was written to fix it. The pattern is not carelessness about hashing; it is that
+each fix moves the certificate closer to the thing certified and then stops,
+because at that distance the two now agree. The question that actually
+discriminates is not *what does the digest cover* but *who wrote the expected
+value, and when*. A check whose expectation was authored by the same act as its
+subject is a consistency check, whatever it is hashing.

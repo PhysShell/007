@@ -41,6 +41,15 @@ property it was written to establish. Every canonical object here conforms to
 and every digest constant was recomputed. The defects are named in place: see A's
 `notAWitnessFor`, F's `why`, G's `why`, and E's `subjectRead.note`.
 
+**Round 3.** Specimen I was added, and no existing file was touched. The round
+found that binding a matcher's identity to an *in-tree* constant — first over its
+behaviour on frozen vectors, then over its implementation bytes — leaves the
+expected value editable by the same commit that edits the thing it judges. The
+answer was not a stronger digest but a different authority: the digest of the
+implementation that ran is now recorded in the query snapshot, at
+`schemaVersion: 2`. C, D and G stay at version 1 deliberately, as the witness for
+what a snapshot written before the field can and cannot establish.
+
 **Round 2.** Specimen H was added and the three query snapshots gained
 `matcher.parameters`, so the query digests for C, D and G were recomputed; the
 candidate review digests are unchanged, since a candidate snapshot does not
@@ -171,6 +180,42 @@ What the record deliberately does not contain is whether the head moved during
 those sixteen minutes. It contains that the question was asked and not answered,
 which is a different fact.
 
+### I — the query snapshot that records which implementation ran
+
+`recorded-implementation-v1.json`
+
+The first `schemaVersion: 2` query snapshot. Its `matcher` block carries
+`implementationDigest` alongside `id`, `version` and `parameters`, so the
+artifact names the code that produced its matched subsequence and not only the
+rule that was intended.
+
+G and I are the pair for §13.1's two halves. G's claim does **not** reproduce,
+and the contradiction shows up in the matched subsequence — that is the *inputs*
+half. I's claim **does** reproduce and every behavioural check agrees, so the
+only thing that can fail is the implementation binding — the *identity* half.
+The isolation is deliberate, the same way F holds `updatedAt` fixed so the trim
+is the only thing that can move a digest: if I also disagreed behaviourally, a
+red test would not say which mechanism caught it.
+
+Why the digest is here rather than only in the matcher registry: a constant
+beside an implementation is edited by the same commit that edits the
+implementation. Both attempts that preceded this one failed exactly there — see
+§23, which keeps them — and the fix was not a better digest but a different
+authority. A snapshot is written at acquisition time and its own canonical
+digest is covered by whatever retains it, so re-blessing a changed
+implementation means changing a durable record rather than a neighbouring line.
+
+This does not make anything unforgeable inside one repository, and the specimen
+does not claim it does. What it stands in for is the case that genuinely leaves
+reach: an attestation already emitted, carrying the digest of the code that
+produced it, which nothing in this tree can edit.
+
+C, D and G stay at `schemaVersion: 1` and are **not** retrofitted. They are the
+record of what the contract required when they were written, and they are the
+only witness for the CANNOT_CHECK case — replaying a snapshot that predates the
+field establishes nothing about the implementation, including that it did not
+drift.
+
 ### E — a wrong-SHA review that explains itself
 
 `wrong-sha-review-v1.json`
@@ -243,6 +288,12 @@ test whose expectations were produced by the code under test proves nothing.
   The first attempt did rest on the vector set and let a real behaviour change
   through under an unchanged version; that escape is recorded as an executable
   commit rather than as a sentence. See §23.
+
+  The second attempt kept the expected digest as a constant beside the
+  implementation, where one commit edits both — so it established that two
+  current fields agreed, not that a version still meant what it meant. That
+  escape is also an executable commit. Specimen I carries the expected value in
+  a durable artifact instead, which is what the fix actually was.
 
   The paragraph below is kept because it states the gap that was closed and why
   it mattered; only its tense is now wrong.
