@@ -32,7 +32,7 @@
 //! with the implementation, changing the witness set and changing the rule would
 //! move the same digest, and the two facts would stop being separable.
 
-use crate::{ConformanceVector, MatcherEntry};
+use crate::{CandidateRequirement, ConformanceVector, MatcherEntry};
 
 pub(crate) mod actions_check_by_name_v1;
 pub(crate) mod review_by_expected_author_login_v1;
@@ -120,6 +120,10 @@ pub(crate) const REVIEW_BY_EXPECTED_AUTHOR_LOGIN_V1: MatcherEntry = MatcherEntry
     implementation_digest:
         "sha256:59ea097cb9ea6705ebff04487a35861af0ea2b1b8e3e7c4980485af52f9567e9",
     conformance_digest: "sha256:7ea10c56ced0cc83ac3889750fd2a133584275d39f6f5fe809f744ebf74c5178",
+    candidate_requirement: CandidateRequirement {
+        source_kind: "github-submitted-review",
+        required_strings: &["/user/login"],
+    },
     predicate: review_by_expected_author_login_v1::matches,
 };
 
@@ -132,5 +136,9 @@ pub(crate) const ACTIONS_CHECK_BY_NAME_V1: MatcherEntry = MatcherEntry {
     implementation_digest:
         "sha256:0400752fb274d0ab8e1540ce39b95fb9c122749612560519f54882074618c4c4",
     conformance_digest: "sha256:524e0585621242e6e7a995f952473dd15b01d3da66663c6505fc244a7714d01a",
+    candidate_requirement: CandidateRequirement {
+        source_kind: "github-actions-check",
+        required_strings: &["/name"],
+    },
     predicate: actions_check_by_name_v1::matches,
 };

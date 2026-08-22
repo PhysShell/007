@@ -77,7 +77,7 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
     let candidates: Vec<Candidate> = Vec::new();
     let ok = json!({"expectedAuthorLogin": "a"});
     assert!(recompute_matched(
-        &named("review-by-expected-author-login", "1", &ok),
+        &named_over("review-by-expected-author-login", "1", &ok, &candidates),
         &candidates
     )
     .is_ok());
@@ -90,7 +90,7 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
         assert!(
             matches!(
                 recompute_matched(
-                    &named("review-by-expected-author-login", "1", &bad),
+                    &named_over("review-by-expected-author-login", "1", &bad, &candidates),
                     &candidates
                 ),
                 Err(MatchError::ParameterMismatch { .. })
@@ -100,7 +100,12 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
     }
     assert!(matches!(
         recompute_matched(
-            &named("review-by-expected-author-login", "1", &json!("nope")),
+            &named_over(
+                "review-by-expected-author-login",
+                "1",
+                &json!("nope"),
+                &candidates
+            ),
             &candidates
         ),
         Err(MatchError::MalformedCandidate { .. })
@@ -115,10 +120,25 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
 /// the drift checks live in `recorded_implementation.rs` and read their expected
 /// digest out of a frozen fixture instead of out of the registry.
 fn named(id: &str, version: &str, parameters: &Value) -> RecordedMatcher {
+    named_over(id, version, parameters, &[])
+}
+
+/// The same, for a replay whose declared candidate sequence is the one these
+/// candidates carry. Tests that build their own candidates are the snapshot.
+fn named_over(
+    id: &str,
+    version: &str,
+    parameters: &Value,
+    candidates: &[Candidate],
+) -> RecordedMatcher {
     RecordedMatcher {
         id: id.to_owned(),
         version: version.to_owned(),
         parameters: parameters.clone(),
+        all_returned_snapshot_digests: candidates
+            .iter()
+            .map(|c| c.declared_digest.clone())
+            .collect(),
         implementation: match resolve(id, version) {
             Ok(entry) => RecordedImplementation::Bound(entry.implementation_digest.to_owned()),
             Err(_) => RecordedImplementation::Unrecorded,
@@ -152,9 +172,10 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
     let c = candidate(review("3", "wanted"));
     let params = json!({"expectedAuthorLogin": "wanted"});
 
+    let abc = [a.clone(), b.clone(), c.clone()];
     let matched = recompute_matched(
-        &named("review-by-expected-author-login", "1", &params),
-        &[a.clone(), b.clone(), c.clone()],
+        &named_over("review-by-expected-author-login", "1", &params, &abc),
+        &abc,
     )
     .expect("recompute");
     assert_eq!(
@@ -164,9 +185,10 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
 
     // Reversing the candidates reverses the matched order: the selection carries
     // observation order rather than imposing one of its own.
+    let cba = [c.clone(), b, a.clone()];
     let reversed = recompute_matched(
-        &named("review-by-expected-author-login", "1", &params),
-        &[c.clone(), b, a.clone()],
+        &named_over("review-by-expected-author-login", "1", &params, &cba),
+        &cba,
     )
     .expect("recompute");
     assert_eq!(
@@ -175,9 +197,10 @@ fn the_matched_list_is_a_subsequence_in_observation_order() {
     );
 
     // A duplicate in the candidate sequence appears twice in the matched one.
+    let aa = [a.clone(), a.clone()];
     let twice = recompute_matched(
-        &named("review-by-expected-author-login", "1", &params),
-        &[a.clone(), a.clone()],
+        &named_over("review-by-expected-author-login", "1", &params, &aa),
+        &aa,
     )
     .expect("recompute");
     assert_eq!(
@@ -213,12 +236,13 @@ fn a_candidate_whose_digest_does_not_hold_is_refused() {
     tampered.snapshot = review("1", "somebody-else");
     assert!(matches!(
         recompute_matched(
-            &named(
+            &named_over(
                 "review-by-expected-author-login",
                 "1",
                 &json!({"expectedAuthorLogin": "wanted"}),
+                std::slice::from_ref(&tampered),
             ),
-            &[tampered],
+            std::slice::from_ref(&tampered),
         ),
         Err(MatchError::CandidateDigestMismatch { .. })
     ));
@@ -235,13 +259,15 @@ fn an_issue_comment_by_the_expected_author_is_not_review_evidence() {
         "body": "No actionable defects found in 1111111111111111111111111111111111111111",
         "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
     }));
+    let only = [comment];
     let matched = recompute_matched(
-        &named(
+        &named_over(
             "review-by-expected-author-login",
             "1",
             &json!({"expectedAuthorLogin": "wanted"}),
+            &only,
         ),
-        &[comment],
+        &only,
     )
     .expect("recompute");
     assert!(
@@ -260,7 +286,7 @@ fn verify_matched_compares_against_the_claim() {
 
     assert!(
         verify_matched(
-            &named("review-by-expected-author-login", "1", &params),
+            &named_over("review-by-expected-author-login", "1", &params, &cands),
             &cands,
             std::slice::from_ref(&a.declared_digest)
         )
@@ -270,7 +296,7 @@ fn verify_matched_compares_against_the_claim() {
     // A claim that the non-matching candidate qualified.
     assert!(
         !verify_matched(
-            &named("review-by-expected-author-login", "1", &params),
+            &named_over("review-by-expected-author-login", "1", &params, &cands),
             &cands,
             std::slice::from_ref(&b.declared_digest)
         )
@@ -281,7 +307,7 @@ fn verify_matched_compares_against_the_claim() {
     // §13 exists to make detectable.
     assert!(
         !verify_matched(
-            &named("review-by-expected-author-login", "1", &params),
+            &named_over("review-by-expected-author-login", "1", &params, &cands),
             &cands,
             &[]
         )

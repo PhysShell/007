@@ -51,11 +51,15 @@ use o7_closure_matcher::{
 };
 
 /// A recorded matcher block for an entry already in hand. Purity, not drift.
-fn bound(entry: &MatcherEntry, parameters: &Value) -> RecordedMatcher {
+fn bound(entry: &MatcherEntry, parameters: &Value, candidates: &[Candidate]) -> RecordedMatcher {
     RecordedMatcher {
         id: entry.id.to_owned(),
         version: entry.version.to_owned(),
         parameters: parameters.clone(),
+        all_returned_snapshot_digests: candidates
+            .iter()
+            .map(|c| c.declared_digest.clone())
+            .collect(),
         implementation: RecordedImplementation::Bound(entry.implementation_digest.to_owned()),
     }
 }
@@ -191,8 +195,8 @@ fn a_candidate_is_judged_without_reference_to_its_neighbours() {
             .map(|(_, c)| c.declared_digest.clone())
             .collect();
 
-        let matched =
-            recompute_matched(&bound(entry, &parameters), &candidates).expect("recompute");
+        let matched = recompute_matched(&bound(entry, &parameters, &candidates), &candidates)
+            .expect("recompute");
         assert_eq!(
             matched.matched, expected,
             "{}/{}: the matched list is not the standalone-true candidates in order",
@@ -204,7 +208,7 @@ fn a_candidate_is_judged_without_reference_to_its_neighbours() {
         let doubled: Vec<Candidate> = candidates.iter().chain(&candidates).cloned().collect();
         let doubled_expected: Vec<String> = expected.iter().chain(&expected).cloned().collect();
         assert_eq!(
-            recompute_matched(&bound(entry, &parameters), &doubled)
+            recompute_matched(&bound(entry, &parameters, &doubled), &doubled)
                 .expect("recompute")
                 .matched,
             doubled_expected,
@@ -232,7 +236,7 @@ fn a_candidate_is_judged_without_reference_to_its_neighbours() {
             .chain(expected.iter().cloned())
             .collect();
         assert_eq!(
-            recompute_matched(&bound(entry, &parameters), &prefixed)
+            recompute_matched(&bound(entry, &parameters, &prefixed), &prefixed)
                 .expect("recompute")
                 .matched,
             prefixed_expected,

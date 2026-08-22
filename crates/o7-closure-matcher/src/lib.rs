@@ -92,7 +92,32 @@ pub struct MatcherEntry {
     /// do, and each vector's hand-authored `expected` does; and because it
     /// covers the vector set itself, so quietly weakening a vector trips it too.
     pub conformance_digest: &'static str,
+    /// The §8 fields this matcher's predicate reads out of a candidate, and the
+    /// `sourceKind` they belong to.
+    ///
+    /// Checked by [`recompute_matched`] before the predicate runs, and
+    /// deliberately NOT inside the predicate: the predicate's bytes are what
+    /// [`MatcherEntry::implementation_digest`] freezes, and a schema precondition
+    /// is not part of the selection rule. §13.1 defines `f` over *canonical
+    /// source snapshots*; an object that is not one is outside its domain rather
+    /// than an input it should answer `false` for.
+    ///
+    /// This is not full §8 validation — only the fields this predicate depends
+    /// on. Validating the whole closed shape belongs to the provenance schema
+    /// validator, which is where a snapshot first becomes classifier input.
+    pub candidate_requirement: CandidateRequirement,
     pub predicate: MatcherFn,
+}
+
+/// The candidate fields a matcher depends on, as a precondition of replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CandidateRequirement {
+    /// Only candidates declaring this `sourceKind` are checked. A candidate of a
+    /// different kind is a genuine non-match, not a malformed one — that is the
+    /// delivery-surface law, and it must keep returning `false`.
+    pub source_kind: &'static str,
+    /// JSON pointers that MUST resolve to strings on a candidate of that kind.
+    pub required_strings: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +169,26 @@ pub enum MatchError {
     },
     /// A candidate's declared digest is not the digest of the snapshot beside it.
     CandidateDigestMismatch { declared: String, computed: String },
+    /// The candidates supplied for replay are not the ones the snapshot declared,
+    /// in the order it declared them. Refused rather than replayed over what is
+    /// present, because a matcher run over a subset answers a different question
+    /// than the one the snapshot recorded.
+    CandidateSetMismatch {
+        declared: Vec<String>,
+        supplied: Vec<String>,
+    },
+    /// A candidate declares a `sourceKind` whose §8 schema requires a field the
+    /// candidate does not carry as a string.
+    ///
+    /// Refused rather than treated as a non-match. A review whose `user.login`
+    /// did not survive projection is evidence that could not be read, and
+    /// reporting it as "did not match" turns an unreadable snapshot into a
+    /// negative result — the absence claim §13 exists to prevent.
+    IncompleteCandidate {
+        source_kind: String,
+        pointer: &'static str,
+        declared_digest: String,
+    },
     /// A durable artifact recorded one implementation digest for this
     /// `(id, version)` and the registry now resolves it to another.
     ///
@@ -201,6 +246,27 @@ impl std::fmt::Display for MatchError {
                  is not editable from here, so the disagreement is real: either the \
                  artifact was produced by different code under the same version, or \
                  this version's implementation changed without taking a new one"
+            ),
+            Self::CandidateSetMismatch { declared, supplied } => write!(
+                f,
+                "replay was given a candidate sequence that is not the one the \
+                 snapshot declared. Declared {} in observation order, supplied {}. \
+                 §13 obliges the matched subsequence to be recomputable from the \
+                 complete candidate set, so a partially resolved bundle is refused \
+                 rather than replayed over the part that loaded",
+                declared.len(),
+                supplied.len()
+            ),
+            Self::IncompleteCandidate {
+                source_kind,
+                pointer,
+                declared_digest,
+            } => write!(
+                f,
+                "candidate {declared_digest} declares sourceKind {source_kind:?}, whose \
+                 §8 schema requires {pointer}, and does not carry it as a string. This \
+                 is refused rather than reported as a non-match: evidence that could \
+                 not be read is not evidence of absence"
             ),
             Self::MalformedRecordedMatcher { why } => {
                 write!(f, "the recorded matcher block is malformed: {why}")
@@ -394,6 +460,16 @@ pub enum ImplementationCheck {
 pub struct RecordedMatcher {
     pub id: String,
     pub version: String,
+    /// `allReturnedSnapshotDigests` exactly as the snapshot declared it, in §13.2
+    /// observation order.
+    ///
+    /// Replay is bound to this list, not to whatever a caller happens to hold.
+    /// §13 obliges `matchedSnapshotDigests` to be recomputable from *the complete
+    /// candidate set*; a caller that resolved only some of it — a retained blob
+    /// that would not load, a truncated bundle — must not be able to reproduce an
+    /// absence claim over the part that did load. An empty slice reproducing an
+    /// empty claim is precisely "partial success is not success" (AGENTS.md).
+    pub all_returned_snapshot_digests: Vec<String>,
     pub parameters: Value,
     pub implementation: RecordedImplementation,
 }
@@ -458,6 +534,21 @@ impl RecordedMatcher {
                 },
             )?,
             implementation,
+            all_returned_snapshot_digests: snapshot
+                .get("allReturnedSnapshotDigests")
+                .and_then(Value::as_array)
+                .ok_or(MatchError::MalformedRecordedMatcher {
+                    why: "no allReturnedSnapshotDigests array",
+                })?
+                .iter()
+                .map(|d| {
+                    d.as_str()
+                        .map(str::to_owned)
+                        .ok_or(MatchError::MalformedRecordedMatcher {
+                            why: "a candidate digest is not a string",
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         })
     }
 }
@@ -529,6 +620,19 @@ pub fn recompute_matched(
     let implementation = check_recorded_implementation(entry, &recorded.implementation)?;
     check_parameters(entry, &recorded.parameters)?;
 
+    // The candidate sequence is the snapshot's, not the caller's. Length and
+    // order both, since §13.2 puts observation order inside the query digest.
+    let supplied: Vec<String> = candidates
+        .iter()
+        .map(|c| c.declared_digest.clone())
+        .collect();
+    if supplied != recorded.all_returned_snapshot_digests {
+        return Err(MatchError::CandidateSetMismatch {
+            declared: recorded.all_returned_snapshot_digests.clone(),
+            supplied,
+        });
+    }
+
     let mut matched = Vec::new();
     for candidate in candidates {
         let computed = digest(&candidate.snapshot)?;
@@ -538,6 +642,7 @@ pub fn recompute_matched(
                 computed: computed.as_str().to_owned(),
             });
         }
+        check_candidate_shape(entry, candidate)?;
         if (entry.predicate)(&candidate.snapshot, &recorded.parameters)? {
             matched.push(candidate.declared_digest.clone());
         }
@@ -569,6 +674,36 @@ pub fn verify_matched(
     let replay = recompute_matched(recorded, candidates)?;
     let reproduced = replay.matched == claimed;
     Ok(MatchedVerdict { replay, reproduced })
+}
+
+/// A candidate of the matcher's target kind must carry the fields the predicate
+/// reads. A candidate of any other kind is left alone — deciding it is the
+/// predicate's job, and the answer is a legitimate `false`.
+fn check_candidate_shape(entry: &MatcherEntry, candidate: &Candidate) -> Result<(), MatchError> {
+    let requirement = &entry.candidate_requirement;
+    if candidate
+        .snapshot
+        .pointer("/sourceKind")
+        .and_then(Value::as_str)
+        != Some(requirement.source_kind)
+    {
+        return Ok(());
+    }
+    for pointer in requirement.required_strings {
+        if candidate
+            .snapshot
+            .pointer(pointer)
+            .and_then(Value::as_str)
+            .is_none()
+        {
+            return Err(MatchError::IncompleteCandidate {
+                source_kind: requirement.source_kind.to_owned(),
+                pointer,
+                declared_digest: candidate.declared_digest.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// §13.1: parameters are exactly what the matcher reads. Not a superset, so a
