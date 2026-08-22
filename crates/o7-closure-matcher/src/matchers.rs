@@ -32,7 +32,64 @@
 //! with the implementation, changing the witness set and changing the rule would
 //! move the same digest, and the two facts would stop being separable.
 
-use crate::{CandidateRequirement, ConformanceVector, MatcherEntry};
+use crate::{CandidateSchema, ConformanceVector, MatcherEntry, Member, ValueKind};
+
+const fn req(name: &'static str) -> Member {
+    Member {
+        name,
+        required: true,
+        kind: ValueKind::Text,
+    }
+}
+const fn opt(name: &'static str) -> Member {
+    Member {
+        name,
+        required: false,
+        kind: ValueKind::Text,
+    }
+}
+const fn int(name: &'static str) -> Member {
+    Member {
+        name,
+        required: true,
+        kind: ValueKind::Integer,
+    }
+}
+
+/// §8.2, verbatim. REQUIRED: schemaVersion, sourceKind, stableId, user.id,
+/// user.login, user.type, authorAssociation, state, body, submittedAt, commitId.
+/// OPTIONAL-IF-PRESENT: none — this shape is entirely required.
+const SUBMITTED_REVIEW_USER: &[Member] = &[req("id"), req("login"), req("type")];
+const SUBMITTED_REVIEW_V1: &[Member] = &[
+    int("schemaVersion"),
+    req("sourceKind"),
+    req("stableId"),
+    Member {
+        name: "user",
+        required: true,
+        kind: ValueKind::Object(SUBMITTED_REVIEW_USER),
+    },
+    req("authorAssociation"),
+    req("state"),
+    req("body"),
+    req("submittedAt"),
+    req("commitId"),
+];
+
+/// §8.3, verbatim. REQUIRED: schemaVersion, sourceKind, stableId, name, headSha,
+/// status. OPTIONAL-IF-PRESENT: conclusion, startedAt, completedAt — a queued run
+/// has no conclusion, and §8 says it is then absent, not null.
+const ACTIONS_CHECK_V1: &[Member] = &[
+    int("schemaVersion"),
+    req("sourceKind"),
+    req("stableId"),
+    req("name"),
+    req("headSha"),
+    req("status"),
+    opt("conclusion"),
+    opt("startedAt"),
+    opt("completedAt"),
+];
 
 pub(crate) mod actions_check_by_name_v1;
 pub(crate) mod review_by_expected_author_login_v1;
@@ -120,9 +177,9 @@ pub(crate) const REVIEW_BY_EXPECTED_AUTHOR_LOGIN_V1: MatcherEntry = MatcherEntry
     implementation_digest:
         "sha256:59ea097cb9ea6705ebff04487a35861af0ea2b1b8e3e7c4980485af52f9567e9",
     conformance_digest: "sha256:7ea10c56ced0cc83ac3889750fd2a133584275d39f6f5fe809f744ebf74c5178",
-    candidate_requirement: CandidateRequirement {
+    candidate_schema: CandidateSchema {
         source_kind: "github-submitted-review",
-        required_strings: &["/user/login"],
+        members: SUBMITTED_REVIEW_V1,
     },
     predicate: review_by_expected_author_login_v1::matches,
 };
@@ -136,9 +193,9 @@ pub(crate) const ACTIONS_CHECK_BY_NAME_V1: MatcherEntry = MatcherEntry {
     implementation_digest:
         "sha256:0400752fb274d0ab8e1540ce39b95fb9c122749612560519f54882074618c4c4",
     conformance_digest: "sha256:524e0585621242e6e7a995f952473dd15b01d3da66663c6505fc244a7714d01a",
-    candidate_requirement: CandidateRequirement {
+    candidate_schema: CandidateSchema {
         source_kind: "github-actions-check",
-        required_strings: &["/name"],
+        members: ACTIONS_CHECK_V1,
     },
     predicate: actions_check_by_name_v1::matches,
 };

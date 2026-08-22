@@ -92,8 +92,8 @@ pub struct MatcherEntry {
     /// do, and each vector's hand-authored `expected` does; and because it
     /// covers the vector set itself, so quietly weakening a vector trips it too.
     pub conformance_digest: &'static str,
-    /// The §8 fields this matcher's predicate reads out of a candidate, and the
-    /// `sourceKind` they belong to.
+    /// The closed §8 shape a candidate must have for this matcher to be allowed
+    /// to score it.
     ///
     /// Checked by [`recompute_matched`] before the predicate runs, and
     /// deliberately NOT inside the predicate: the predicate's bytes are what
@@ -102,22 +102,48 @@ pub struct MatcherEntry {
     /// source snapshots*; an object that is not one is outside its domain rather
     /// than an input it should answer `false` for.
     ///
-    /// This is not full §8 validation — only the fields this predicate depends
-    /// on. Validating the whole closed shape belongs to the provenance schema
-    /// validator, which is where a snapshot first becomes classifier input.
-    pub candidate_requirement: CandidateRequirement,
+    /// This is the whole shape, not merely the fields the predicate reads. A
+    /// candidate missing `commitId` is not a canonical source snapshot even
+    /// though no matcher reads `commitId`, and scoring it `false` would let an
+    /// empty matched set be assembled out of objects that are not evidence.
+    pub candidate_schema: CandidateSchema,
     pub predicate: MatcherFn,
 }
 
-/// The candidate fields a matcher depends on, as a precondition of replay.
+/// One member of a closed §8 shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CandidateRequirement {
+pub struct Member {
+    pub name: &'static str,
+    /// REQUIRED members must be present. OPTIONAL-IF-PRESENT members may be
+    /// absent — but never `null`: §8 says an absent field is absent, and `null`
+    /// is a value that claims the field was observed as empty.
+    pub required: bool,
+    pub kind: ValueKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueKind {
+    Text,
+    Integer,
+    /// A nested object with its own closed shape, e.g. `user`.
+    Object(&'static [Member]),
+}
+
+/// The §8 shape a candidate of one `sourceKind` must have to be admissible input
+/// to a matcher.
+///
+/// §8 shapes are **closed** key sets, so this checks both directions: every
+/// required member present with the right type, and no member outside the
+/// declared set. A subset check would let a candidate carry an unknown field
+/// past replay, and a required-only check would let a truncated projection be
+/// scored as a candidate that did not qualify.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CandidateSchema {
     /// Only candidates declaring this `sourceKind` are checked. A candidate of a
     /// different kind is a genuine non-match, not a malformed one — that is the
     /// delivery-surface law, and it must keep returning `false`.
     pub source_kind: &'static str,
-    /// JSON pointers that MUST resolve to strings on a candidate of that kind.
-    pub required_strings: &'static [&'static str],
+    pub members: &'static [Member],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,8 +203,8 @@ pub enum MatchError {
         declared: Vec<String>,
         supplied: Vec<String>,
     },
-    /// A candidate declares a `sourceKind` whose §8 schema requires a field the
-    /// candidate does not carry as a string.
+    /// A candidate declares a `sourceKind` and does not conform to that kind's
+    /// closed §8 shape.
     ///
     /// Refused rather than treated as a non-match. A review whose `user.login`
     /// did not survive projection is evidence that could not be read, and
@@ -186,7 +212,7 @@ pub enum MatchError {
     /// negative result — the absence claim §13 exists to prevent.
     IncompleteCandidate {
         source_kind: String,
-        pointer: &'static str,
+        why: String,
         declared_digest: String,
     },
     /// A durable artifact recorded one implementation digest for this
@@ -259,14 +285,14 @@ impl std::fmt::Display for MatchError {
             ),
             Self::IncompleteCandidate {
                 source_kind,
-                pointer,
+                why,
                 declared_digest,
             } => write!(
                 f,
-                "candidate {declared_digest} declares sourceKind {source_kind:?}, whose \
-                 §8 schema requires {pointer}, and does not carry it as a string. This \
-                 is refused rather than reported as a non-match: evidence that could \
-                 not be read is not evidence of absence"
+                "candidate {declared_digest} declares sourceKind {source_kind:?} and does \
+                 not conform to that kind's closed §8 shape: {why}. This is refused \
+                 rather than reported as a non-match: evidence that could not be read is \
+                 not evidence of absence"
             ),
             Self::MalformedRecordedMatcher { why } => {
                 write!(f, "the recorded matcher block is malformed: {why}")
@@ -676,31 +702,66 @@ pub fn verify_matched(
     Ok(MatchedVerdict { replay, reproduced })
 }
 
-/// A candidate of the matcher's target kind must carry the fields the predicate
-/// reads. A candidate of any other kind is left alone — deciding it is the
+/// A candidate of the matcher's target kind must conform to that kind's closed
+/// §8 shape. A candidate of any other kind is left alone — deciding it is the
 /// predicate's job, and the answer is a legitimate `false`.
 fn check_candidate_shape(entry: &MatcherEntry, candidate: &Candidate) -> Result<(), MatchError> {
-    let requirement = &entry.candidate_requirement;
+    let schema = &entry.candidate_schema;
     if candidate
         .snapshot
         .pointer("/sourceKind")
         .and_then(Value::as_str)
-        != Some(requirement.source_kind)
+        != Some(schema.source_kind)
     {
         return Ok(());
     }
-    for pointer in requirement.required_strings {
-        if candidate
-            .snapshot
-            .pointer(pointer)
-            .and_then(Value::as_str)
-            .is_none()
-        {
-            return Err(MatchError::IncompleteCandidate {
-                source_kind: requirement.source_kind.to_owned(),
-                pointer,
-                declared_digest: candidate.declared_digest.clone(),
-            });
+    check_shape(&candidate.snapshot, schema.members, "").map_err(|why| {
+        MatchError::IncompleteCandidate {
+            source_kind: schema.source_kind.to_owned(),
+            why,
+            declared_digest: candidate.declared_digest.clone(),
+        }
+    })
+}
+
+/// Both directions of a closed shape: nothing required missing, nothing outside
+/// the declared set present.
+fn check_shape(value: &Value, members: &[Member], path: &str) -> Result<(), String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| format!("{path}/ is not an object"))?;
+
+    for member in members {
+        let at = format!("{path}/{}", member.name);
+        match object.get(member.name) {
+            None => {
+                if member.required {
+                    return Err(format!("{at} is REQUIRED and absent"));
+                }
+            }
+            Some(Value::Null) => {
+                return Err(format!(
+                    "{at} is null; §8 says an absent field is absent, not null"
+                ))
+            }
+            Some(found) => match member.kind {
+                ValueKind::Text if found.as_str().is_none() => {
+                    return Err(format!("{at} is not a string"))
+                }
+                ValueKind::Integer if !found.is_i64() && !found.is_u64() => {
+                    return Err(format!("{at} is not an integer"))
+                }
+                ValueKind::Object(nested) => check_shape(found, nested, &at)?,
+                _ => {}
+            },
+        }
+    }
+
+    for key in object.keys() {
+        if !members.iter().any(|m| m.name == key.as_str()) {
+            return Err(format!(
+                "{path}/{key} is outside the closed §8 key set for this kind"
+            ));
         }
     }
     Ok(())

@@ -1,5 +1,5 @@
-//! The two P1s Codex found at `080aa7b`, closed, with the witnesses that keep
-//! them closed.
+//! What counts as admissible input to a replay: three P1s from two reviewers,
+//! closed, with the witnesses that keep them closed.
 //!
 //! Both are the same sentence from AGENTS.md, at two different layers:
 //!
@@ -21,6 +21,20 @@
 //! declared candidates got `reproduced: true` against an empty claim. Specimen
 //! G's whole failure mode, re-entering through the API rather than through a
 //! fixture.
+//!
+//! P1 #3 — the first fix for #1 was incomplete, and the contract said so. It
+//! checked only the fields the predicate reads, and §13.1 as written says a
+//! candidate that "omits a field that kind requires" is inadmissible. So a review
+//! carrying `user.login` but missing `state`, `commitId` or `submittedAt` passed
+//! the check, scored `false` on the login comparison, and could contribute to an
+//! empty matched set — the same defect as #1, one field over. The document and
+//! the mechanism disagreed, and both were written in the same push.
+//!
+//! The check is now the whole closed §8 shape for the kind: every required member
+//! present with the right type, no member outside the declared set, and no `null`
+//! standing in for an absent one. `commitId` is validated even though no matcher
+//! reads it, because "is this a canonical source snapshot" is not the same
+//! question as "does this matcher need it".
 //!
 //! WHERE THE FIXES LIVE, AND WHY NOT WHERE THEY WERE SUGGESTED. The review
 //! proposed validating inside the predicate. The check sits in
@@ -101,12 +115,13 @@ fn an_unreadable_review_is_refused_rather_than_counted_as_a_non_match() {
     );
     match outcome {
         Err(MatchError::IncompleteCandidate {
-            source_kind,
-            pointer,
-            ..
+            source_kind, why, ..
         }) => {
             assert_eq!(source_kind, "github-submitted-review");
-            assert_eq!(pointer, "/user/login");
+            assert!(
+                why.contains("login"),
+                "the diagnostic names the field: {why}"
+            );
         }
         other => panic!("an unreadable review must be refused, got {other:?}"),
     }
@@ -204,4 +219,104 @@ fn an_empty_declaration_replayed_over_nothing_is_not_a_mismatch() {
     let recorded = over(&[], json!({"expectedAuthorLogin": "wanted"}));
     let replay = recompute_matched(&recorded, &[]).expect("replay");
     assert!(replay.matched.is_empty());
+}
+
+// ---- P1 #3: the shape check is the whole §8 shape, not the fields read.
+
+fn review_missing(field: &str) -> Value {
+    let mut v = review(Some("other"));
+    v.as_object_mut().expect("object").remove(field);
+    v
+}
+
+/// The exact case the review named: a login that is present and simply does not
+/// match, on an object that is missing fields no matcher reads. Before the fix
+/// this scored `false` and fed an empty matched set.
+#[test]
+fn a_review_missing_a_field_no_matcher_reads_is_still_inadmissible() {
+    for field in [
+        "state",
+        "commitId",
+        "submittedAt",
+        "body",
+        "authorAssociation",
+        "stableId",
+    ] {
+        let broken = [candidate(review_missing(field))];
+        let outcome = recompute_matched(
+            &over(&broken, json!({"expectedAuthorLogin": "wanted"})),
+            &broken,
+        );
+        match outcome {
+            Err(MatchError::IncompleteCandidate { why, .. }) => {
+                assert!(why.contains(field), "the diagnostic names {field}: {why}");
+            }
+            other => panic!("a review missing {field} must be refused, got {other:?}"),
+        }
+    }
+}
+
+/// §8 shapes are closed in both directions, so an unknown member is refused too.
+/// A subset check would let a field ride along into replay unexamined.
+#[test]
+fn a_member_outside_the_closed_shape_is_refused() {
+    let mut extra = review(Some("wanted"));
+    extra
+        .as_object_mut()
+        .expect("object")
+        .insert("htmlUrl".to_owned(), json!("https://example.invalid/x"));
+    let broken = [candidate(extra)];
+    assert!(
+        matches!(
+            recompute_matched(
+                &over(&broken, json!({"expectedAuthorLogin": "wanted"})),
+                &broken
+            ),
+            Err(MatchError::IncompleteCandidate { .. })
+        ),
+        "a locator smuggled into a canonical snapshot is not a canonical snapshot"
+    );
+}
+
+/// §8: an absent field is absent. `null` is a value claiming the field was
+/// observed and empty, which is a different assertion.
+#[test]
+fn null_is_not_how_an_absent_field_is_expressed() {
+    let mut nulled = review(Some("wanted"));
+    nulled.as_object_mut().expect("object")["commitId"] = Value::Null;
+    let broken = [candidate(nulled)];
+    match recompute_matched(
+        &over(&broken, json!({"expectedAuthorLogin": "wanted"})),
+        &broken,
+    ) {
+        Err(MatchError::IncompleteCandidate { why, .. }) => {
+            assert!(why.contains("null"), "{why}");
+        }
+        other => panic!("a null required field must be refused, got {other:?}"),
+    }
+}
+
+/// The nested shape is closed as well — `user` is not exempt from being checked
+/// because it is an object rather than a scalar.
+#[test]
+fn the_nested_user_object_is_checked_too() {
+    let mut no_type = review(Some("wanted"));
+    no_type.as_object_mut().expect("object")["user"]
+        .as_object_mut()
+        .expect("user object")
+        .remove("type");
+    let broken = [candidate(no_type)];
+    match recompute_matched(
+        &over(&broken, json!({"expectedAuthorLogin": "wanted"})),
+        &broken,
+    ) {
+        Err(MatchError::IncompleteCandidate { why, .. }) => {
+            assert!(
+                why.contains("user/type"),
+                "user.type is REQUIRED and distinguishes Bot from User without \
+                 string-matching a login: {why}"
+            );
+        }
+        other => panic!("a user object missing type must be refused, got {other:?}"),
+    }
 }

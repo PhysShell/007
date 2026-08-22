@@ -641,6 +641,15 @@ Note that the digest binding does not catch this: a truncated projection hashes
 to its own digest correctly, so every candidate can verify while the set as a
 whole is unreadable. *An absent signal is not a negative result.*
 
+"Conform to its §8 schema" means the **whole** closed shape for that
+`sourceKind`, not the subset a particular matcher happens to read. A review
+missing `commitId` is not a canonical source snapshot even though no registered
+matcher reads `commitId`, and admitting it because the selection rule would not
+have looked at that field lets an empty matched set be assembled out of objects
+that are not evidence. Both directions of the closed key set are checked, since a
+member outside the declared set is a §8 violation exactly as a missing one is,
+and `null` never stands in for an absent optional member.
+
 The second rule is a precondition of the pipeline, not a branch of the predicate.
 Placing it inside `f` would make the matcher's own bytes carry schema knowledge
 and would make a schema correction a matcher behaviour change under §13.1 —
@@ -1207,6 +1216,13 @@ line in `AGENTS.md` about missing evidence not being a passed check.
   reason recorded, because the placement is load-bearing rather than stylistic:
   inside `f` it would make every schema correction a matcher behaviour change
   under §13.1's own versioning rule.
+- **§13.1 — conformance means the whole closed shape**, stated explicitly after
+  the first implementation of the rule above checked only the fields the matcher
+  reads. The document said "a field that kind requires" and the code said "a
+  field this matcher reads", and both were written in the same push, so nothing
+  compared them. `crates/o7-closure-matcher/tests/schema_parity.rs` now parses
+  §8.2 and §8.3 out of this document and fails if the two ever disagree again —
+  the expectation is the contract, not a second copy of the key set.
 
 Both were caught by review of the implementation, not of the contract, which is
 worth recording as a fact about where these defects live. §13's conformance
