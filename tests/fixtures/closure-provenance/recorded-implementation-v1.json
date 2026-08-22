@@ -1,0 +1,100 @@
+{
+  "specimenSet": "closure-provenance-v1",
+  "specimens": [
+    "I"
+  ],
+  "synthetic": true,
+  "contract": "docs/architecture/closure-source-provenance-v1.md",
+  "witnesses": [
+    "13",
+    "13.1",
+    "13.2"
+  ],
+  "what": "a query snapshot that records WHICH IMPLEMENTATION of the matcher produced its matched subsequence",
+  "why": "G proves a matched subsequence must be recomputable from retained candidates. It does not pin the code that recomputes it: matcher.id and matcher.version are a name and a number, and a tree that edits the predicate and its declared digest in one commit satisfies every in-tree check while /1 quietly means something else. This specimen records the implementation digest alongside the identity pair, so the artifact carries the identity of the code that produced it and later code claiming the same /1 cannot re-bless it.",
+  "pairedWith": "matcher-candidate-set-v1.json",
+  "contrastWith": "G's claim does NOT reproduce, and the contradiction is visible in the matched subsequence. Here the claim DOES reproduce and every behavioural check agrees, so the only thing that can fail is the recorded implementation binding. That isolation is the point, the way F isolates the trim: if this specimen also had a behavioural disagreement, a failure would not say which mechanism caught it.",
+  "matcherRule": "true when the candidate is a github-submitted-review whose user.login equals parameters.expectedAuthorLogin. Nothing about the review's state enters the rule — the classifier judges verdicts, the matcher only selects.",
+  "schemaVersionNote": "schemaVersion 2 of github-query-snapshot. Version 1 has no implementationDigest and cannot witness which code ran; specimens C, D and G stay at version 1 and are untouched, because they are the record of what the contract required when they were written. Replaying a version-1 snapshot yields CANNOT_CHECK on this axis, never a pass.",
+  "candidates": [
+    {
+      "candidateId": "I-unrelated",
+      "satisfiesMatcherRule": false,
+      "note": "different author login; APPROVED, so a rule that leaked review state would still exclude it for the wrong reason",
+      "canonical": {
+        "schemaVersion": 1,
+        "sourceKind": "github-submitted-review",
+        "stableId": "9000000301",
+        "user": {
+          "id": "9000000905",
+          "login": "synthetic-drive-by",
+          "type": "User"
+        },
+        "authorAssociation": "NONE",
+        "state": "APPROVED",
+        "body": "Looks fine to me.\n",
+        "submittedAt": "2026-08-07T10:00:00Z",
+        "commitId": "3a2b1c0d9e8f776655443322110099887766554f"
+      },
+      "canonicalDigest": "sha256:698fa8110c61a25d35f2b31915a087e813e788eba8e9938f203df44ff4fabf05"
+    },
+    {
+      "candidateId": "I-qualifying",
+      "satisfiesMatcherRule": true,
+      "note": "author login equals the expected author",
+      "canonical": {
+        "schemaVersion": 1,
+        "sourceKind": "github-submitted-review",
+        "stableId": "9000000302",
+        "user": {
+          "id": "9000000901",
+          "login": "synthetic-external-reviewer",
+          "type": "User"
+        },
+        "authorAssociation": "NONE",
+        "state": "APPROVED",
+        "body": "Manifest member is reachable now.\n",
+        "submittedAt": "2026-08-07T10:41:19Z",
+        "commitId": "3a2b1c0d9e8f776655443322110099887766554f"
+      },
+      "canonicalDigest": "sha256:742c21bc8cd04d4123bff50215ffcf17d732e73b1ec07e99826beb302c744888"
+    }
+  ],
+  "canonical": {
+    "schemaVersion": 2,
+    "sourceKind": "github-query-snapshot",
+    "surface": "pull-request-reviews",
+    "requiredObservationId": "review/external-auditor",
+    "binding": {
+      "repository": "PhysShell/007",
+      "pullRequest": "9003"
+    },
+    "pagination": {
+      "perPage": 100,
+      "pagesRequested": [
+        "1"
+      ],
+      "pagesObtained": [
+        "1"
+      ],
+      "nextPagePresent": false
+    },
+    "enumeration": "COMPLETE",
+    "matcher": {
+      "id": "review-by-expected-author-login",
+      "version": "1",
+      "implementationDigest": "sha256:59ea097cb9ea6705ebff04487a35861af0ea2b1b8e3e7c4980485af52f9567e9",
+      "parameters": {
+        "expectedAuthorLogin": "synthetic-external-reviewer"
+      }
+    },
+    "allReturnedSnapshotDigests": [
+      "sha256:698fa8110c61a25d35f2b31915a087e813e788eba8e9938f203df44ff4fabf05",
+      "sha256:742c21bc8cd04d4123bff50215ffcf17d732e73b1ec07e99826beb302c744888"
+    ],
+    "matchedSnapshotDigests": [
+      "sha256:742c21bc8cd04d4123bff50215ffcf17d732e73b1ec07e99826beb302c744888"
+    ]
+  },
+  "canonicalDigest": "sha256:30b88c6cb7f0ce43e7c4ba22bc57561e09a3a8d2b52b0253cd8401ce4a4492ea"
+}

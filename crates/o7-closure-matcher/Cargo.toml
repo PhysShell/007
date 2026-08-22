@@ -1,0 +1,28 @@
+[package]
+name = "o7-closure-matcher"
+version = "0.1.0"
+edition = "2021"
+description = "Matcher implementation binding for closure query snapshots: resolves provenance V1 §13.1's matcher.id + matcher.version to exactly one immutable predicate, and recomputes a matched subsequence from retained candidates."
+publish = false
+
+[lib]
+name = "o7_closure_matcher"
+path = "src/lib.rs"
+
+[dependencies]
+o7-closure-canonical = { path = "../o7-closure-canonical" }
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
