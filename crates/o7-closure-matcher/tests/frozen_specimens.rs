@@ -108,8 +108,12 @@ fn the_matcher_the_specimens_name_now_resolves() {
         "recorded-implementation-v1.json",
     ] {
         let q = query_of(name);
-        resolve(&q.recorded.id, &q.recorded.version).unwrap_or_else(|e| {
-            panic!("{name} names {}/{}: {e}", q.recorded.id, q.recorded.version)
+        resolve(q.recorded.id(), q.recorded.version()).unwrap_or_else(|e| {
+            panic!(
+                "{name} names {}/{}: {e}",
+                q.recorded.id(),
+                q.recorded.version()
+            )
         });
     }
 }
@@ -123,7 +127,7 @@ fn specimen_g_s_empty_matched_subset_does_not_survive_re_execution() {
     let q = query_of("matcher-candidate-set-v1.json");
     assert_eq!(q.candidates.len(), 2, "G retains two candidates");
     assert!(
-        q.recorded.matched_snapshot_digests.is_empty(),
+        q.recorded.matched_snapshot_digests().is_empty(),
         "G claims an empty matched subset"
     );
 
@@ -180,7 +184,8 @@ fn the_c_g_pair_is_separated_by_re_execution_not_by_the_claimed_value() {
     let g = query_of("matcher-candidate-set-v1.json");
 
     assert_eq!(
-        c.recorded.matched_snapshot_digests, g.recorded.matched_snapshot_digests,
+        c.recorded.matched_snapshot_digests(),
+        g.recorded.matched_snapshot_digests(),
         "both claim the same empty matched list"
     );
     assert!(c.candidates.is_empty());

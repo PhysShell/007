@@ -46,25 +46,63 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_matcher::{
-    recompute_matched, verify_binding, Candidate, MatcherEntry, RecordedImplementation,
-    RecordedMatcher, REGISTRY,
+    recompute_matched, verify_binding, Candidate, MatcherEntry, RecordedMatcher, REGISTRY,
 };
+use serde_json::{json, Value};
 
-/// A recorded matcher block for an entry already in hand. Purity, not drift.
+/// A recorded matcher for an entry already in hand. Purity, not drift.
 fn bound(entry: &MatcherEntry, parameters: &Value, candidates: &[Candidate]) -> RecordedMatcher {
-    RecordedMatcher {
-        id: entry.id.to_owned(),
-        version: entry.version.to_owned(),
-        parameters: parameters.clone(),
-        matched_snapshot_digests: Vec::new(),
-        all_returned_snapshot_digests: candidates
-            .iter()
-            .map(|c| c.declared_digest.clone())
-            .collect(),
-        implementation: RecordedImplementation::Bound(entry.implementation_digest.to_owned()),
-    }
+    let declared: Vec<String> = candidates
+        .iter()
+        .map(|c| c.declared_digest.clone())
+        .collect();
+    snapshot(
+        entry.id,
+        entry.version,
+        parameters,
+        &declared,
+        &[],
+        Some(entry.implementation_digest),
+    )
 }
-use serde_json::Value;
+
+/// Build a `github-query-snapshot` and parse it, because that is the only way to
+/// obtain a `RecordedMatcher`.
+///
+/// Deliberately not a shortcut past the parser: a test that could assemble one
+/// field-by-field would be testing a value production code can never see.
+fn snapshot(
+    id: &str,
+    version: &str,
+    parameters: &Value,
+    all_returned: &[String],
+    claimed: &[String],
+    implementation: Option<&str>,
+) -> RecordedMatcher {
+    let mut matcher = json!({
+        "id": id,
+        "version": version,
+        "parameters": parameters.clone(),
+    });
+    let schema_version = match implementation {
+        Some(digest) => {
+            matcher
+                .as_object_mut()
+                .expect("the matcher block is an object")
+                .insert("implementationDigest".to_owned(), json!(digest));
+            2
+        }
+        None => 1,
+    };
+    RecordedMatcher::from_query_snapshot(&json!({
+        "schemaVersion": schema_version,
+        "sourceKind": "github-query-snapshot",
+        "matcher": matcher,
+        "allReturnedSnapshotDigests": all_returned,
+        "matchedSnapshotDigests": claimed,
+    }))
+    .expect("a well-formed query snapshot parses")
+}
 
 /// Set on the subprocess by `vectors_hold_under_a_perturbed_environment`.
 const REEXEC_MARKER: &str = "O7_MATCHER_AMBIENT_PROBE_CHILD";

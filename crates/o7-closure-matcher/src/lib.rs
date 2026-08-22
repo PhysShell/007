@@ -498,8 +498,8 @@ pub enum ImplementationCheck {
 /// A matcher block as some durable artifact recorded it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedMatcher {
-    pub id: String,
-    pub version: String,
+    id: String,
+    version: String,
     /// `matchedSnapshotDigests` exactly as the snapshot claimed it.
     ///
     /// Carried rather than passed in, for the same reason as the field below and
@@ -508,7 +508,7 @@ pub struct RecordedMatcher {
     /// recomputed value in place of the artifact's own would report `reproduced`
     /// for a snapshot that contradicts itself, which is the one thing §13 asks
     /// replay to surface.
-    pub matched_snapshot_digests: Vec<String>,
+    matched_snapshot_digests: Vec<String>,
     /// `allReturnedSnapshotDigests` exactly as the snapshot declared it, in §13.2
     /// observation order.
     ///
@@ -518,12 +518,48 @@ pub struct RecordedMatcher {
     /// that would not load, a truncated bundle — must not be able to reproduce an
     /// absence claim over the part that did load. An empty slice reproducing an
     /// empty claim is precisely "partial success is not success" (AGENTS.md).
-    pub all_returned_snapshot_digests: Vec<String>,
-    pub parameters: Value,
-    pub implementation: RecordedImplementation,
+    all_returned_snapshot_digests: Vec<String>,
+    parameters: Value,
+    implementation: RecordedImplementation,
 }
 
 impl RecordedMatcher {
+    /// Every field is private and there is exactly one constructor, which reads
+    /// an artifact.
+    ///
+    /// The fields carry the values replay is checked against, and §13.1 says
+    /// nothing being checked may arrive from the party being checked. Public
+    /// fields leave that as a convention: a caller could parse a snapshot whose
+    /// claim is false, overwrite `matched_snapshot_digests` with the recomputed
+    /// list, and get `reproduced: true` — reintroducing, through assignment, the
+    /// exact bypass that removing the `claimed` parameter closed. Private fields
+    /// make a `RecordedMatcher` unforgeable evidence of what an artifact said,
+    /// so the rule is enforced by construction rather than by discipline.
+    ///
+    /// Tests build a snapshot and parse it like anything else. That costs a few
+    /// lines per case and buys the guarantee that the only path into this type
+    /// is the one production uses.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+    pub fn parameters(&self) -> &Value {
+        &self.parameters
+    }
+    /// `matchedSnapshotDigests` as the snapshot claimed it.
+    pub fn matched_snapshot_digests(&self) -> &[String] {
+        &self.matched_snapshot_digests
+    }
+    /// `allReturnedSnapshotDigests` as the snapshot declared it, in §13.2 order.
+    pub fn all_returned_snapshot_digests(&self) -> &[String] {
+        &self.all_returned_snapshot_digests
+    }
+    pub fn implementation(&self) -> &RecordedImplementation {
+        &self.implementation
+    }
+
     /// Read the matcher block out of a canonical `github-query-snapshot`.
     ///
     /// `schemaVersion` 1 yields [`RecordedImplementation::Unrecorded`];

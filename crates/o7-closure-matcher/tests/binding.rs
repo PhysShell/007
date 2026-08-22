@@ -10,7 +10,7 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{
     recompute_matched, resolve, verify_binding, verify_matched, Candidate, MatchError,
-    RecordedImplementation, RecordedMatcher, REGISTRY,
+    RecordedMatcher, REGISTRY,
 };
 use serde_json::{json, Value};
 
@@ -112,19 +112,16 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
     ));
 }
 
-/// A recorded matcher block that agrees with this tree by construction.
+/// A recorded matcher that agrees with this tree by construction.
 ///
 /// These tests are about selection — order, duplicates, parameters, surface —
-/// not about implementation drift, so the recorded digest is taken from the
-/// resolved entry. That makes it useless as a drift check, which is exactly why
-/// the drift checks live in `recorded_implementation.rs` and read their expected
-/// digest out of a frozen fixture instead of out of the registry.
+/// not about implementation drift, so the recorded digest is the resolved one.
+/// That makes them useless as a drift check, which is why the drift checks live
+/// in `recorded_implementation.rs` and read their expectation out of a fixture.
 fn named(id: &str, version: &str, parameters: &Value) -> RecordedMatcher {
     named_over(id, version, parameters, &[])
 }
 
-/// The same, for a replay whose declared candidate sequence is the one these
-/// candidates carry. Tests that build their own candidates are the snapshot.
 fn named_over(
     id: &str,
     version: &str,
@@ -134,7 +131,6 @@ fn named_over(
     named_claiming(id, version, parameters, candidates, Vec::new())
 }
 
-/// The same, for a snapshot that claims a particular matched subsequence.
 fn named_claiming(
     id: &str,
     version: &str,
@@ -142,20 +138,50 @@ fn named_claiming(
     candidates: &[Candidate],
     claimed: Vec<String>,
 ) -> RecordedMatcher {
-    RecordedMatcher {
-        id: id.to_owned(),
-        version: version.to_owned(),
-        parameters: parameters.clone(),
-        matched_snapshot_digests: claimed,
-        all_returned_snapshot_digests: candidates
-            .iter()
-            .map(|c| c.declared_digest.clone())
-            .collect(),
-        implementation: match resolve(id, version) {
-            Ok(entry) => RecordedImplementation::Bound(entry.implementation_digest.to_owned()),
-            Err(_) => RecordedImplementation::Unrecorded,
-        },
-    }
+    let declared: Vec<String> = candidates
+        .iter()
+        .map(|c| c.declared_digest.clone())
+        .collect();
+    let implementation = resolve(id, version).ok().map(|e| e.implementation_digest);
+    snapshot(id, version, parameters, &declared, &claimed, implementation)
+}
+
+/// Build a `github-query-snapshot` and parse it, because that is the only way to
+/// obtain a `RecordedMatcher`.
+///
+/// Deliberately not a shortcut past the parser: a test that could assemble one
+/// field-by-field would be testing a value production code can never see.
+fn snapshot(
+    id: &str,
+    version: &str,
+    parameters: &Value,
+    all_returned: &[String],
+    claimed: &[String],
+    implementation: Option<&str>,
+) -> RecordedMatcher {
+    let mut matcher = json!({
+        "id": id,
+        "version": version,
+        "parameters": parameters.clone(),
+    });
+    let schema_version = match implementation {
+        Some(digest) => {
+            matcher
+                .as_object_mut()
+                .expect("the matcher block is an object")
+                .insert("implementationDigest".to_owned(), json!(digest));
+            2
+        }
+        None => 1,
+    };
+    RecordedMatcher::from_query_snapshot(&json!({
+        "schemaVersion": schema_version,
+        "sourceKind": "github-query-snapshot",
+        "matcher": matcher,
+        "allReturnedSnapshotDigests": all_returned,
+        "matchedSnapshotDigests": claimed,
+    }))
+    .expect("a well-formed query snapshot parses")
 }
 
 fn review(stable_id: &str, login: &str) -> Value {

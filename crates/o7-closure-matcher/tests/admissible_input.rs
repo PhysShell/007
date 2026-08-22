@@ -56,8 +56,7 @@
 // runs against production input.
 
 use o7_closure_matcher::{
-    recompute_matched, resolve, verify_matched, Candidate, MatchError, RecordedImplementation,
-    RecordedMatcher,
+    recompute_matched, resolve, verify_matched, Candidate, MatchError, RecordedMatcher,
 };
 use serde_json::{json, Value};
 
@@ -96,17 +95,56 @@ fn over(candidates: &[Candidate], parameters: Value) -> RecordedMatcher {
 
 fn claiming(candidates: &[Candidate], parameters: Value, claimed: Vec<String>) -> RecordedMatcher {
     let entry = resolve("review-by-expected-author-login", "1").expect("resolve");
-    RecordedMatcher {
-        id: entry.id.to_owned(),
-        version: entry.version.to_owned(),
-        parameters,
-        matched_snapshot_digests: claimed,
-        all_returned_snapshot_digests: candidates
-            .iter()
-            .map(|c| c.declared_digest.clone())
-            .collect(),
-        implementation: RecordedImplementation::Bound(entry.implementation_digest.to_owned()),
-    }
+    let declared: Vec<String> = candidates
+        .iter()
+        .map(|c| c.declared_digest.clone())
+        .collect();
+    snapshot(
+        entry.id,
+        entry.version,
+        &parameters,
+        &declared,
+        &claimed,
+        Some(entry.implementation_digest),
+    )
+}
+
+/// Build a `github-query-snapshot` and parse it, because that is the only way to
+/// obtain a `RecordedMatcher`.
+///
+/// Deliberately not a shortcut past the parser: a test that could assemble one
+/// field-by-field would be testing a value production code can never see.
+fn snapshot(
+    id: &str,
+    version: &str,
+    parameters: &Value,
+    all_returned: &[String],
+    claimed: &[String],
+    implementation: Option<&str>,
+) -> RecordedMatcher {
+    let mut matcher = json!({
+        "id": id,
+        "version": version,
+        "parameters": parameters.clone(),
+    });
+    let schema_version = match implementation {
+        Some(digest) => {
+            matcher
+                .as_object_mut()
+                .expect("the matcher block is an object")
+                .insert("implementationDigest".to_owned(), json!(digest));
+            2
+        }
+        None => 1,
+    };
+    RecordedMatcher::from_query_snapshot(&json!({
+        "schemaVersion": schema_version,
+        "sourceKind": "github-query-snapshot",
+        "matcher": matcher,
+        "allReturnedSnapshotDigests": all_returned,
+        "matchedSnapshotDigests": claimed,
+    }))
+    .expect("a well-formed query snapshot parses")
 }
 
 /// P1 #1. A candidate of the matcher's own kind that is missing a field the
@@ -439,11 +477,11 @@ fn the_parser_carries_the_recorded_claim() {
     let snapshot = doc.get("canonical").expect("canonical");
     let recorded = RecordedMatcher::from_query_snapshot(snapshot).expect("recorded");
     assert!(
-        recorded.matched_snapshot_digests.is_empty(),
+        recorded.matched_snapshot_digests().is_empty(),
         "G claims an empty matched subset, and that claim now travels with the \
          recorded matcher instead of being supplied alongside it"
     );
-    assert_eq!(recorded.all_returned_snapshot_digests.len(), 2);
+    assert_eq!(recorded.all_returned_snapshot_digests().len(), 2);
 }
 
 // ---- P1 #6: an unregistered schemaVersion is unreadable evidence.

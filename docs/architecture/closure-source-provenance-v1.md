@@ -685,6 +685,14 @@ the artifact's own reports agreement for a snapshot that contradicts itself.
 same reason: every one of them is the thing being checked, and none may arrive
 from the party being checked.
 
+**A type that carries recorded values must not let a caller assign to them.**
+Reading the claim from the snapshot instead of taking it as an argument closes
+the bypass only if the parsed value is then immutable. Otherwise a caller parses
+a snapshot whose claim is false, overwrites the field with the recomputed list,
+and the verifier agrees — the same defect reopened through assignment rather than
+through a parameter. The rule is enforced by construction: one constructor, which
+reads an artifact, and no public fields.
+
 The second rule is a precondition of the pipeline, not a branch of the predicate.
 Placing it inside `f` would make the matcher's own bytes carry schema knowledge
 and would make a schema correction a matcher behaviour change under §13.1 —
@@ -1269,6 +1277,13 @@ line in `AGENTS.md` about missing evidence not being a passed check.
   being checked.** Each of these was found separately, by three reviewers across
   five rounds, and each time the fix was applied to the one field named rather
   than to the class — which is why there were five rounds.
+- **§13.1 — the recorded values are immutable after parsing.** The eighth
+  instance, and the one that shows the previous seven were all fixed at the wrong
+  level: each moved a value from *argument* to *field* while leaving the field
+  assignable, so "read from the artifact" was a convention the API invited
+  callers to break. One constructor, no public fields. A test asserts both
+  against the source, because the compiler enforcing it today is not evidence
+  that a later `pub` would be noticed.
 - **§13.1 — conformance is judged against the declared kind.** The seventh
   instance, found by a reviewer reading a test rather than the code: the
   "legitimate foreign-surface candidate" in `admissible_input.rs` was itself

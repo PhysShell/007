@@ -154,7 +154,7 @@ fn replaying_the_recorded_snapshot_binds_the_implementation_that_ran() {
         replay.matched, claimed,
         "specimen I's claim reproduces, so a failure here can only be the binding"
     );
-    let RecordedImplementation::Bound(expected) = &recorded.implementation else {
+    let RecordedImplementation::Bound(expected) = recorded.implementation() else {
         panic!("specimen I is a version-2 snapshot and must record an implementation");
     };
     assert_eq!(
@@ -175,7 +175,7 @@ fn replaying_the_recorded_snapshot_binds_the_implementation_that_ran() {
 #[test]
 fn a_recorded_digest_this_tree_does_not_resolve_to_is_refused() {
     let recorded = RecordedMatcher::from_query_snapshot(&specimen_i_snapshot()).expect("recorded");
-    let entry = resolve(&recorded.id, &recorded.version).expect("resolve");
+    let entry = resolve(recorded.id(), recorded.version()).expect("resolve");
 
     let drifted = RecordedImplementation::Bound(
         "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
@@ -195,11 +195,22 @@ fn a_recorded_digest_this_tree_does_not_resolve_to_is_refused() {
 /// which code recomputed it, because there is no entry point that omits it.
 #[test]
 fn replay_refuses_drift_rather_than_reporting_it_alongside_a_result() {
-    let mut recorded =
-        RecordedMatcher::from_query_snapshot(&specimen_i_snapshot()).expect("recorded");
-    recorded.implementation = RecordedImplementation::Bound(
-        "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
-    );
+    // Built by editing the SNAPSHOT, not the parsed value: RecordedMatcher has
+    // no public fields, so a drifted record can only come from a drifted
+    // artifact. That is the point — a caller cannot manufacture agreement.
+    let mut drifted = specimen_i_snapshot();
+    drifted
+        .pointer_mut("/matcher")
+        .and_then(Value::as_object_mut)
+        .expect("matcher object")
+        .insert(
+            "implementationDigest".to_owned(),
+            Value::String(
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                    .to_owned(),
+            ),
+        );
+    let recorded = RecordedMatcher::from_query_snapshot(&drifted).expect("recorded");
     assert!(matches!(
         recompute_matched(&recorded, &specimen_i_candidates()),
         Err(MatchError::RecordedImplementationDrift { .. })
@@ -220,13 +231,13 @@ fn a_version_one_snapshot_cannot_check_the_implementation() {
         let recorded = RecordedMatcher::from_query_snapshot(&snapshot)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(
-            recorded.implementation,
-            RecordedImplementation::Unrecorded,
+            recorded.implementation(),
+            &RecordedImplementation::Unrecorded,
             "{name} is a version-1 snapshot"
         );
-        let entry = resolve(&recorded.id, &recorded.version).expect("resolve");
+        let entry = resolve(recorded.id(), recorded.version()).expect("resolve");
         assert_eq!(
-            check_recorded_implementation(entry, &recorded.implementation).expect("check"),
+            check_recorded_implementation(entry, recorded.implementation()).expect("check"),
             ImplementationCheck::CannotCheck,
             "{name} carries no implementation evidence, so nothing about the \
              implementation is established — including that it did not drift"
@@ -259,12 +270,12 @@ fn every_recorded_implementation_in_the_corpus_binds() {
         }
         let recorded = RecordedMatcher::from_query_snapshot(snapshot)
             .unwrap_or_else(|e| panic!("{path:?}: {e}"));
-        let RecordedImplementation::Bound(_) = recorded.implementation else {
+        let RecordedImplementation::Bound(_) = recorded.implementation() else {
             continue;
         };
         let resolved =
-            resolve(&recorded.id, &recorded.version).unwrap_or_else(|e| panic!("{path:?}: {e}"));
-        let check = check_recorded_implementation(resolved, &recorded.implementation)
+            resolve(recorded.id(), recorded.version()).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        let check = check_recorded_implementation(resolved, recorded.implementation())
             .unwrap_or_else(|e| panic!("{path:?}: {e}"));
         assert!(
             matches!(check, ImplementationCheck::Bound { .. }),
@@ -310,4 +321,73 @@ fn the_two_snapshot_shapes_do_not_borrow_fields_from_each_other() {
         RecordedMatcher::from_query_snapshot(&v2_without_digest),
         Err(MatchError::MalformedRecordedMatcher { .. })
     ));
+}
+
+// ---- The binding is structural, not conventional.
+
+/// `RecordedMatcher` has no public fields and exactly one constructor.
+///
+/// Every value it holds is something replay is checked against, and §13.1 says
+/// nothing being checked may arrive from the party being checked. With public
+/// fields that is a convention: parse a snapshot whose claim is false, assign
+/// the recomputed list over `matched_snapshot_digests`, and `verify_matched`
+/// reports agreement — the same bypass that removing the `claimed` parameter
+/// closed, reopened through assignment.
+///
+/// Asserted against the source because it is a property of the type rather than
+/// of any execution, and because the compiler enforcing it today is not evidence
+/// that a later `pub` would be noticed. This is the same kind of tripwire as the
+/// import allowlist in `ambient_state.rs`, with the same limits.
+#[test]
+fn the_recorded_matcher_cannot_be_assembled_by_a_caller() {
+    let source = std::fs::read_to_string(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+    )
+    .expect("reading the crate source");
+
+    let body = source
+        .split_once("pub struct RecordedMatcher {")
+        .expect("RecordedMatcher is declared")
+        .1
+        .split_once("\n}")
+        .expect("its declaration closes")
+        .0;
+    let public: Vec<&str> = body
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("pub "))
+        .collect();
+    assert!(
+        public.is_empty(),
+        "RecordedMatcher has public fields {public:?}; a caller who can assign to \
+         one can manufacture agreement with a claim the artifact never made"
+    );
+
+    // The only way in is the artifact. An added constructor is a new door, and
+    // whether it should exist is a decision rather than an oversight.
+    let impl_body = source
+        .split_once("impl RecordedMatcher {")
+        .expect("RecordedMatcher has an impl block")
+        .1
+        .split_once("\n}")
+        .expect("the impl closes")
+        .0;
+    let constructors: Vec<String> = impl_body
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("pub fn "))
+        .filter(|l| l.contains("-> Result<Self") || l.contains("-> Self"))
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        constructors.len(),
+        1,
+        "expected exactly one constructor, found {constructors:?}"
+    );
+    assert!(
+        constructors
+            .first()
+            .is_some_and(|c| c.contains("from_query_snapshot")),
+        "the one constructor must read an artifact: {constructors:?}"
+    );
 }
