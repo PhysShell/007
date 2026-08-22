@@ -486,6 +486,15 @@ pub enum ImplementationCheck {
 pub struct RecordedMatcher {
     pub id: String,
     pub version: String,
+    /// `matchedSnapshotDigests` exactly as the snapshot claimed it.
+    ///
+    /// Carried rather than passed in, for the same reason as the field below and
+    /// as `implementation`: a verifier handed the claim as a loose argument is a
+    /// verifier whose caller chooses what it is checking against. Passing the
+    /// recomputed value in place of the artifact's own would report `reproduced`
+    /// for a snapshot that contradicts itself, which is the one thing §13 asks
+    /// replay to surface.
+    pub matched_snapshot_digests: Vec<String>,
     /// `allReturnedSnapshotDigests` exactly as the snapshot declared it, in §13.2
     /// observation order.
     ///
@@ -560,23 +569,31 @@ impl RecordedMatcher {
                 },
             )?,
             implementation,
-            all_returned_snapshot_digests: snapshot
-                .get("allReturnedSnapshotDigests")
-                .and_then(Value::as_array)
-                .ok_or(MatchError::MalformedRecordedMatcher {
-                    why: "no allReturnedSnapshotDigests array",
-                })?
-                .iter()
-                .map(|d| {
-                    d.as_str()
-                        .map(str::to_owned)
-                        .ok_or(MatchError::MalformedRecordedMatcher {
-                            why: "a candidate digest is not a string",
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+            matched_snapshot_digests: digest_array(snapshot, "matchedSnapshotDigests")?,
+            all_returned_snapshot_digests: digest_array(snapshot, "allReturnedSnapshotDigests")?,
         })
     }
+}
+
+/// One of the snapshot's ordered digest arrays. Both are REQUIRED by §13 even
+/// when empty: an empty array is a fact about the enumeration, an absent one is
+/// a fact about the adapter.
+fn digest_array(snapshot: &Value, field: &'static str) -> Result<Vec<String>, MatchError> {
+    snapshot
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or(MatchError::MalformedRecordedMatcher {
+            why: "a required digest array is absent or not an array",
+        })?
+        .iter()
+        .map(|d| {
+            d.as_str()
+                .map(str::to_owned)
+                .ok_or(MatchError::MalformedRecordedMatcher {
+                    why: "a candidate digest is not a string",
+                })
+        })
+        .collect()
 }
 
 /// Compare the implementation the registry resolves against the one an artifact
@@ -690,15 +707,19 @@ pub struct MatchedVerdict {
     pub reproduced: bool,
 }
 
-/// The obligation as a verdict: recompute, and compare against what a query
-/// snapshot claimed.
+/// The obligation as a verdict: recompute, and compare against what the query
+/// snapshot itself claimed.
+///
+/// There is no `claimed` parameter. The claim is a field of the recorded matcher
+/// because a caller who supplies it chooses what the verifier is checking
+/// against, and the failure that hides is exactly the one §13 exists to surface:
+/// a snapshot whose `matchedSnapshotDigests` contradicts its own candidate set.
 pub fn verify_matched(
     recorded: &RecordedMatcher,
     candidates: &[Candidate],
-    claimed: &[String],
 ) -> Result<MatchedVerdict, MatchError> {
     let replay = recompute_matched(recorded, candidates)?;
-    let reproduced = replay.matched == claimed;
+    let reproduced = replay.matched == recorded.matched_snapshot_digests;
     Ok(MatchedVerdict { replay, reproduced })
 }
 
@@ -707,12 +728,50 @@ pub fn verify_matched(
 /// predicate's job, and the answer is a legitimate `false`.
 fn check_candidate_shape(entry: &MatcherEntry, candidate: &Candidate) -> Result<(), MatchError> {
     let schema = &entry.candidate_schema;
-    if candidate
+    let refuse = |why: String| MatchError::IncompleteCandidate {
+        source_kind: candidate
+            .snapshot
+            .pointer("/sourceKind")
+            .and_then(Value::as_str)
+            .unwrap_or("<absent>")
+            .to_owned(),
+        why,
+        declared_digest: candidate.declared_digest.clone(),
+    };
+
+    // §7 first, and for every candidate regardless of kind: a canonical object
+    // carries its own schemaVersion and sourceKind. An object without them is not
+    // a canonical object at all, so it is not "a candidate of another kind" — the
+    // delivery-surface path is for objects that legitimately declare a DIFFERENT
+    // kind, not for objects that declare none. Skipping that distinction lets a
+    // truncated snapshot that still holds the expected login be scored `false`.
+    let Some(declared_kind) = candidate
         .snapshot
         .pointer("/sourceKind")
         .and_then(Value::as_str)
-        != Some(schema.source_kind)
+    else {
+        return Err(refuse(
+            "/sourceKind is absent or not a string; §7 requires every canonical \
+             object to carry it"
+                .to_owned(),
+        ));
+    };
+    if candidate
+        .snapshot
+        .pointer("/schemaVersion")
+        .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)))
+        .is_none()
     {
+        return Err(refuse(
+            "/schemaVersion is absent or not an integer; §7 requires every \
+             canonical object to carry it"
+                .to_owned(),
+        ));
+    }
+
+    if declared_kind != schema.source_kind {
+        // A genuinely different, genuinely declared kind. The delivery-surface
+        // law says this is an ordinary non-match for the predicate to decide.
         return Ok(());
     }
     check_shape(&candidate.snapshot, schema.members, "").map_err(|why| {

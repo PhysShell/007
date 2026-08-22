@@ -56,6 +56,7 @@ fn bound(entry: &MatcherEntry, parameters: &Value, candidates: &[Candidate]) -> 
         id: entry.id.to_owned(),
         version: entry.version.to_owned(),
         parameters: parameters.clone(),
+        matched_snapshot_digests: Vec::new(),
         all_returned_snapshot_digests: candidates
             .iter()
             .map(|c| c.declared_digest.clone())

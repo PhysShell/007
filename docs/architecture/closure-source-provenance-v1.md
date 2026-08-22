@@ -650,6 +650,23 @@ that are not evidence. Both directions of the closed key set are checked, since 
 member outside the declared set is a §8 violation exactly as a missing one is,
 and `null` never stands in for an absent optional member.
 
+**§7's universal members are checked on every candidate, whatever kind it names.**
+An object with no `sourceKind`, or a non-string one, is not a canonical object at
+all, so it is not "a candidate of a different surface" — the delivery-surface
+path is for objects that legitimately declare *another* kind, not for objects
+that declare none. The same holds for `schemaVersion`. Treating an undeclared
+object as a foreign one lets a truncated snapshot that still carries the expected
+login be scored as a candidate that did not qualify.
+
+**The claim is read from the snapshot, never supplied alongside it.** A verifier
+handed `matchedSnapshotDigests` as a separate argument is a verifier whose caller
+chooses what it is checking against, and passing the recomputed value in place of
+the artifact's own reports agreement for a snapshot that contradicts itself.
+`matchedSnapshotDigests`, `allReturnedSnapshotDigests` and
+`matcher.implementationDigest` are all fields of the recorded matcher for the
+same reason: every one of them is the thing being checked, and none may arrive
+from the party being checked.
+
 The second rule is a precondition of the pipeline, not a branch of the predicate.
 Placing it inside `f` would make the matcher's own bytes carry schema knowledge
 and would make a schema correction a matcher behaviour change under §13.1 —
@@ -1223,6 +1240,17 @@ line in `AGENTS.md` about missing evidence not being a passed check.
   compared them. `crates/o7-closure-matcher/tests/schema_parity.rs` now parses
   §8.2 and §8.3 out of this document and fails if the two ever disagree again —
   the expectation is the contract, not a second copy of the key set.
+- **§13.1 — §7's universal members are checked on every candidate**, so an object
+  declaring no `sourceKind` is refused rather than routed down the
+  delivery-surface path as though it were a different surface.
+- **§13.1 — the claim is a field of the recorded matcher**, not an argument to
+  the verifier. This is the fourth field to move from "supplied by the caller" to
+  "read from the artifact", after the implementation digest, the parameters and
+  the candidate sequence. The generalisation is now explicit and worth applying
+  ahead of the next reviewer: **nothing being checked may arrive from the party
+  being checked.** Each of these was found separately, by three reviewers across
+  five rounds, and each time the fix was applied to the one field named rather
+  than to the class — which is why there were five rounds.
 
 Both were caught by review of the implementation, not of the contract, which is
 worth recording as a fact about where these defects live. §13's conformance

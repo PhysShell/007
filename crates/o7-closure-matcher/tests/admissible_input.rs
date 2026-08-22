@@ -91,11 +91,16 @@ fn review(login: Option<&str>) -> Value {
 }
 
 fn over(candidates: &[Candidate], parameters: Value) -> RecordedMatcher {
+    claiming(candidates, parameters, Vec::new())
+}
+
+fn claiming(candidates: &[Candidate], parameters: Value, claimed: Vec<String>) -> RecordedMatcher {
     let entry = resolve("review-by-expected-author-login", "1").expect("resolve");
     RecordedMatcher {
         id: entry.id.to_owned(),
         version: entry.version.to_owned(),
         parameters,
+        matched_snapshot_digests: claimed,
         all_returned_snapshot_digests: candidates
             .iter()
             .map(|c| c.declared_digest.clone())
@@ -170,7 +175,7 @@ fn an_unresolvable_candidate_set_cannot_reproduce_an_empty_claim() {
 
     assert!(
         matches!(
-            verify_matched(&recorded, &[], &[]),
+            verify_matched(&recorded, &[]),
             Err(MatchError::CandidateSetMismatch { .. })
         ),
         "an empty slice against a snapshot that declared a candidate is refused"
@@ -178,7 +183,7 @@ fn an_unresolvable_candidate_set_cannot_reproduce_an_empty_claim() {
 
     // Resolved properly, the same empty claim is contradicted rather than
     // refused — the two outcomes are different facts and stay different.
-    let verdict = verify_matched(&recorded, &declared, &[]).expect("verify");
+    let verdict = verify_matched(&recorded, &declared).expect("verify");
     assert!(!verdict.reproduced);
 }
 
@@ -319,4 +324,120 @@ fn the_nested_user_object_is_checked_too() {
         }
         other => panic!("a user object missing type must be refused, got {other:?}"),
     }
+}
+
+// ---- P1 #4: an object that declares no kind is not "a candidate of another kind".
+
+/// §7 requires every canonical object to carry `sourceKind`. Before the fix, an
+/// object without one took the delivery-surface path — treated as a legitimate
+/// candidate of some other surface — and scored `false`. A truncated snapshot
+/// that still held the expected login therefore fed an empty absence claim.
+#[test]
+fn a_candidate_that_declares_no_kind_is_refused_not_waved_through() {
+    for mangled in [
+        // absent entirely
+        {
+            let mut v = review(Some("wanted"));
+            v.as_object_mut().expect("object").remove("sourceKind");
+            v
+        },
+        // present but not a string
+        {
+            let mut v = review(Some("wanted"));
+            v.as_object_mut().expect("object")["sourceKind"] = json!(7);
+            v
+        },
+    ] {
+        let broken = [candidate(mangled)];
+        match recompute_matched(
+            &over(&broken, json!({"expectedAuthorLogin": "wanted"})),
+            &broken,
+        ) {
+            Err(MatchError::IncompleteCandidate { why, .. }) => {
+                assert!(why.contains("sourceKind"), "{why}");
+            }
+            other => panic!("an object declaring no kind must be refused, got {other:?}"),
+        }
+    }
+}
+
+/// The same for §7's other universal member. A candidate with no
+/// `schemaVersion` is not a canonical object either, whatever kind it names.
+#[test]
+fn a_candidate_that_declares_no_schema_version_is_refused() {
+    let mut v = json!({
+        "sourceKind": "github-issue-comment", "stableId": "9",
+        "user": {"id": "1", "login": "wanted", "type": "Bot"},
+        "authorAssociation": "NONE", "body": "",
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"
+    });
+    v.as_object_mut().expect("object").remove("schemaVersion");
+    let broken = [candidate(v)];
+    match recompute_matched(
+        &over(&broken, json!({"expectedAuthorLogin": "wanted"})),
+        &broken,
+    ) {
+        Err(MatchError::IncompleteCandidate { why, .. }) => {
+            assert!(why.contains("schemaVersion"), "{why}");
+        }
+        other => panic!("§7 applies to every candidate, not only matching ones: {other:?}"),
+    }
+}
+
+// ---- P1 #5: the claim is the artifact's, not the caller's.
+
+/// `verify_matched` takes no `claimed` argument. The claim is read from the
+/// snapshot, so a caller cannot hand the verifier the recomputed value and
+/// receive `reproduced: true` for an artifact that contradicts itself.
+#[test]
+fn the_claim_compared_against_is_the_snapshots_own() {
+    let a = candidate(review(Some("wanted")));
+    let declared = [a.clone()];
+
+    // The artifact claims nothing matched, while its own candidate does match.
+    let contradicting = claiming(
+        &declared,
+        json!({"expectedAuthorLogin": "wanted"}),
+        Vec::new(),
+    );
+    let verdict = verify_matched(&contradicting, &declared).expect("verify");
+    assert!(
+        !verdict.reproduced,
+        "a snapshot that contradicts its own candidate set must not reproduce"
+    );
+    assert_eq!(verdict.replay.matched, vec![a.declared_digest.clone()]);
+
+    // An artifact whose claim is honest reproduces.
+    let honest = claiming(
+        &declared,
+        json!({"expectedAuthorLogin": "wanted"}),
+        vec![a.declared_digest.clone()],
+    );
+    assert!(
+        verify_matched(&honest, &declared)
+            .expect("verify")
+            .reproduced
+    );
+}
+
+/// And the snapshot parser reads the claim rather than leaving it to a caller —
+/// specimen G is the case that matters, since its claim is the false one.
+#[test]
+fn the_parser_carries_the_recorded_claim() {
+    let doc: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/closure-provenance/matcher-candidate-set-v1.json"),
+        )
+        .expect("specimen G"),
+    )
+    .expect("json");
+    let snapshot = doc.get("canonical").expect("canonical");
+    let recorded = RecordedMatcher::from_query_snapshot(snapshot).expect("recorded");
+    assert!(
+        recorded.matched_snapshot_digests.is_empty(),
+        "G claims an empty matched subset, and that claim now travels with the \
+         recorded matcher instead of being supplied alongside it"
+    );
+    assert_eq!(recorded.all_returned_snapshot_digests.len(), 2);
 }

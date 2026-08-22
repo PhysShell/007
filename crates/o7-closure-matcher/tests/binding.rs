@@ -131,10 +131,22 @@ fn named_over(
     parameters: &Value,
     candidates: &[Candidate],
 ) -> RecordedMatcher {
+    named_claiming(id, version, parameters, candidates, Vec::new())
+}
+
+/// The same, for a snapshot that claims a particular matched subsequence.
+fn named_claiming(
+    id: &str,
+    version: &str,
+    parameters: &Value,
+    candidates: &[Candidate],
+    claimed: Vec<String>,
+) -> RecordedMatcher {
     RecordedMatcher {
         id: id.to_owned(),
         version: version.to_owned(),
         parameters: parameters.clone(),
+        matched_snapshot_digests: claimed,
         all_returned_snapshot_digests: candidates
             .iter()
             .map(|c| c.declared_digest.clone())
@@ -286,9 +298,14 @@ fn verify_matched_compares_against_the_claim() {
 
     assert!(
         verify_matched(
-            &named_over("review-by-expected-author-login", "1", &params, &cands),
-            &cands,
-            std::slice::from_ref(&a.declared_digest)
+            &named_claiming(
+                "review-by-expected-author-login",
+                "1",
+                &params,
+                &cands,
+                vec![a.declared_digest.clone()]
+            ),
+            &cands
         )
         .expect("verify")
         .reproduced
@@ -296,9 +313,14 @@ fn verify_matched_compares_against_the_claim() {
     // A claim that the non-matching candidate qualified.
     assert!(
         !verify_matched(
-            &named_over("review-by-expected-author-login", "1", &params, &cands),
-            &cands,
-            std::slice::from_ref(&b.declared_digest)
+            &named_claiming(
+                "review-by-expected-author-login",
+                "1",
+                &params,
+                &cands,
+                vec![b.declared_digest.clone()]
+            ),
+            &cands
         )
         .expect("verify")
         .reproduced
@@ -307,9 +329,14 @@ fn verify_matched_compares_against_the_claim() {
     // §13 exists to make detectable.
     assert!(
         !verify_matched(
-            &named_over("review-by-expected-author-login", "1", &params, &cands),
-            &cands,
-            &[]
+            &named_claiming(
+                "review-by-expected-author-login",
+                "1",
+                &params,
+                &cands,
+                Vec::new()
+            ),
+            &cands
         )
         .expect("verify")
         .reproduced

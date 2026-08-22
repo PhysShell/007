@@ -50,7 +50,6 @@ fn fixture(name: &str) -> Value {
 struct Query {
     recorded: RecordedMatcher,
     candidates: Vec<Candidate>,
-    claimed: Vec<String>,
 }
 
 fn query_of(name: &str) -> Query {
@@ -94,13 +93,6 @@ fn query_of(name: &str) -> Query {
         recorded: RecordedMatcher::from_query_snapshot(canonical)
             .unwrap_or_else(|e| panic!("{name}: reading the recorded matcher block: {e}")),
         candidates,
-        claimed: canonical
-            .get("matchedSnapshotDigests")
-            .and_then(Value::as_array)
-            .expect("matchedSnapshotDigests")
-            .iter()
-            .map(|d| d.as_str().expect("a digest is a string").to_owned())
-            .collect(),
     }
 }
 
@@ -130,7 +122,10 @@ fn the_matcher_the_specimens_name_now_resolves() {
 fn specimen_g_s_empty_matched_subset_does_not_survive_re_execution() {
     let q = query_of("matcher-candidate-set-v1.json");
     assert_eq!(q.candidates.len(), 2, "G retains two candidates");
-    assert!(q.claimed.is_empty(), "G claims an empty matched subset");
+    assert!(
+        q.recorded.matched_snapshot_digests.is_empty(),
+        "G claims an empty matched subset"
+    );
 
     let recomputed = recompute_matched(&q.recorded, &q.candidates)
         .expect("re-executing the bound matcher over G's retained candidates");
@@ -141,7 +136,7 @@ fn specimen_g_s_empty_matched_subset_does_not_survive_re_execution() {
         recomputed.matched
     );
     assert!(
-        !verify_matched(&q.recorded, &q.candidates, &q.claimed)
+        !verify_matched(&q.recorded, &q.candidates)
             .expect("verify")
             .reproduced,
         "G's empty matched subset must not verify"
@@ -185,20 +180,20 @@ fn the_c_g_pair_is_separated_by_re_execution_not_by_the_claimed_value() {
     let g = query_of("matcher-candidate-set-v1.json");
 
     assert_eq!(
-        c.claimed, g.claimed,
+        c.recorded.matched_snapshot_digests, g.recorded.matched_snapshot_digests,
         "both claim the same empty matched list"
     );
     assert!(c.candidates.is_empty());
     assert!(!g.candidates.is_empty());
 
     assert!(
-        verify_matched(&c.recorded, &c.candidates, &c.claimed)
+        verify_matched(&c.recorded, &c.candidates)
             .expect("verify")
             .reproduced,
         "C's empty matched subset is reproduced by the bound matcher"
     );
     assert!(
-        !verify_matched(&g.recorded, &g.candidates, &g.claimed)
+        !verify_matched(&g.recorded, &g.candidates)
             .expect("verify")
             .reproduced,
         "G's is not"
@@ -217,7 +212,7 @@ fn the_c_g_pair_is_separated_by_re_execution_not_by_the_claimed_value() {
 fn re_execution_is_silent_about_whether_the_enumeration_finished() {
     let d = query_of("incomplete-query-v1.json");
     assert!(
-        verify_matched(&d.recorded, &d.candidates, &d.claimed)
+        verify_matched(&d.recorded, &d.candidates)
             .expect("verify")
             .reproduced,
         "D's matched subset is faithful to the candidates it retained"
