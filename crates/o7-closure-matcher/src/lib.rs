@@ -31,6 +31,7 @@ use o7_closure_canonical::{digest, digest_of_canonical_bytes, CanonicalError, Di
 use serde_json::Value;
 
 pub mod matchers;
+mod schemas;
 
 /// The predicate §13.1 describes. A function pointer rather than a closure or a
 /// trait object: it has no captured environment, so its inputs are exactly the
@@ -92,8 +93,11 @@ pub struct MatcherEntry {
     /// do, and each vector's hand-authored `expected` does; and because it
     /// covers the vector set itself, so quietly weakening a vector trips it too.
     pub conformance_digest: &'static str,
-    /// The closed §8 shape a candidate must have for this matcher to be allowed
-    /// to score it.
+    /// The `sourceKind` whose objects this matcher scores.
+    ///
+    /// Not a validation table: validation is against [`SOURCE_SCHEMAS`], keyed by
+    /// what each candidate declares. This names only which surface the predicate
+    /// is about.
     ///
     /// Checked by [`recompute_matched`] before the predicate runs, and
     /// deliberately NOT inside the predicate: the predicate's bytes are what
@@ -106,7 +110,7 @@ pub struct MatcherEntry {
     /// candidate missing `commitId` is not a canonical source snapshot even
     /// though no matcher reads `commitId`, and scoring it `false` would let an
     /// empty matched set be assembled out of objects that are not evidence.
-    pub candidate_schema: CandidateSchema,
+    pub target_source_kind: &'static str,
     pub predicate: MatcherFn,
 }
 
@@ -139,9 +143,7 @@ pub enum ValueKind {
 /// scored as a candidate that did not qualify.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CandidateSchema {
-    /// Only candidates declaring this `sourceKind` are checked. A candidate of a
-    /// different kind is a genuine non-match, not a malformed one — that is the
-    /// delivery-surface law, and it must keep returning `false`.
+    /// The `sourceKind` this shape describes.
     pub source_kind: &'static str,
     /// The exact `schemaVersion` this shape describes.
     ///
@@ -361,6 +363,9 @@ impl From<CanonicalError> for MatchError {
 /// smallest mechanism that makes `id` + `version` resolve to one implementation.
 /// Not a plugin system, not a registry file, nothing dynamic — a matcher that is
 /// not in this array does not exist, and adding one is a reviewable diff.
+/// Every §8 source-snapshot shape, keyed by the `sourceKind` it describes.
+pub const SOURCE_SCHEMAS: &[CandidateSchema] = schemas::ALL;
+
 pub const REGISTRY: &[MatcherEntry] = matchers::ALL;
 
 /// Resolve an identity pair, failing closed on both halves.
@@ -694,7 +699,7 @@ pub fn recompute_matched(
                 computed: computed.as_str().to_owned(),
             });
         }
-        check_candidate_shape(entry, candidate)?;
+        check_candidate_shape(candidate)?;
         if (entry.predicate)(&candidate.snapshot, &recorded.parameters)? {
             matched.push(candidate.declared_digest.clone());
         }
@@ -732,11 +737,15 @@ pub fn verify_matched(
     Ok(MatchedVerdict { replay, reproduced })
 }
 
-/// A candidate of the matcher's target kind must conform to that kind's closed
-/// §8 shape. A candidate of any other kind is left alone — deciding it is the
-/// predicate's job, and the answer is a legitimate `false`.
-fn check_candidate_shape(entry: &MatcherEntry, candidate: &Candidate) -> Result<(), MatchError> {
-    let schema = &entry.candidate_schema;
+/// Every candidate must conform to the closed §8 shape of the kind **it
+/// declares** — not of the kind the running matcher scores.
+///
+/// A candidate of another surface is still an ordinary non-match, which is the
+/// delivery-surface law. But it has to be a well-formed object of that surface
+/// first: a malformed foreign object scored `false` joins an empty absence claim
+/// exactly as a malformed same-kind one would, just wearing a different
+/// `sourceKind`.
+fn check_candidate_shape(candidate: &Candidate) -> Result<(), MatchError> {
     let refuse = |why: String| MatchError::IncompleteCandidate {
         source_kind: candidate
             .snapshot
@@ -776,15 +785,24 @@ fn check_candidate_shape(entry: &MatcherEntry, candidate: &Candidate) -> Result<
         ));
     };
 
-    if declared_kind != schema.source_kind {
-        // A genuinely different, genuinely declared kind. The delivery-surface
-        // law says this is an ordinary non-match for the predicate to decide.
-        return Ok(());
-    }
-    // The kind matches, so the version decides which shape applies. An
-    // unregistered version is unreadable evidence, not a candidate that failed
-    // to qualify: applying the V1 key set to a V2 projection would score an
-    // object this registry has never been taught to read.
+    // The shape is chosen by what the candidate DECLARES. A kind §8 does not
+    // define is unreadable evidence: a canonical source snapshot comes from an
+    // enumerated surface, so an object claiming another one is not one.
+    let Some(schema) = SOURCE_SCHEMAS
+        .iter()
+        .find(|s| s.source_kind == declared_kind)
+    else {
+        return Err(refuse(format!(
+            "§8 defines no surface {declared_kind:?}; a canonical source snapshot \
+             comes from an enumerated surface, so an object claiming another one is \
+             evidence whose shape is unknown"
+        )));
+    };
+
+    // §8 gives a changed projection a new version, so an unregistered version is
+    // evidence whose shape is unknown rather than a candidate that failed to
+    // qualify. Applying the V1 key set to a V2 projection scores an object this
+    // registry has never been taught to read.
     if declared_version != schema.schema_version {
         return Err(refuse(format!(
             "/schemaVersion is {declared_version}, and this registry knows only \
@@ -794,13 +812,7 @@ fn check_candidate_shape(entry: &MatcherEntry, candidate: &Candidate) -> Result<
         )));
     }
 
-    check_shape(&candidate.snapshot, schema.members, "").map_err(|why| {
-        MatchError::IncompleteCandidate {
-            source_kind: schema.source_kind.to_owned(),
-            why,
-            declared_digest: candidate.declared_digest.clone(),
-        }
-    })
+    check_shape(&candidate.snapshot, schema.members, "").map_err(refuse)
 }
 
 /// Both directions of a closed shape: nothing required missing, nothing outside

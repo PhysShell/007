@@ -19,7 +19,7 @@
 // the contract document that ships in this repository. A contract this cannot
 // parse is a defect to report loudly, not one to skip past.
 
-use o7_closure_matcher::{Member, ValueKind, REGISTRY};
+use o7_closure_matcher::{Member, ValueKind, SOURCE_SCHEMAS};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -97,10 +97,10 @@ fn declared(members: &[Member]) -> (BTreeSet<String>, BTreeSet<String>) {
 #[test]
 fn every_declared_schema_is_the_one_the_contract_states() {
     let mut checked = 0;
-    for entry in REGISTRY {
-        let kind = entry.candidate_schema.source_kind;
+    for schema in SOURCE_SCHEMAS {
+        let kind = schema.source_kind;
         let (want_required, want_optional) = contract_members(kind);
-        let (got_required, got_optional) = declared(entry.candidate_schema.members);
+        let (got_required, got_optional) = declared(schema.members);
 
         assert_eq!(
             got_required, want_required,
@@ -122,12 +122,11 @@ fn every_declared_schema_is_the_one_the_contract_states() {
 /// rather than collapsing into a bare `user` that any object would satisfy.
 #[test]
 fn the_dotted_members_the_contract_names_are_checked_as_a_nested_shape() {
-    let entry = REGISTRY
+    let schema = SOURCE_SCHEMAS
         .iter()
-        .find(|e| e.candidate_schema.source_kind == "github-submitted-review")
-        .expect("the review matcher is registered");
-    let user = entry
-        .candidate_schema
+        .find(|s| s.source_kind == "github-submitted-review")
+        .expect("the review shape is registered");
+    let user = schema
         .members
         .iter()
         .find(|m| m.name == "user")

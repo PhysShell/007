@@ -658,6 +658,16 @@ that declare none. The same holds for `schemaVersion`. Treating an undeclared
 object as a foreign one lets a truncated snapshot that still carries the expected
 login be scored as a candidate that did not qualify.
 
+**Conformance is judged against the kind the candidate declares, not the kind the
+running matcher scores.** A candidate of another surface is still an ordinary
+non-match — that is the delivery-surface law — but it has to be a well-formed
+object *of that surface* first. Validating only the matcher's own kind leaves a
+malformed foreign object scored `false` and joining an absence claim, which is
+the same defect as a malformed same-kind one wearing a different `sourceKind`.
+A `sourceKind` §8 does not define is likewise unreadable: a canonical source
+snapshot comes from an enumerated surface, so an object claiming another one is
+refused rather than scored.
+
 **An unregistered `schemaVersion` is unreadable evidence, not a non-match.** §8
 gives a changed projection a new version, so a candidate declaring a version the
 consumer does not know is an object whose shape is unknown. Applying the shape it
@@ -1259,6 +1269,13 @@ line in `AGENTS.md` about missing evidence not being a passed check.
   being checked.** Each of these was found separately, by three reviewers across
   five rounds, and each time the fix was applied to the one field named rather
   than to the class — which is why there were five rounds.
+- **§13.1 — conformance is judged against the declared kind.** The seventh
+  instance, found by a reviewer reading a test rather than the code: the
+  "legitimate foreign-surface candidate" in `admissible_input.rs` was itself
+  malformed — a `github-issue-comment` with no `user.login` — and the consumer
+  accepted it because it was not the matcher's kind. The test that existed to
+  show a correct non-match was the demonstration of the bypass. All five §8
+  shapes are now registered and every candidate is validated against its own.
 - **§13.1 — an unregistered candidate `schemaVersion` is refused.** The sixth
   instance, and the one that does not fit the sentence above, so it earns its own:
   *validating a field's type is not validating the value admissibility turns on.*

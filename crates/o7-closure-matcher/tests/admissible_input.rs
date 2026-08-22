@@ -152,9 +152,13 @@ fn the_digest_check_alone_does_not_notice_a_truncated_projection() {
 /// than becoming an error.
 #[test]
 fn a_candidate_of_another_kind_is_still_an_ordinary_non_match() {
+    // Well-formed under §8.5 — an earlier revision of this test omitted
+    // user.login, which made it a malformed object rather than the legitimate
+    // foreign-surface candidate it was written to be. That omission is what
+    // demonstrated the bypass this round closed.
     let comment = [candidate(json!({
         "schemaVersion": 1, "sourceKind": "github-issue-comment", "stableId": "9",
-        "user": {"id": "1", "type": "Bot"},
+        "user": {"id": "1", "login": "wanted", "type": "Bot"},
         "authorAssociation": "NONE", "body": "",
         "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"
     }))];
@@ -473,11 +477,71 @@ fn a_candidate_declaring_an_unregistered_schema_version_is_refused() {
 /// reachable: `schemaVersion: 2` on a V1 key set is well-typed and inadmissible.
 #[test]
 fn the_registered_version_is_the_one_the_shape_describes() {
-    for entry in o7_closure_matcher::REGISTRY {
+    for schema in o7_closure_matcher::SOURCE_SCHEMAS {
         assert_eq!(
-            entry.candidate_schema.schema_version, 1,
+            schema.schema_version, 1,
             "{} declares a version its member table does not describe",
-            entry.candidate_schema.source_kind
+            schema.source_kind
         );
+    }
+}
+
+/// Every surface §8 defines has a shape here, so a candidate of any legitimate
+/// kind is validated rather than waved through as "not this matcher's problem".
+#[test]
+fn every_surface_the_contract_defines_has_a_registered_shape() {
+    let kinds: std::collections::BTreeSet<&str> = o7_closure_matcher::SOURCE_SCHEMAS
+        .iter()
+        .map(|s| s.source_kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        std::collections::BTreeSet::from([
+            "github-actions-check",
+            "github-issue-comment",
+            "github-pull-request-head",
+            "github-review-comment",
+            "github-submitted-review",
+        ]),
+        "§8 defines exactly these five surfaces"
+    );
+}
+
+/// A candidate declaring a surface §8 does not define is unreadable evidence.
+#[test]
+fn a_candidate_of_an_undefined_surface_is_refused() {
+    let mut alien = review(Some("wanted"));
+    alien.as_object_mut().expect("object")["sourceKind"] = json!("github-discussion-comment");
+    let broken = [candidate(alien)];
+    match recompute_matched(
+        &over(&broken, json!({"expectedAuthorLogin": "wanted"})),
+        &broken,
+    ) {
+        Err(MatchError::IncompleteCandidate { why, .. }) => {
+            assert!(why.contains("no surface"), "{why}");
+        }
+        other => panic!("an undefined surface must be refused, got {other:?}"),
+    }
+}
+
+/// The finding that produced this round: a MALFORMED candidate of another kind
+/// was waved through because it was not the matcher's kind. It is refused now,
+/// while a WELL-FORMED one of another kind stays an ordinary non-match.
+#[test]
+fn a_malformed_foreign_candidate_is_refused_and_a_well_formed_one_is_not() {
+    let malformed = [candidate(json!({
+        "schemaVersion": 1, "sourceKind": "github-issue-comment", "stableId": "9",
+        "user": {"id": "1", "type": "Bot"},
+        "authorAssociation": "NONE", "body": "",
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"
+    }))];
+    match recompute_matched(
+        &over(&malformed, json!({"expectedAuthorLogin": "wanted"})),
+        &malformed,
+    ) {
+        Err(MatchError::IncompleteCandidate { why, .. }) => {
+            assert!(why.contains("login"), "§8.5 requires user.login: {why}");
+        }
+        other => panic!("a malformed issue comment must be refused, got {other:?}"),
     }
 }
