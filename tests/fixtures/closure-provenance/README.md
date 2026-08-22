@@ -41,6 +41,14 @@ property it was written to establish. Every canonical object here conforms to
 and every digest constant was recomputed. The defects are named in place: see A's
 `notAWitnessFor`, F's `why`, G's `why`, and E's `subjectRead.note`.
 
+**Round 4.** No specimen changed. External review of the *consumer* found two
+ways to satisfy §13's letter while defeating it — replaying over a partially
+resolved candidate set, and scoring a candidate that violates its own §8 schema
+instead of refusing it. Both are now normative in §13.1 and enforced in
+`crates/o7-closure-matcher`. The corpus is untouched because the corpus was never
+wrong: C, D, G and I all say exactly what they said before, and it was the code
+reading them that could reach a conclusion they do not support.
+
 **Round 3.** Specimen I was added, and no existing file was touched. The round
 found that binding a matcher's identity to an *in-tree* constant — first over its
 behaviour on frozen vectors, then over its implementation bytes — leaves the

@@ -620,6 +620,35 @@ then   matchedSnapshotDigests MUST be exactly recomputable
 If it is not recomputable, the absence claim is an assertion with provenance
 decoration. That is the whole difference this section exists to protect.
 
+Two things follow that an implementation can get wrong while still looking like
+it satisfies the paragraph above.
+
+**Replay runs over the complete declared set, or it does not run.** The candidate
+sequence is `allReturnedSnapshotDigests` exactly, in observation order. A replay
+given a prefix, a subset, or a reordering MUST be refused, not performed over
+what is present. Resolving only part of a bundle — a retained blob that will not
+load — and recomputing over the part that loaded answers a different question
+than the snapshot recorded, and the two answers agree most often in exactly the
+case that matters: an empty claim reproduces against an empty slice. *Partial
+success is not success.*
+
+**A candidate that does not conform to its §8 schema is not admissible input.** A
+matcher is defined over *canonical source snapshots*; an object that declares a
+`sourceKind` and then omits a field that kind requires is not one, and MUST be
+refused rather than passed to the matcher. Scoring it produces `false` — a
+snapshot that could not be read, recorded as a candidate that did not qualify.
+Note that the digest binding does not catch this: a truncated projection hashes
+to its own digest correctly, so every candidate can verify while the set as a
+whole is unreadable. *An absent signal is not a negative result.*
+
+The second rule is a precondition of the pipeline, not a branch of the predicate.
+Placing it inside `f` would make the matcher's own bytes carry schema knowledge
+and would make a schema correction a matcher behaviour change under §13.1 —
+requiring a new `version` for a fix that has nothing to do with the selection
+rule. Which fields are checked is a property of the matcher (it is exactly what
+that matcher reads) and is declared alongside it; the checking happens before
+`f` is called.
+
 ### 13.2 The digest arrays are ordered sequences
 
 They are described as a candidate set and a matched subset, but they serialize as
@@ -898,6 +927,8 @@ it as open — necessary conditions presented as sufficient ones.
 | What inputs must be retained for matcher re-execution? | §13.1 — id, version, parameters, retained candidates |
 | How does id + version resolve to exactly one predicate? | §23 — **DISCHARGED**: const registry in `crates/o7-closure-matcher` |
 | What binds that pair to the code that actually ran? | §13.1 — `matcher.implementationDigest`, recorded in the snapshot |
+| May a replay run over the candidates it managed to resolve? | §13.1 — no; the complete declared sequence or refusal |
+| What happens to a candidate that violates its own §8 schema? | §13.1 — refused as inadmissible, never scored as a non-match |
 | What does a snapshot written before that field prove about the implementation? | §13 — nothing; CANNOT_CHECK, not a pass |
 | What stops a version's predicate from changing under it? | §23 — a digest over the implementation's bytes, **not** over its results |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
@@ -1153,3 +1184,33 @@ because at that distance the two now agree. The question that actually
 discriminates is not *what does the digest cover* but *who wrote the expected
 value, and when*. A check whose expectation was authored by the same act as its
 subject is a consistency check, whatever it is hashing.
+
+### 24.5 Added in the admissible-input correction round
+
+Two defects found in external review of the implementation slice, both of which
+the document already implied and neither of which it said outright. They are the
+same rule at two layers, and the rule is older than this document — it is the
+line in `AGENTS.md` about missing evidence not being a passed check.
+
+- **§13.1 — replay is bound to the complete declared candidate sequence.** A
+  prefix, a subset or a reordering is refused rather than replayed over what is
+  present. The failure this prevents is specific: a bundle that resolves to
+  nothing reproduces an empty absence claim, because an empty recomputation
+  agrees with an empty claim. Nothing about that outcome looks wrong from the
+  inside.
+- **§13.1 — a candidate that violates its own §8 schema is inadmissible.** It is
+  refused, never scored. Scoring it converts an unreadable snapshot into a
+  candidate that did not qualify, which is how an authoritative absence gets
+  built out of broken evidence. The digest binding is no defence here: a
+  truncated projection hashes to its own digest correctly.
+- **§13.1 — the schema precondition is placed outside the predicate**, with the
+  reason recorded, because the placement is load-bearing rather than stylistic:
+  inside `f` it would make every schema correction a matcher behaviour change
+  under §13.1's own versioning rule.
+
+Both were caught by review of the implementation, not of the contract, which is
+worth recording as a fact about where these defects live. §13's conformance
+obligation was stated correctly and completely; the two ways to satisfy its
+letter while defeating it were both in the layer that executes it. A contract
+that is right is not the same as a consumer that is right, and only one of them
+can be checked by reading.
