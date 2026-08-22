@@ -658,6 +658,14 @@ that declare none. The same holds for `schemaVersion`. Treating an undeclared
 object as a foreign one lets a truncated snapshot that still carries the expected
 login be scored as a candidate that did not qualify.
 
+**An unregistered `schemaVersion` is unreadable evidence, not a non-match.** §8
+gives a changed projection a new version, so a candidate declaring a version the
+consumer does not know is an object whose shape is unknown. Applying the shape it
+does know, because the object happens to satisfy that key set, scores evidence
+the consumer was never taught to read. Checking that `schemaVersion` is an
+integer establishes only that the field is well-typed; admissibility turns on its
+value, since that value is what says which key set the object was built to.
+
 **The claim is read from the snapshot, never supplied alongside it.** A verifier
 handed `matchedSnapshotDigests` as a separate argument is a verifier whose caller
 chooses what it is checking against, and passing the recomputed value in place of
@@ -1251,6 +1259,11 @@ line in `AGENTS.md` about missing evidence not being a passed check.
   being checked.** Each of these was found separately, by three reviewers across
   five rounds, and each time the fix was applied to the one field named rather
   than to the class — which is why there were five rounds.
+- **§13.1 — an unregistered candidate `schemaVersion` is refused.** The sixth
+  instance, and the one that does not fit the sentence above, so it earns its own:
+  *validating a field's type is not validating the value admissibility turns on.*
+  `schemaVersion` was checked as an integer, which is exactly the check that
+  cannot tell a V1 projection from a V2 one.
 
 Both were caught by review of the implementation, not of the contract, which is
 worth recording as a fact about where these defects live. §13's conformance

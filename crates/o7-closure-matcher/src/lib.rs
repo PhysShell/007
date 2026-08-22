@@ -143,6 +143,15 @@ pub struct CandidateSchema {
     /// different kind is a genuine non-match, not a malformed one — that is the
     /// delivery-surface law, and it must keep returning `false`.
     pub source_kind: &'static str,
+    /// The exact `schemaVersion` this shape describes.
+    ///
+    /// §8 gives a changed projection a new version, so a candidate declaring a
+    /// version this registry does not know is evidence whose shape is unknown —
+    /// not evidence that failed to match. Checking that `schemaVersion` is an
+    /// integer establishes only that the field is well-typed; admissibility
+    /// turns on its value, because that value is what says which key set the
+    /// object was built to.
+    pub schema_version: i64,
     pub members: &'static [Member],
 }
 
@@ -756,24 +765,35 @@ fn check_candidate_shape(entry: &MatcherEntry, candidate: &Candidate) -> Result<
                 .to_owned(),
         ));
     };
-    if candidate
-        .snapshot
-        .pointer("/schemaVersion")
-        .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)))
-        .is_none()
-    {
+    let Some(declared_version) = candidate.snapshot.pointer("/schemaVersion").and_then(|v| {
+        v.as_i64()
+            .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))
+    }) else {
         return Err(refuse(
             "/schemaVersion is absent or not an integer; §7 requires every \
              canonical object to carry it"
                 .to_owned(),
         ));
-    }
+    };
 
     if declared_kind != schema.source_kind {
         // A genuinely different, genuinely declared kind. The delivery-surface
         // law says this is an ordinary non-match for the predicate to decide.
         return Ok(());
     }
+    // The kind matches, so the version decides which shape applies. An
+    // unregistered version is unreadable evidence, not a candidate that failed
+    // to qualify: applying the V1 key set to a V2 projection would score an
+    // object this registry has never been taught to read.
+    if declared_version != schema.schema_version {
+        return Err(refuse(format!(
+            "/schemaVersion is {declared_version}, and this registry knows only \
+             version {} of {}; §8 gives a changed projection a new version, so an \
+             unregistered one is evidence whose shape is unknown",
+            schema.schema_version, schema.source_kind
+        )));
+    }
+
     check_shape(&candidate.snapshot, schema.members, "").map_err(|why| {
         MatchError::IncompleteCandidate {
             source_kind: schema.source_kind.to_owned(),

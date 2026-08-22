@@ -179,6 +179,7 @@ pub(crate) const REVIEW_BY_EXPECTED_AUTHOR_LOGIN_V1: MatcherEntry = MatcherEntry
     conformance_digest: "sha256:7ea10c56ced0cc83ac3889750fd2a133584275d39f6f5fe809f744ebf74c5178",
     candidate_schema: CandidateSchema {
         source_kind: "github-submitted-review",
+        schema_version: 1,
         members: SUBMITTED_REVIEW_V1,
     },
     predicate: review_by_expected_author_login_v1::matches,
@@ -195,6 +196,7 @@ pub(crate) const ACTIONS_CHECK_BY_NAME_V1: MatcherEntry = MatcherEntry {
     conformance_digest: "sha256:524e0585621242e6e7a995f952473dd15b01d3da66663c6505fc244a7714d01a",
     candidate_schema: CandidateSchema {
         source_kind: "github-actions-check",
+        schema_version: 1,
         members: ACTIONS_CHECK_V1,
     },
     predicate: actions_check_by_name_v1::matches,

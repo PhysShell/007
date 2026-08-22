@@ -441,3 +441,43 @@ fn the_parser_carries_the_recorded_claim() {
     );
     assert_eq!(recorded.all_returned_snapshot_digests.len(), 2);
 }
+
+// ---- P1 #6: an unregistered schemaVersion is unreadable evidence.
+
+/// §8 gives a changed projection a new `schemaVersion`. A candidate declaring a
+/// version this registry does not know must be refused, not scored under the V1
+/// key set it happens to satisfy — the shape that version describes is unknown,
+/// and "unknown shape" is not "did not match".
+#[test]
+fn a_candidate_declaring_an_unregistered_schema_version_is_refused() {
+    for version in [2, 3, 0, -1] {
+        let mut v = review(Some("wanted"));
+        v.as_object_mut().expect("object")["schemaVersion"] = json!(version);
+        let broken = [candidate(v)];
+        match recompute_matched(
+            &over(&broken, json!({"expectedAuthorLogin": "wanted"})),
+            &broken,
+        ) {
+            Err(MatchError::IncompleteCandidate { why, .. }) => {
+                assert!(
+                    why.contains("schemaVersion"),
+                    "the diagnostic names the version: {why}"
+                );
+            }
+            other => panic!("schemaVersion {version} must be refused, got {other:?}"),
+        }
+    }
+}
+
+/// Validating the type is not validating the value, which is what made this
+/// reachable: `schemaVersion: 2` on a V1 key set is well-typed and inadmissible.
+#[test]
+fn the_registered_version_is_the_one_the_shape_describes() {
+    for entry in o7_closure_matcher::REGISTRY {
+        assert_eq!(
+            entry.candidate_schema.schema_version, 1,
+            "{} declares a version its member table does not describe",
+            entry.candidate_schema.source_kind
+        );
+    }
+}
