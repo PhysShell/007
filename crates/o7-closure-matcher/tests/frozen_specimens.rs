@@ -34,7 +34,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use o7_closure_matcher::{recompute_matched, resolve, verify_matched, Candidate, RecordedMatcher};
+use o7_closure_matcher::{
+    recompute_matched, resolve, verify_matched, Candidate, RecordedMatcher, RecordedQuerySnapshot,
+};
 use serde_json::Value;
 
 fn fixture(name: &str) -> Value {
@@ -90,8 +92,18 @@ fn query_of(name: &str) -> Query {
         .collect();
 
     Query {
-        recorded: RecordedMatcher::from_query_snapshot(canonical)
-            .unwrap_or_else(|e| panic!("{name}: reading the recorded matcher block: {e}")),
+        // The expected digest is the specimen's OWN canonicalDigest, computed with
+        // rfc8785 outside this workspace. That is the whole point: the binding is
+        // checked against a value this crate did not produce.
+        recorded: RecordedQuerySnapshot::from_canonical(
+            canonical,
+            doc.get("canonicalDigest")
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("{name}: no canonicalDigest")),
+        )
+        .unwrap_or_else(|e| panic!("{name}: binding the recorded query snapshot: {e}"))
+        .recorded_matcher()
+        .clone(),
         candidates,
     }
 }

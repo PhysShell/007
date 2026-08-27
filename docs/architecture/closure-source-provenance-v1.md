@@ -685,6 +685,38 @@ the artifact's own reports agreement for a snapshot that contradicts itself.
 same reason: every one of them is the thing being checked, and none may arrive
 from the party being checked.
 
+**The query snapshot joins the content-addressed chain.** §11 retains snapshots
+BY digest, so the authority is the mapping `digest -> retained bytes`, never the
+bytes on their own. Candidates were already bound that way — each candidate's
+digest is recomputed and checked against what the query snapshot declared — while
+the query snapshot itself was checked against nothing, so the chain terminated on
+an unbound object one step above the part that was careful. A consumer MUST
+therefore recompute the canonical digest of the **whole** query snapshot and
+compare it against a digest supplied from outside, before reading any recorded
+value out of it. Checking a subset leaves every unchecked member free to differ
+from the artifact the digest names, including the members replay is checked
+against.
+
+What that establishes, and what it does not, stated together because the second
+half is the part that gets dropped:
+
+```text
+bytes + expected digest, mismatched   ->  REFUSE
+bytes + expected digest, matching     ->  these are the bytes that digest names
+```
+
+A forged snapshot presented together with the digest of that same forgery is
+internally consistent and passes. This is **content binding relative to an
+expectation, not authentication**. The expectation's *authority* comes from the
+layer that retained it — which digest is in the decision basis is a provenance
+question, not a matcher one; its *production* from acquisition, which computes
+the digest of the bytes it retained; and its *authenticity* from attestation.
+The mechanical comparison MUST NOT be deferred to the producer: a producer that
+is the sole attester of its own bytes hashing to its own digest has verified
+nothing. Naming follows the same discipline — no type or field in this chain may
+carry an adjective like "trusted" or "authenticated" that a later reader could
+mistake for a property the mechanism has.
+
 **A type that carries recorded values must not let a caller assign to them.**
 Reading the claim from the snapshot instead of taking it as an argument closes
 the bypass only if the parsed value is then immutable. Otherwise a caller parses
@@ -1091,7 +1123,16 @@ statements rather than written alongside them.
      bytes are not identical behaviour across a moving substrate. The conformance
      vectors are the witness for that residual and are the reason both digests
      are kept; neither subsumes the other.
-  2. An author who edits the implementation, the registry constant and the
+  2. **The authority of an expected query digest.** Binding canonical bytes to a
+     digest supplied from outside proves those bytes are the ones that digest
+     names. It does not prove the digest is the right one to have asked for. A
+     forgery presented with its own digest is self-consistent and admissible, and
+     no arrangement inside one process closes that — the expected value has to
+     come from a retained evidence bundle or an attestation subject, neither of
+     which exists yet. Recorded here rather than in §13.1 because it is a
+     residual, not a rule, and because the two previous annotations in this
+     document were withdrawn for claiming exactly this kind of thing.
+  3. An author who edits the implementation, the registry constant and the
      recorded digest in one commit. Nothing inside a single repository prevents
      this, and claiming otherwise is how the previous two annotations went wrong.
      What the mechanism buys is that drift stops being a local edit: the record
@@ -1277,6 +1318,13 @@ line in `AGENTS.md` about missing evidence not being a passed check.
   being checked.** Each of these was found separately, by three reviewers across
   five rounds, and each time the fix was applied to the one field named rather
   than to the class — which is why there were five rounds.
+- **§13.1 — the query snapshot is bound to a digest supplied from outside.** The
+  ninth instance, and the first to point outward rather than inward: private
+  fields stopped a caller assembling a record, and left them free to mutate a
+  retained snapshot and parse the result. The fix completes the symmetry with
+  candidates and moves the trust boundary down one level; it does not close the
+  regress, and §23 carries what remains. Stated with the layer split so the
+  mechanical check is not deferred to the producer that computes the digest.
 - **§13.1 — the recorded values are immutable after parsing.** The eighth
   instance, and the one that shows the previous seven were all fixed at the wrong
   level: each moved a value from *argument* to *field* while leaving the field

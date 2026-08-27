@@ -46,7 +46,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_matcher::{
-    recompute_matched, verify_binding, Candidate, MatcherEntry, RecordedMatcher, REGISTRY,
+    recompute_matched, verify_binding, Candidate, MatcherEntry, RecordedMatcher,
+    RecordedQuerySnapshot, REGISTRY,
 };
 use serde_json::{json, Value};
 
@@ -94,14 +95,24 @@ fn snapshot(
         }
         None => 1,
     };
-    RecordedMatcher::from_query_snapshot(&json!({
+    // The digest is computed from the snapshot this helper just built, so it is
+    // self-consistent by construction and proves nothing about authority. That is
+    // deliberate: these tests are about selection semantics, and the binding's own
+    // discriminating witnesses live in `recorded_implementation.rs`, where the
+    // expected digest is read out of a frozen fixture computed outside this
+    // workspace.
+    let document = json!({
         "schemaVersion": schema_version,
         "sourceKind": "github-query-snapshot",
         "matcher": matcher,
         "allReturnedSnapshotDigests": all_returned,
         "matchedSnapshotDigests": claimed,
-    }))
-    .expect("a well-formed query snapshot parses")
+    });
+    let bound = o7_closure_canonical::digest(&document).expect("digest");
+    RecordedQuerySnapshot::from_canonical(&document, bound.as_str())
+        .expect("a well-formed query snapshot parses")
+        .recorded_matcher()
+        .clone()
 }
 
 /// Set on the subprocess by `vectors_hold_under_a_perturbed_environment`.

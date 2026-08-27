@@ -57,6 +57,7 @@
 
 use o7_closure_matcher::{
     recompute_matched, resolve, verify_matched, Candidate, MatchError, RecordedMatcher,
+    RecordedQuerySnapshot,
 };
 use serde_json::{json, Value};
 
@@ -137,14 +138,24 @@ fn snapshot(
         }
         None => 1,
     };
-    RecordedMatcher::from_query_snapshot(&json!({
+    // The digest is computed from the snapshot this helper just built, so it is
+    // self-consistent by construction and proves nothing about authority. That is
+    // deliberate: these tests are about selection semantics, and the binding's own
+    // discriminating witnesses live in `recorded_implementation.rs`, where the
+    // expected digest is read out of a frozen fixture computed outside this
+    // workspace.
+    let document = json!({
         "schemaVersion": schema_version,
         "sourceKind": "github-query-snapshot",
         "matcher": matcher,
         "allReturnedSnapshotDigests": all_returned,
         "matchedSnapshotDigests": claimed,
-    }))
-    .expect("a well-formed query snapshot parses")
+    });
+    let bound = o7_closure_canonical::digest(&document).expect("digest");
+    RecordedQuerySnapshot::from_canonical(&document, bound.as_str())
+        .expect("a well-formed query snapshot parses")
+        .recorded_matcher()
+        .clone()
 }
 
 /// P1 #1. A candidate of the matcher's own kind that is missing a field the
@@ -475,7 +486,14 @@ fn the_parser_carries_the_recorded_claim() {
     )
     .expect("json");
     let snapshot = doc.get("canonical").expect("canonical");
-    let recorded = RecordedMatcher::from_query_snapshot(snapshot).expect("recorded");
+    let expected = doc
+        .get("canonicalDigest")
+        .and_then(Value::as_str)
+        .expect("specimen G carries its canonicalDigest");
+    let recorded = RecordedQuerySnapshot::from_canonical(snapshot, expected)
+        .expect("recorded")
+        .recorded_matcher()
+        .clone();
     assert!(
         recorded.matched_snapshot_digests().is_empty(),
         "G claims an empty matched subset, and that claim now travels with the \

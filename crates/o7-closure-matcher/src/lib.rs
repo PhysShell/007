@@ -241,6 +241,17 @@ pub enum MatchError {
         recorded: String,
         resolved: String,
     },
+    /// The canonical query-snapshot bytes do not hash to the digest supplied for
+    /// them.
+    ///
+    /// This binds the artifact's CONTENT to an expectation held outside it. It
+    /// does NOT establish that the expectation is authoritative, that the bytes
+    /// are genuine, or that whoever produced them was honest — a forged snapshot
+    /// presented with the digest of that same forgery is internally consistent
+    /// and passes. The authority of the expected digest comes from the layer
+    /// that retained it (§11), which is Slice B's subject, and its authenticity
+    /// from attestation, which is Slice D's.
+    QuerySnapshotDigestMismatch { expected: String, computed: String },
     /// A query snapshot's matcher block does not match its `schemaVersion`.
     /// Version 1 has no `implementationDigest`; version 2 requires one. The two
     /// shapes are closed, so neither may borrow a field from the other.
@@ -304,6 +315,12 @@ impl std::fmt::Display for MatchError {
                  not conform to that kind's closed §8 shape: {why}. This is refused \
                  rather than reported as a non-match: evidence that could not be read is \
                  not evidence of absence"
+            ),
+            Self::QuerySnapshotDigestMismatch { expected, computed } => write!(
+                f,
+                "the canonical query snapshot hashes to {computed}, and the digest \
+                 supplied for it is {expected}. The bytes are not the ones that \
+                 digest names, so nothing is extracted from them"
             ),
             Self::MalformedRecordedMatcher { why } => {
                 write!(f, "the recorded matcher block is malformed: {why}")
@@ -495,6 +512,73 @@ pub enum ImplementationCheck {
     CannotCheck,
 }
 
+/// A canonical `github-query-snapshot` whose bytes hash to a digest supplied
+/// from outside it.
+///
+/// This is the only route to a [`RecordedMatcher`]. §11 retains snapshots BY
+/// digest, so the mapping `digest -> retained bytes` is where the authority
+/// lives; the bytes alone are just JSON a caller happens to hold. Candidates
+/// were already bound this way — each candidate's digest is recomputed and
+/// checked against what the query snapshot declared — and the query snapshot
+/// itself was bound to nothing, so the chain of custody terminated on an
+/// unbound object one step above the part that was careful.
+///
+/// WHAT THIS ESTABLISHES, EXACTLY:
+///
+/// ```text
+/// bytes + expected digest, mismatched   ->  REFUSE
+/// bytes + expected digest, matching     ->  these are the bytes that digest names
+/// ```
+///
+/// WHAT IT DOES NOT ESTABLISH. A forged snapshot presented together with the
+/// digest of that same forgery is internally consistent and passes. This is
+/// content binding relative to an expectation, not authentication: the
+/// expectation's *authority* comes from the layer that retained it (Slice B
+/// decides which digest is in the decision basis), its *production* from
+/// acquisition (Slice C), and its *authenticity* from attestation (Slice D).
+/// The name deliberately carries no adjective — nothing here is "trusted" or
+/// "authenticated", and a later reader must not be able to infer that it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedQuerySnapshot {
+    digest: String,
+    matcher: RecordedMatcher,
+}
+
+impl RecordedQuerySnapshot {
+    /// Bind canonical query-snapshot bytes to the digest supplied for them.
+    ///
+    /// The whole snapshot is canonicalized and hashed BEFORE any recorded value
+    /// is read out of it. Checking a subset would leave every unchecked member
+    /// free to differ from the artifact the digest names — including the members
+    /// replay is checked against.
+    pub fn from_canonical(
+        snapshot: &Value,
+        expected_query_digest: &str,
+    ) -> Result<Self, MatchError> {
+        let computed = digest(snapshot)?;
+        if computed.as_str() != expected_query_digest {
+            return Err(MatchError::QuerySnapshotDigestMismatch {
+                expected: expected_query_digest.to_owned(),
+                computed: computed.as_str().to_owned(),
+            });
+        }
+        Ok(Self {
+            digest: computed.as_str().to_owned(),
+            matcher: RecordedMatcher::from_query_snapshot(snapshot)?,
+        })
+    }
+
+    /// The digest these bytes were bound to.
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+
+    /// The matcher block, now known to be the one those bytes carry.
+    pub fn recorded_matcher(&self) -> &RecordedMatcher {
+        &self.matcher
+    }
+}
+
 /// A matcher block as some durable artifact recorded it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedMatcher {
@@ -567,7 +651,13 @@ impl RecordedMatcher {
     /// missing the field and a version-1 snapshot carrying it are both refused:
     /// §8 schemas are closed key sets, and a shape that can borrow a field from
     /// its neighbour is not closed.
-    pub fn from_query_snapshot(snapshot: &Value) -> Result<Self, MatchError> {
+    /// NOT public. The only way to obtain a `RecordedMatcher` is through
+    /// [`RecordedQuerySnapshot`], which binds the snapshot's bytes to a digest
+    /// supplied from outside before anything is extracted from it. A public
+    /// `&Value -> RecordedMatcher` constructor would let a caller mutate a
+    /// retained snapshot and parse the result, which is the bypass one level
+    /// earlier than the one private fields closed.
+    fn from_query_snapshot(snapshot: &Value) -> Result<Self, MatchError> {
         let schema_version = snapshot
             .get("schemaVersion")
             .and_then(Value::as_u64)

@@ -59,7 +59,7 @@
 
 use o7_closure_matcher::{
     check_recorded_implementation, recompute_matched, resolve, Candidate, ImplementationCheck,
-    MatchError, RecordedImplementation, RecordedMatcher,
+    MatchError, RecordedImplementation, RecordedMatcher, RecordedQuerySnapshot,
 };
 use serde_json::Value;
 use std::fs;
@@ -111,6 +111,57 @@ fn specimen_i_candidates() -> Vec<Candidate> {
         .collect()
 }
 
+/// Public constructors declared in one `impl` block's source text.
+///
+/// Scans items rather than lines: rustfmt wraps a multi-argument signature, so
+/// `pub fn` and `-> Result<Self>` land on different lines and a line-based filter
+/// silently finds nothing — reporting "zero constructors" for a type that has
+/// one. A structural check that cannot see what it checks is the failure mode
+/// this crate is about, arriving in the test that asserts it.
+fn public_constructors(source: &str, type_name: &str) -> Vec<String> {
+    let marker = format!("impl {type_name} {{");
+    let body = source
+        .split_once(marker.as_str())
+        .unwrap_or_else(|| panic!("{type_name} has an impl block"))
+        .1
+        .split_once("\n}")
+        .expect("the impl closes")
+        .0;
+    body.match_indices("pub fn ")
+        .filter_map(|(at, _)| {
+            let item = body.get(at..)?;
+            let head = item.get(..item.len().min(400))?;
+            let signature = head.split_once('{')?.0;
+            (signature.contains("-> Result<Self") || signature.contains("-> Self"))
+                .then(|| signature.split_whitespace().collect::<Vec<_>>().join(" "))
+        })
+        .collect()
+}
+
+/// Bind a snapshot to a digest supplied for it, then take the matcher.
+fn bind(snapshot: &Value, expected: &str) -> Result<RecordedMatcher, MatchError> {
+    RecordedQuerySnapshot::from_canonical(snapshot, expected).map(|q| q.recorded_matcher().clone())
+}
+
+/// A specimen's own `canonicalDigest`, computed with rfc8785 0.1.4 outside this
+/// workspace. This is what the binding is checked against, and the reason these
+/// tests say something the synthetic helpers elsewhere cannot.
+fn fixture_digest(name: &str) -> String {
+    fixture(name)
+        .get("canonicalDigest")
+        .and_then(Value::as_str)
+        .expect("a specimen carries its canonicalDigest")
+        .to_owned()
+}
+
+/// For a snapshot this test built or mutated: the digest is derived from the
+/// bytes in hand, so it is self-consistent by construction. Used where the
+/// subject is the matcher block's shape rather than the binding.
+fn self_bound(snapshot: &Value) -> Result<RecordedMatcher, MatchError> {
+    let computed = o7_closure_canonical::digest(snapshot).expect("digest");
+    bind(snapshot, computed.as_str())
+}
+
 /// The expected digest is a literal in a JSON file that this crate does not
 /// write. If it ever starts coming from `REGISTRY`, every test below reverts to
 /// checking that the tree agrees with itself.
@@ -140,7 +191,7 @@ fn the_expectation_is_a_literal_in_the_frozen_corpus() {
 #[test]
 fn replaying_the_recorded_snapshot_binds_the_implementation_that_ran() {
     let snapshot = specimen_i_snapshot();
-    let recorded = RecordedMatcher::from_query_snapshot(&snapshot).expect("recorded matcher");
+    let recorded = bind(&snapshot, &fixture_digest(SPECIMEN_I)).expect("recorded matcher");
     let claimed: Vec<String> = snapshot
         .get("matchedSnapshotDigests")
         .and_then(Value::as_array)
@@ -174,7 +225,7 @@ fn replaying_the_recorded_snapshot_binds_the_implementation_that_ran() {
 /// why the RED-3 commit exists as history rather than as an assertion here.
 #[test]
 fn a_recorded_digest_this_tree_does_not_resolve_to_is_refused() {
-    let recorded = RecordedMatcher::from_query_snapshot(&specimen_i_snapshot()).expect("recorded");
+    let recorded = bind(&specimen_i_snapshot(), &fixture_digest(SPECIMEN_I)).expect("recorded");
     let entry = resolve(recorded.id(), recorded.version()).expect("resolve");
 
     let drifted = RecordedImplementation::Bound(
@@ -210,7 +261,10 @@ fn replay_refuses_drift_rather_than_reporting_it_alongside_a_result() {
                     .to_owned(),
             ),
         );
-    let recorded = RecordedMatcher::from_query_snapshot(&drifted).expect("recorded");
+    // A drifted snapshot is a DIFFERENT artifact and is bound to its own digest.
+    // The query binding and the implementation binding are separate checks; this
+    // test is about the second.
+    let recorded = self_bound(&drifted).expect("recorded");
     assert!(matches!(
         recompute_matched(&recorded, &specimen_i_candidates()),
         Err(MatchError::RecordedImplementationDrift { .. })
@@ -228,8 +282,8 @@ fn a_version_one_snapshot_cannot_check_the_implementation() {
         "incomplete-query-v1.json",
     ] {
         let snapshot = fixture(name).get("canonical").expect("canonical").clone();
-        let recorded = RecordedMatcher::from_query_snapshot(&snapshot)
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let recorded =
+            bind(&snapshot, &fixture_digest(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(
             recorded.implementation(),
             &RecordedImplementation::Unrecorded,
@@ -268,8 +322,11 @@ fn every_recorded_implementation_in_the_corpus_binds() {
         if snapshot.get("sourceKind").and_then(Value::as_str) != Some("github-query-snapshot") {
             continue;
         }
-        let recorded = RecordedMatcher::from_query_snapshot(snapshot)
-            .unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        let expected = doc
+            .get("canonicalDigest")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("{path:?}: no canonicalDigest"));
+        let recorded = bind(snapshot, expected).unwrap_or_else(|e| panic!("{path:?}: {e}"));
         let RecordedImplementation::Bound(_) = recorded.implementation() else {
             continue;
         };
@@ -307,7 +364,7 @@ fn the_two_snapshot_shapes_do_not_borrow_fields_from_each_other() {
             Value::String("sha256:00".to_owned()),
         );
     assert!(matches!(
-        RecordedMatcher::from_query_snapshot(&v1_with_digest),
+        self_bound(&v1_with_digest),
         Err(MatchError::MalformedRecordedMatcher { .. })
     ));
 
@@ -318,7 +375,7 @@ fn the_two_snapshot_shapes_do_not_borrow_fields_from_each_other() {
         .expect("matcher object")
         .remove("implementationDigest");
     assert!(matches!(
-        RecordedMatcher::from_query_snapshot(&v2_without_digest),
+        self_bound(&v2_without_digest),
         Err(MatchError::MalformedRecordedMatcher { .. })
     ));
 }
@@ -345,49 +402,151 @@ fn the_recorded_matcher_cannot_be_assembled_by_a_caller() {
     )
     .expect("reading the crate source");
 
-    let body = source
-        .split_once("pub struct RecordedMatcher {")
-        .expect("RecordedMatcher is declared")
-        .1
-        .split_once("\n}")
-        .expect("its declaration closes")
-        .0;
-    let public: Vec<&str> = body
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with("pub "))
-        .collect();
+    for ty in ["RecordedMatcher", "RecordedQuerySnapshot"] {
+        let decl = format!("pub struct {ty} {{");
+        let fields = source
+            .split_once(decl.as_str())
+            .unwrap_or_else(|| panic!("{ty} is declared"))
+            .1
+            .split_once("\n}")
+            .expect("its declaration closes")
+            .0;
+        let public: Vec<&str> = fields
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("pub "))
+            .collect();
+        assert!(
+            public.is_empty(),
+            "{ty} has public fields {public:?}; a caller who can assign to one can \
+             manufacture agreement with a claim the artifact never made"
+        );
+    }
+
+    // RecordedMatcher has NO public constructor. Private fields stopped a caller
+    // assembling one; a public `&Value -> RecordedMatcher` still let them mutate a
+    // retained snapshot and parse the result — the same forgery one step earlier.
+    let matcher_ctors = public_constructors(&source, "RecordedMatcher");
     assert!(
-        public.is_empty(),
-        "RecordedMatcher has public fields {public:?}; a caller who can assign to \
-         one can manufacture agreement with a claim the artifact never made"
+        matcher_ctors.is_empty(),
+        "RecordedMatcher must have no public constructor; found {matcher_ctors:?}"
     );
 
-    // The only way in is the artifact. An added constructor is a new door, and
-    // whether it should exist is a decision rather than an oversight.
-    let impl_body = source
-        .split_once("impl RecordedMatcher {")
-        .expect("RecordedMatcher has an impl block")
-        .1
-        .split_once("\n}")
-        .expect("the impl closes")
-        .0;
-    let constructors: Vec<String> = impl_body
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with("pub fn "))
-        .filter(|l| l.contains("-> Result<Self") || l.contains("-> Self"))
-        .map(str::to_owned)
-        .collect();
+    // The one door that exists takes the expected digest as an argument. Without
+    // it, it is the unbound `&Value` entry point wearing a different type name.
+    let snapshot_ctors = public_constructors(&source, "RecordedQuerySnapshot");
     assert_eq!(
-        constructors.len(),
+        snapshot_ctors.len(),
         1,
-        "expected exactly one constructor, found {constructors:?}"
+        "expected exactly one constructor, found {snapshot_ctors:?}"
+    );
+    let only = snapshot_ctors.first().expect("checked non-empty");
+    assert!(
+        only.contains("from_canonical"),
+        "the one constructor must read an artifact: {only}"
     );
     assert!(
-        constructors
-            .first()
-            .is_some_and(|c| c.contains("from_query_snapshot")),
-        "the one constructor must read an artifact: {constructors:?}"
+        only.contains("expected_query_digest"),
+        "it must take the expected digest, or it is the unbound entry point under a \
+         new name: {only}"
+    );
+}
+
+// ---- The query snapshot joins the content-addressed chain.
+//
+// Before this, candidates were bound (each candidate's digest recomputed and
+// checked against what the query snapshot declared) and the query snapshot was
+// bound to nothing. The chain of custody terminated on an unbound object one
+// step above the part that was careful, so making RecordedMatcher's fields
+// private only moved the forgery earlier: mutate a retained snapshot, parse it,
+// and the parsed value is "what the artifact said".
+//
+// What these witnesses establish, and the limit, stated together so the limit is
+// not lost:
+//
+//     bytes + expected digest, mismatched  ->  REFUSE
+//     bytes + expected digest, matching    ->  these are the bytes that digest names
+//
+// A forged snapshot presented with the digest of that same forgery is internally
+// consistent and still passes. This is content binding relative to an
+// expectation, not authentication. The expectation's authority belongs to the
+// layer that retained it (Slice B), its production to acquisition (Slice C), and
+// its authenticity to attestation (Slice D).
+
+/// Specimen I, bound to its own externally computed digest, yields its matcher.
+#[test]
+fn a_snapshot_that_hashes_to_its_recorded_digest_is_admissible() {
+    let bound =
+        RecordedQuerySnapshot::from_canonical(&specimen_i_snapshot(), &fixture_digest(SPECIMEN_I))
+            .expect("specimen I hashes to its own canonicalDigest");
+    assert_eq!(bound.digest(), fixture_digest(SPECIMEN_I));
+    assert_eq!(
+        bound.recorded_matcher().id(),
+        "review-by-expected-author-login"
+    );
+}
+
+/// The claim cannot be edited under a retained digest.
+#[test]
+fn mutating_the_claim_under_the_recorded_digest_is_refused() {
+    let mut forged = specimen_i_snapshot();
+    let recomputed: Vec<Value> = specimen_i_candidates()
+        .iter()
+        .map(|c| Value::String(c.declared_digest.clone()))
+        .collect();
+    forged.as_object_mut().expect("snapshot object").insert(
+        "matchedSnapshotDigests".to_owned(),
+        Value::Array(recomputed),
+    );
+
+    match RecordedQuerySnapshot::from_canonical(&forged, &fixture_digest(SPECIMEN_I)) {
+        Err(MatchError::QuerySnapshotDigestMismatch { expected, computed }) => {
+            assert_eq!(expected, fixture_digest(SPECIMEN_I));
+            assert_ne!(computed, expected, "the forgery hashes elsewhere");
+        }
+        other => panic!("an edited claim under a retained digest must be refused: {other:?}"),
+    }
+}
+
+/// And the same for the declared candidate sequence — the check covers the whole
+/// artifact, not the one field a previous round happened to name.
+#[test]
+fn mutating_the_declared_candidates_under_the_recorded_digest_is_refused() {
+    let mut forged = specimen_i_snapshot();
+    forged.as_object_mut().expect("snapshot object").insert(
+        "allReturnedSnapshotDigests".to_owned(),
+        Value::Array(Vec::new()),
+    );
+
+    assert!(
+        matches!(
+            RecordedQuerySnapshot::from_canonical(&forged, &fixture_digest(SPECIMEN_I)),
+            Err(MatchError::QuerySnapshotDigestMismatch { .. })
+        ),
+        "an edited candidate sequence under a retained digest must be refused"
+    );
+}
+
+/// The residual, asserted rather than only described: a forgery carrying its own
+/// digest passes. Recorded as a test so nobody later reads the two witnesses
+/// above and concludes the constructor authenticates anything.
+#[test]
+fn a_forgery_presented_with_its_own_digest_still_passes() {
+    let mut forged = specimen_i_snapshot();
+    forged.as_object_mut().expect("snapshot object").insert(
+        "allReturnedSnapshotDigests".to_owned(),
+        Value::Array(Vec::new()),
+    );
+    let its_own = o7_closure_canonical::digest(&forged).expect("digest");
+
+    let bound = RecordedQuerySnapshot::from_canonical(&forged, its_own.as_str())
+        .expect("self-consistent by construction, and that is the point");
+    assert!(
+        bound
+            .recorded_matcher()
+            .all_returned_snapshot_digests()
+            .is_empty(),
+        "content binding relative to an expectation is not authentication: the \
+         authority of the expected digest comes from the layer that retained it"
     );
 }
