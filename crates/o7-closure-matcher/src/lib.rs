@@ -256,6 +256,16 @@ pub enum MatchError {
     /// Version 1 has no `implementationDigest`; version 2 requires one. The two
     /// shapes are closed, so neither may borrow a field from the other.
     MalformedRecordedMatcher { why: &'static str },
+    /// The bytes are digest-bound, and they are not a conforming
+    /// `github-query-snapshot`.
+    ///
+    /// These are different facts and neither implies the other. A digest binds
+    /// bytes to an expectation; it says nothing about their shape, because a
+    /// malformed snapshot hashes to its own digest exactly as a well-formed one
+    /// does. §13 defines the query snapshot as a closed key set at each
+    /// `schemaVersion`, so conformance is a property of the whole object — not
+    /// of the members some particular reader happens to consult.
+    MalformedQuerySnapshot { why: String },
     /// A candidate snapshot cannot be canonicalized at all.
     Canonical { message: String },
     /// The candidate is not shaped like a canonical source snapshot.
@@ -325,6 +335,13 @@ impl std::fmt::Display for MatchError {
             Self::MalformedRecordedMatcher { why } => {
                 write!(f, "the recorded matcher block is malformed: {why}")
             }
+            Self::MalformedQuerySnapshot { why } => write!(
+                f,
+                "the bytes hash to the digest supplied for them and are not a conforming \
+                 §13 github-query-snapshot: {why}. A matching digest establishes only that \
+                 these are the bytes that digest names; a malformed snapshot hashes to its \
+                 own digest, so nothing downstream will catch this"
+            ),
             Self::ConformanceDigestMismatch {
                 id,
                 version,
