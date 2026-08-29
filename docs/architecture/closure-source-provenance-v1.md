@@ -913,6 +913,29 @@ falsification subject_sha (if any), verification status
 Without this, source bytes can be retained perfectly while an adapter bug stays
 invisible.
 
+**The decision basis is also where an expected digest lives, and the direction
+is load-bearing.** §13.1 establishes that a consumer checks retained bytes
+against a digest supplied from outside them, and records that the *authority* of
+that digest is a provenance question rather than a matcher one. This is that
+answer: the digest is named by the frozen decision basis, and the retained-
+evidence store is asked only to resolve it. The store never supplies the value
+it will then be checked against.
+
+```text
+store.query_snapshot() -> (snapshot, digest)     FORBIDDEN
+```
+
+That shape is self-consistency wearing the costume of verification — a thing and
+its certificate written by the same act — and it passes every local check. A
+retained-evidence interface therefore MUST NOT expose any operation returning a
+digest; the absence of that method is the mechanism, and a convention not to call
+it would not be.
+
+The store is not trusted with its own answer either. A consumer recomputes the
+digest of whatever the store returns and refuses a mismatch, because a resolver
+that can answer a correct request with a different object is the substitution the
+content-addressed chain exists to prevent.
+
 ## 18. Derived facts must not masquerade as source fields
 
 `ReviewEvidence.carries_finding` is **not** a GitHub API field. It is derived,
@@ -929,6 +952,20 @@ classifier must list the source snapshot digests it was derived from.
 
 No general derivation language, no DSL. The V1 rule is only: *a derived fact
 names its inputs.*
+
+**Naming is necessary and not sufficient.** A citation nobody follows is
+satisfied equally well by the right answer and by sources that do not imply it,
+so a consumer MUST recompute the fact from the digests it names and refuse a
+disagreement. The case this catches is not a wrong value: it is a value that is
+*correct* while resting on sources that do not establish it, which reads as
+fully provenanced from every angle except the one nobody looked from.
+
+Recomputation requires `(derivation.id, derivation.version)` to resolve to
+exactly one function — the same obligation §13.1 places on a matcher, for the
+same reason, and discharged the same way. A derivation that cannot read what it
+needs yields **no answer**, never `false`: a rule that could not run has
+established nothing, and reporting that as the negative outcome is the
+absent-signal-as-negative-result error at the smallest possible scale.
 
 ## 19. A claim and its verification are different provenance chains
 
@@ -1100,6 +1137,13 @@ it as open — necessary conditions presented as sufficient ones.
 | May the acquisition adapter emit `Reproduced`? | §19 — no; `Claimed` only |
 | Which residual blocks which slice? | §23, and §21's order is read off it |
 | What remains OWED? | §23 |
+| Where does an expected digest come from? | §17 — the decision basis; never the store that holds the bytes |
+| May a retained-evidence interface return a digest? | §17 — no; the absence of the method is the mechanism |
+| Is a resolver trusted to return the right bytes? | §17 — no; the digest is recomputed and a mismatch refused |
+| Is naming a derived fact's inputs sufficient? | §18 — no; it is recomputed from them and disagreement refused |
+| What does a derivation that cannot read its inputs return? | §18 — no answer; never `false` |
+| Does a blocked field defeat an observation? | redaction §10 — only the decisions that read it |
+| Who is authoritative about which assessment permitted a retention? | redaction §9.2 — the retained binding, not the basis asserting one |
 
 ## 23. Residuals — OWED, not decided here
 
@@ -1190,15 +1234,22 @@ statements rather than written alongside them.
      bytes are not identical behaviour across a moving substrate. The conformance
      vectors are the witness for that residual and are the reason both digests
      are kept; neither subsumes the other.
-  2. **The authority of an expected query digest.** Binding canonical bytes to a
-     digest supplied from outside proves those bytes are the ones that digest
-     names. It does not prove the digest is the right one to have asked for. A
-     forgery presented with its own digest is self-consistent and admissible, and
-     no arrangement inside one process closes that — the expected value has to
-     come from a retained evidence bundle or an attestation subject, neither of
-     which exists yet. Recorded here rather than in §13.1 because it is a
-     residual, not a rule, and because the two previous annotations in this
-     document were withdrawn for claiming exactly this kind of thing.
+  2. **The authority of an expected query digest.** NARROWED, not closed, by
+     `crates/o7-closure-provenance`. The expected digest now enters replay from
+     the frozen decision basis and the retained-evidence store resolves it
+     without ever supplying it, so the specific escape this item was written
+     about — a store handing out both an artifact and the certificate for it —
+     is closed by an interface that cannot express it (§17).
+
+     What remains is one step further out and is genuinely still open: the
+     decision basis is itself an artifact somebody wrote. A basis naming a
+     forged digest, over a store holding the matching forgery, is self-consistent
+     and admissible exactly as before. The regress has moved rather than ended,
+     and it ends where it always was going to — at an attestation subject, which
+     is Slice D's, or at a bundle whose provenance is signed rather than
+     asserted. Recorded here rather than in §13.1 because it is a residual, not a
+     rule, and because the previous annotations in this document were withdrawn
+     for claiming exactly this kind of thing one level too early.
   3. An author who edits the implementation, the registry constant and the
      recorded digest in one commit. Nothing inside a single repository prevents
      this, and claiming otherwise is how the previous two annotations went wrong.

@@ -814,16 +814,48 @@ with what it blocks. No classifier change is made here.
   acquisition adapter.* This is deliberately the same shape as provenance V1
   §13.1's matcher binding, and for the same reason: a named algorithm without
   immutable resolution is a locator pointing at mutable semantics.
-- **Classifier retention axis.** The classifier can express none of §10: no
-  per-field retention, and no decision basis whose inputs may be individually
-  missing. *Blocks the classifier provenance binding slice*, which must add both;
-  without them an adapter would have to forge `FAILED` to express a blocked
-  retention, misreporting a fetch that succeeded, or discard an observation whose
-  decision inputs all survived.
-- **Where retention bindings live.** §9.2 requires a `RetentionBinding` per
-  retained record and does not say where the set of them is carried. *Blocks the
-  classifier provenance binding slice*, alongside the axis above — the two land
-  in the same schema.
+- ~~**Classifier retention axis.**~~ **DISCHARGED** by
+  `crates/o7-closure-provenance`. A decision basis lists what one decision read
+  as `(source digest, JSON pointer)` pairs, and admissibility is computed per
+  decision from whether each pointer resolves to retained bytes. Neither of the
+  two forced errors is now reachable: no adapter has to forge `FAILED` for a
+  fetch that succeeded, because retention is a separate axis; and no observation
+  whose decision inputs all survived is discarded, because a blocked field the
+  decision never read does not enter its evaluation. §10's R6/R7 pair is
+  executable as `b4_…` and `b5_…` — same gate outcome, same blocked field,
+  opposite admissibility.
+
+  Two consequences of the computation that were not obvious until it existed. A
+  pointer in **neither** `retainedFields` nor `blockedFields` is refused, not
+  admitted: §7.1 partitions the required set exhaustively, so a record
+  accounting for a field in neither direction is not evidence that nothing was
+  blocked. And a blocked pointer is refused as a *retention loss*, distinct from
+  a pointer that was simply never in the projection — collapsing the two would
+  lose exactly the distinction §10 is built on.
+- ~~**Where retention bindings live.**~~ **DISCHARGED**, and not where this
+  document guessed. §9.2 asked where "the set of them" is carried, which assumed
+  the set travels with the decision. It does not: the binding is retained
+  alongside the record and looked up by `recordDigest`, and the decision basis
+  may only *assert* one, which is then compared against the retained binding and
+  refused on disagreement.
+
+  That asymmetry is the point. If the basis carried the bindings, the party
+  asserting which assessment authorised a record would be the party whose
+  decision that record supports — a permission granted by whoever benefits from
+  it. Making the store the authority and the basis a claim to be checked is the
+  same correction Slice A applied ten times over: nothing being checked may
+  arrive from the party being checked.
+- **Derivation implementation binding.** `crates/o7-closure-provenance`
+  recomputes a derived fact from the sources it names, which requires
+  `(derivation.id, derivation.version)` to resolve to exactly one function; it
+  does, via a registry hashing the defining file's bytes. The expected digest
+  lives in the same tree as those bytes, so one commit can move both — the
+  identical half-measure provenance V1 §23 records for matchers before the
+  artifact carried the value. *Blocks nothing today*: no artifact yet records a
+  derivation digest, so there is nothing for a recorded value to disagree with.
+  It becomes live with the first acquisition adapter that emits a derived fact,
+  and the answer is already known — record the digest in the artifact, not
+  beside the code.
 - **Mechanical coverage of three source kinds.** §5.3 freezes required field sets
   for five kinds. The preregistration specimens exercise three —
   `github-issue-comment`, `github-submitted-review`, `github-review-comment` —
