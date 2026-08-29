@@ -432,6 +432,43 @@ sits permanently in the record as `stableId` — the field-retention gate bypass
 by an alias. A locator is what lets you go and look again; it is never what you
 show instead of having looked.
 
+### 7.5 Which pointer space a consumer reads in
+
+Not a new decision — a consequence of two existing ones that had never been put
+side by side, and it is load-bearing for anything that reads a retained record.
+
+```text
+§5.3      pointers into the DECODED source object   /commit_id
+§8 (V1)   canonical projection members              commitId
+```
+
+§7.1 builds `retainedFields` and `blockedFields` out of the §5.3 set, so a
+reduced record is keyed in the **decoded** space. A complete §8 projection is
+keyed in the **canonical** one. Both are correct, and they are not the same set
+of names.
+
+```text
+reduced record        /commit_id     the §5.3 partition key
+complete projection   /commitId      the §8 member
+```
+
+So the space a decision-basis pointer is written in **follows the record kind**,
+and a consumer dispatches on `sourceKind` before it resolves a pointer. There is
+no correspondence table here and none is invented: the two vocabularies are
+defined by their own sections, and a third mapping maintained alongside them
+would be a place for them to disagree silently.
+
+This was found by implementing §7.1's partition check rather than by reading. The
+fixtures that had exercised the reduced record since it was first written listed
+`/commitId` and `/stableId` — the right fields in the wrong space — and every
+check that existed at the time accepted them. It is recorded here because the
+asymmetry is genuinely surprising, and a reader who assumes one vocabulary
+throughout will write a consumer that resolves nothing and reports it as
+retention loss.
+
+The asymmetry itself stays as a residual in §11. Removing it is a schema change
+to one of the two contracts and is not made in a correction round.
+
 ### 7.4 What the record is, and is not
 
 - Its `sourceKind` is **distinct** from every provenance V1 §8 kind and MUST NOT
@@ -807,6 +844,23 @@ with what it blocks. No classifier change is made here.
 
 ## 11. Residuals — OWED, each naming what it blocks
 
+- **The two pointer vocabularies.** §7.5 states that a reduced record is keyed
+  in §5.3's decoded-source space while a complete projection is keyed in
+  provenance V1 §8's canonical space, and that a consumer therefore dispatches on
+  `sourceKind` before resolving a pointer. That is the honest reading of the two
+  contracts as they stand; it is not a nice property. *Blocks nothing today —
+  consumers dispatch — and it is recorded so that the first slice which needs one
+  vocabulary across both kinds knows it is a schema change to one of these two
+  documents rather than a mapping table bolted between them.*
+- **A retention binding for records outside the gate.** §9.2 requires one for
+  "every retained record produced through this gate — complete projection or
+  reduced record". §5.3 places `github-query-snapshot` outside the gate. A
+  consumer that demanded a binding for one would be demanding an assessment with
+  an empty denominator, whose presence would then read as evidence that a gate
+  ran; `crates/o7-closure-provenance` therefore does not demand one, and checks
+  the record's kind against the role it is being consumed in instead. *Blocks
+  nothing; recorded because it is a check REMOVED, and a removal argued only in a
+  commit message is a removal nobody can audit.*
 - **Detector implementation binding.** `detector.id` + `detector.version` +
   `detector.configDigest` must resolve to exactly one detector behaviour, and
   this document does not say how — a registry, a pinned artifact, a digest over
@@ -943,6 +997,12 @@ retention axis.
 | Does the gate outcome determine the state? | §10 — no; the decision basis does |
 | May a blocked body leave a decision evaluable? | §10 — yes, if its inputs survive |
 | Is the gate part of the acquisition status? | §10.1 — no, a third axis |
+| Which vocabulary is a retained record keyed in? | §7.5 — decoded for a reduced record, canonical for a projection |
+| How does a consumer know which? | §7.5 — it dispatches on `sourceKind`; there is no mapping table |
+| Does a conforming assessment authorise the record it is bound to? | §6.2, §9.6, §7.1 — not by conforming; the outcome and partition must match |
+| May a `BLOCK_SECRET` assessment stand behind a complete projection? | §6.2 — no |
+| Is `coverageComplete` checkable, or only assertable? | §5.2 — checkable, against the §5.3 set |
+| Must a record outside the gate carry a `RetentionBinding`? | §11 — no; §9.2 scopes the requirement to gated records |
 | What is still OWED, and what does it block? | §11 |
 | Does this unblock acquisition? | §12 — no |
 
@@ -1101,3 +1161,64 @@ be stated.
    the admissible rule ids to `detector.configDigest` rather than keeping a
    global list — so a record cannot claim one configuration and use another's
    rules. The production form of that binding stays OWED in §11.
+
+
+## 19. Correction round 6 — the relation-binding round
+
+Five findings from the paired external round on the consuming implementation.
+The contract text needed one addition (§7.5) and two residuals (§11); everything
+else was a consumer reading the contract as a list of member names instead of as
+a set of relations.
+
+**The law the round states.** A retained artifact may influence a decision only
+after **both** are established:
+
+```text
+1. artifact validity   bytes, digest, type, closed schema
+2. relation validity   the artifact's own fields establish the exact subject,
+                       role, state, partition and relation under which this
+                       decision consumes it
+```
+
+The previous round closed clause 1 for the bytes and then treated a
+correctly-resolved artifact as though that settled what it was **about**.
+Resolving the right bytes proves *this artifact exists and these are its bytes*
+and nothing more. It does not prove the artifact concerns this subject, has the
+role the decision assigns it, is in a state that supports the claim, or
+authorises this other artifact.
+
+Applied to this document, the missing relations were:
+
+- a conforming assessment reading `BLOCK_SECRET` resolving perfectly well behind
+  a complete §8 projection §6.2 forbids;
+- a reduced record whose own `outcome` or `coverageComplete` contradicted the
+  assessment §9.6 makes authoritative;
+- a §7.1 partition read off the record instead of recomputed from the
+  assessment's own findings and coverage;
+- `coverageComplete` accepted as a claim rather than checked against §5.2's
+  denominator.
+
+**Two checks were written, found unreachable, and removed rather than
+witnessed.** Mutation testing — delete a rule, re-run, see whether anything
+complains — was what established it. §9's requirement that a finding name a
+field in the §5.3 set has no reachable failure once §7.1's two partition rules
+are in force: a flagged pointer is either absent from `blockedFields`, and
+"flagged is blocked, always" refuses it, or present in it, and "the partition
+stays inside §5.3" refuses it for being outside the set. There is no third case.
+Likewise §9's `findings`-iff-`BLOCK_SECRET` presence rule is strictly subsumed by
+§9.6's computation, which refuses every state the iff refuses and refuses states
+the iff admits. Both are now derivations in the consumer rather than checks, and
+the derivations are written where the checks were.
+
+The consequence is worth stating separately, because it cuts the other way from
+most review findings: **a check with no reachable failure is not a check.** It
+cannot distinguish a conformant record from a non-conformant one, so a green
+witness over it is evidence of nothing — the same defect as round 5's withdrawn
+claim, arrived at from the opposite direction.
+
+**And one rule was genuinely missing, found the same way.** §5.1 defines
+`BLOCK_SECRET` as *at least one assessed field carries a blocking finding*.
+Nothing refused `findings: []` under it. The presence rules were all satisfied,
+both conditionals were correct, and the record claimed simultaneously that
+something was found and that nothing was — `failure -> empty set -> green`
+wearing the one costume §5.6 had not been written about.

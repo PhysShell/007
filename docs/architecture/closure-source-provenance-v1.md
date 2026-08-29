@@ -968,6 +968,50 @@ witnesses that exercise each relation. Documenting a surface guard as though it
 enforced the law is how the withdrawn rule survived review: the guard was green,
 so the property was believed.
 
+### 17.1 Content binding is necessary and not sufficient
+
+The four-clause authority rule above says when a reference returned by a store
+may be **consumed**. This says what consuming it has still not established.
+
+```text
+resolved and re-digested   ->  this artifact exists, and these are its bytes
+                           ->  NOT that it concerns this subject
+                           ->  NOT that it has the role this decision assigns it
+                           ->  NOT that its state supports this claim
+                           ->  NOT that it authorises this other artifact
+```
+
+So a retained artifact may influence a decision only after **both** are
+established:
+
+```text
+1. artifact validity   bytes, digest, type, closed schema
+2. relation validity   the artifact's own fields establish the exact subject,
+                       role, state, partition and relation under which this
+                       decision consumes it
+```
+
+Three consequences, each of which was a live escape before it was written down:
+
+- **The subject must arrive from outside the artifacts being checked.** Two head
+  reads of another pull request are real, correctly digested, correctly roled,
+  and agree with each other perfectly. Deriving the target from the same retained
+  events under examination is the party in question supplying the identity it is
+  examined against, so §8.1's staleness question takes
+  `{ repository, pullRequest, expectedSha }` from the caller.
+
+- **The role is part of the relation.** A record consumed as *the query snapshot
+  an absence claim rests on* and a record consumed as *a gated source read
+  through a decision pointer* are two different jobs. A submitted review standing
+  in for the first resolves, re-digests, and answers a question it cannot answer;
+  §13 is explicit that only a query snapshot carries the enumeration and matcher
+  an absence rests on.
+
+- **A caller's account of a state is not the state.** A falsification scan
+  declaring itself COMPLETE, evidenced by a snapshot of exactly the right surface
+  and query whose own `enumeration` reads `INCOMPLETE`, passes every content
+  check and returns zero claims as a fact about the surface.
+
 ## 18. Derived facts must not masquerade as source fields
 
 `ReviewEvidence.carries_finding` is **not** a GitHub API field. It is derived,
@@ -1181,6 +1225,12 @@ it as open — necessary conditions presented as sufficient ones.
 | Is a resolved scan snapshot sufficient evidence for a scan? | §16, §17 — no; it must also answer THAT scan's query |
 | What does a successful head read carry? | §8.1 — a reference to a retained event, never a bare SHA |
 | Does an API-surface test establish the authority law? | §17 — no; it establishes only that the surface did not change unnoticed |
+| Is a correctly resolved artifact ready to be consumed? | §17 — no; its own fields must establish the relation it is consumed under |
+| Does a head read witness THIS subject? | §8.1 — only if checked against an independently supplied subject identity |
+| Which slot may a head-read event fill? | §8.1 — the one its own `role` names |
+| Is a scan's own COMPLETE its authority? | §13, §16 — no; the evidencing snapshot's `enumeration` is |
+| May any retained record fill the expected-query-snapshot role? | §13 — no; only a `github-query-snapshot` |
+| What does a check with no reachable failure establish? | §24.8 — nothing; it is removed, not witnessed |
 
 ## 23. Residuals — OWED, not decided here
 
@@ -1613,3 +1663,59 @@ is about to be wrong.
 only malformed-event case covered was a missing `snapshotDigest`, which the next
 check caught anyway. A relation with no witness is a relation nobody is holding,
 and the only way to find that is to break the check and watch nothing complain.
+
+
+### 24.8 Added in the relation-binding correction round
+
+Five findings, one law. The previous round made the store untrusted for the bytes
+it returns; this one makes it untrusted for what those bytes are **about**. §17.1
+above is the normative statement.
+
+**The findings were not five defects.** Each was the same sentence at a different
+surface: *an artifact was checked for what it IS and never for what it is
+ABOUT.* A conforming retention assessment behind a record it refuses, a §7.1
+partition read off the record instead of recomputed from that assessment, a scan
+whose evidence contradicts its own completeness claim, a head-read event in the
+wrong slot, and a pair of head reads of another pull request. Correcting them as
+five fixes would have produced five checks and no rule.
+
+**Checking several significant members is not checking the object** — already
+§13.1's rule for query snapshots — extends to every closed form this document
+and the redaction policy define. The assessment checker probed ten pointers and
+one enumeration; §9.4's whole argument is that the *closure* is the security
+property, because an open schema lets a producer add a member holding the content
+the gate refused and satisfy every rule anybody enumerated.
+
+**Two checks were removed for having no reachable failure.** Mutation testing
+found them: delete the rule, re-run, watch nothing complain. Both were genuinely
+subsumed — the distinctness of the two head-read events by the per-slot role
+check, and one of the redaction policy's finding rules by its two partition
+rules. Each was replaced by the derivation, written where the check had been.
+
+This is the mirror of the previous round's result and belongs beside it. That
+round found *a witness green over a property that does not hold*. This one found
+*a check that cannot fail*, which is the same defect approached from the code
+rather than the test: neither can distinguish a conformant artifact from a
+non-conformant one, and both read as coverage.
+
+**Mutation testing found five rules with no evidence, and one rule missing
+entirely.** Three of the five had real content and fixtures that merely tripped
+an earlier check first — a green suite over a masked rule is the same false
+comfort as a green witness over an absent one. The missing rule was
+`findings: []` under `BLOCK_SECRET`: every presence rule satisfied, both
+conditionals correct, and the record claiming at once that something was found
+and that nothing was.
+
+**One transcription, not two.** The §9 member tables and §5.3 field sets the
+consumer ranges over are parsed out of the redaction policy and compared against
+it, because §5.2 makes that denominator normative precisely so a consumer cannot
+take it from the producer — and a consumer taking it from a stale copy of the
+document has reintroduced the same problem with a slower clock. Verified by
+drifting a pointer, a member name and a vocabulary value in turn.
+
+**A contract-level asymmetry surfaced from implementing it.** §5.3's pointers are
+into the decoded source object and §8's projections carry canonical members, so a
+reduced record and a complete projection are keyed in different vocabularies. The
+fixtures had been mixing them since the reduced record was first written, and
+every check that existed accepted it. Recorded as redaction policy §7.5, with the
+asymmetry itself as a residual there.
