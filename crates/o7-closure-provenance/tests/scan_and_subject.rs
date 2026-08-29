@@ -207,7 +207,10 @@ fn b9a_two_matching_head_reads_are_not_stale() {
         before: evidenced_head(&mut store, "HEAD_BEFORE", "aaaa"),
         after: evidenced_head(&mut store, "HEAD_AFTER", "aaaa"),
     };
-    assert_eq!(staleness(&subject("aaaa"), &read, &store), Staleness::NotStale);
+    assert_eq!(
+        staleness(&subject("aaaa"), &read, &store),
+        Staleness::NotStale
+    );
 }
 
 #[test]

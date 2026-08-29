@@ -38,6 +38,7 @@ use o7_closure_canonical::digest;
 use serde_json::Value;
 
 pub mod derivations;
+pub mod redaction;
 
 /// One value a decision actually read: a retained source, and the JSON pointer
 /// within it.
@@ -174,6 +175,22 @@ pub enum Unresolved {
         snapshot_digest: String,
         why: String,
     },
+    /// The assessment is a conforming §9 object and does not authorise THIS
+    /// record: its outcome refuses the record's own kind, contradicts the
+    /// record's own outcome, or its findings and coverage do not compute the
+    /// partition the record carries.
+    AssessmentDoesNotAuthorise {
+        record_digest: String,
+        assessment_digest: String,
+        why: String,
+    },
+    /// A retained record consumed in a role its own `sourceKind` does not
+    /// support. Real bytes, correct digest, wrong kind of thing for the job.
+    WrongKindForRole {
+        digest: String,
+        role: &'static str,
+        found: String,
+    },
     /// A derived fact does not follow from the sources it names.
     DerivationDisagrees {
         derivation: String,
@@ -202,6 +219,32 @@ pub enum Admissible {
     CannotCheck { why: Vec<Unresolved> },
 }
 
+/// The role a decision consumes a retained record IN.
+///
+/// Clause 2 of the relation rule lists `role` alongside subject, state and
+/// partition, and this is where it bites: `admissibility` resolves records for
+/// two entirely different jobs, and before this they went down one identical
+/// path. A submitted review standing in for the query snapshot an absence claim
+/// rests on resolves, re-digests and passes every check — while answering a
+/// question it cannot answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConsumedAs {
+    /// A source record the redaction gate produced, read through a decision
+    /// pointer.
+    GatedSource,
+    /// The query snapshot an absence claim is replayed against — §13.
+    ExpectedQuerySnapshot,
+}
+
+impl ConsumedAs {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::GatedSource => "a gated source record",
+            Self::ExpectedQuerySnapshot => "the expected query snapshot",
+        }
+    }
+}
+
 /// Resolve one digest to the bytes it names, refusing anything else.
 ///
 /// Three refusals, in order, and none of them is optional:
@@ -217,6 +260,7 @@ pub enum Admissible {
 fn resolve_record<E: RetainedEvidence>(
     store: &E,
     requested: &str,
+    role: ConsumedAs,
     declared: &[DeclaredBinding],
     into: &mut Vec<Unresolved>,
 ) -> Option<Value> {
@@ -243,6 +287,50 @@ fn resolve_record<E: RetainedEvidence>(
             });
             return None;
         }
+    }
+
+    // THE ROLE. Before anything is asked about the record's authorisation, the
+    // record has to be the kind of thing this job needs. §5.3 places
+    // `github-query-snapshot` outside the gate outright, and §13 is equally
+    // explicit that only a query snapshot carries the enumeration and matcher an
+    // absence claim rests on.
+    let found_kind = record
+        .pointer("/sourceKind")
+        .and_then(Value::as_str)
+        .unwrap_or("<absent>");
+    let fits = match role {
+        ConsumedAs::ExpectedQuerySnapshot => found_kind == "github-query-snapshot",
+        ConsumedAs::GatedSource => {
+            found_kind == "github-reduced-source-record"
+                || redaction::required_fields(found_kind).is_some()
+        }
+    };
+    if !fits {
+        into.push(Unresolved::WrongKindForRole {
+            digest: requested.to_owned(),
+            role: role.name(),
+            found: found_kind.to_owned(),
+        });
+        return None;
+    }
+
+    // A RETENTION BINDING IS NOT WHAT MAKES AN UNGATED RECORD ADMISSIBLE.
+    //
+    // This is a check being REMOVED, so it is argued rather than assumed. §9.2
+    // requires a binding for "every retained record produced through this gate —
+    // complete projection or reduced record". §5.3 places `github-query-snapshot`
+    // outside the gate in as many words: it is constructed rather than fetched,
+    // and retains only enumeration facts and digests of objects that passed the
+    // gate on their own. No assessment about it can exist, so demanding one
+    // demands a permission-shaped artifact with an empty denominator — a rubber
+    // stamp, and one whose presence would read as evidence that a gate ran.
+    //
+    // What it is replaced by is not nothing. The basis names the digest, the
+    // store resolves it, the bytes are re-digested against that digest, and the
+    // kind is checked against the role above. The direction of authority is
+    // unchanged; only the demand for an inapplicable artifact is gone.
+    if role == ConsumedAs::ExpectedQuerySnapshot {
+        return Some(record);
     }
 
     let Some(binding) = store.binding_for(requested) else {
@@ -292,8 +380,21 @@ fn resolve_record<E: RetainedEvidence>(
             return None;
         }
     }
-    if let Err(why) = check_assessment_shape(&assessment) {
+    // CLAUSE 1 — artifact validity. The whole closed §9 form, both directions,
+    // rather than the members somebody thought to probe for.
+    if let Err(why) = redaction::check_assessment(&assessment) {
         into.push(Unresolved::MalformedAssessment {
+            assessment_digest: binding.assessment_digest.clone(),
+            why,
+        });
+        return None;
+    }
+
+    // CLAUSE 2 — relation validity. A conforming assessment is an assessment; it
+    // is not yet a permission to keep THIS record.
+    if let Err(why) = redaction::check_authorises(&record, &assessment) {
+        into.push(Unresolved::AssessmentDoesNotAuthorise {
+            record_digest: requested.to_owned(),
             assessment_digest: binding.assessment_digest.clone(),
             why,
         });
@@ -315,70 +416,6 @@ fn resolve_record<E: RetainedEvidence>(
     }
 
     Some(record)
-}
-
-/// A resolved assessment is a conforming §9 `RetentionAssessment`.
-///
-/// The REQUIRED members only. This deliberately does not re-derive the redaction
-/// gate's own decisions — `closure-redaction-policy-v1.md` froze those and this
-/// crate consumes the outcome rather than re-deciding it. What it establishes is
-/// that the object authorising a retention is the kind of object that can
-/// authorise one at all: some other retained record, correctly digested and
-/// honestly bound, is not a permission.
-///
-/// The assessment is NOT itself required to carry a `RetentionBinding`. It is a
-/// control artifact, and requiring one would make every permission depend on a
-/// permission — a recursion with no base case that would outlive the evidence it
-/// was meant to protect.
-fn check_assessment_shape(assessment: &Value) -> Result<(), String> {
-    let kind = assessment
-        .pointer("/sourceKind")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "/sourceKind is absent or not a string".to_owned())?;
-    if kind != "closure-retention-assessment" {
-        return Err(format!(
-            "/sourceKind is {kind:?}; an authorising assessment is a \
-             closure-retention-assessment, not merely some retained object"
-        ));
-    }
-
-    for required in [
-        "/schemaVersion",
-        "/redactionPolicyVersion",
-        "/detector/id",
-        "/detector/version",
-        "/detector/configDigest",
-        "/representation",
-        "/assessedFields",
-        "/coverageComplete",
-        "/outcome",
-        "/observedAt",
-    ] {
-        if assessment.pointer(required).is_none() {
-            return Err(format!("{required} is REQUIRED by §9 and absent"));
-        }
-    }
-
-    let outcome = assessment
-        .pointer("/outcome")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "/outcome is not a string".to_owned())?;
-    if !["RETAIN", "BLOCK_SECRET", "CANNOT_ASSESS"].contains(&outcome) {
-        return Err(format!(
-            "/outcome is {outcome:?}; §9.3 defines RETAIN, BLOCK_SECRET, CANNOT_ASSESS"
-        ));
-    }
-
-    // §9: a RETAIN outcome MUST NOT appear without coverageComplete: true.
-    if outcome == "RETAIN" && assessment.pointer("/coverageComplete") != Some(&Value::Bool(true)) {
-        return Err(
-            "/outcome is RETAIN with /coverageComplete not true, which §9 forbids: a clean \
-             verdict over an incomplete examination is not a clean verdict"
-                .to_owned(),
-        );
-    }
-
-    Ok(())
 }
 
 /// Read one pointer out of a resolved record, honouring the per-field retention
@@ -475,7 +512,13 @@ fn check_derived<E: RetainedEvidence>(
         // Every cited source goes through the same resolution the decision's own
         // inputs do. A derived fact resting on bytes nobody was permitted to keep
         // is not better evidenced than a decision resting on them.
-        match resolve_record(store, source_digest, declared, into) {
+        match resolve_record(
+            store,
+            source_digest,
+            ConsumedAs::GatedSource,
+            declared,
+            into,
+        ) {
             Some(record) => sources.push(record),
             None => return,
         }
@@ -517,8 +560,13 @@ pub fn admissibility<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> A
     let mut values = Vec::new();
 
     for input in &basis.inputs {
-        let Some(record) = resolve_record(store, &input.source_digest, &basis.bindings, &mut why)
-        else {
+        let Some(record) = resolve_record(
+            store,
+            &input.source_digest,
+            ConsumedAs::GatedSource,
+            &basis.bindings,
+            &mut why,
+        ) else {
             continue;
         };
         match read_pointer(&record, &input.source_digest, &input.pointer) {
@@ -536,7 +584,15 @@ pub fn admissibility<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> A
     // authority path this slice exists to establish, and reversing it would make
     // the store the author of its own expectation.
     if let Some(expected) = &basis.expected_query_digest {
-        if resolve_record(store, expected, &basis.bindings, &mut why).is_none() {
+        if resolve_record(
+            store,
+            expected,
+            ConsumedAs::ExpectedQuerySnapshot,
+            &basis.bindings,
+            &mut why,
+        )
+        .is_none()
+        {
             // resolve_record has already recorded why.
         }
     }
@@ -702,6 +758,38 @@ fn check_scan_evidence<E: RetainedEvidence>(
             evidenced_surface.unwrap_or("<absent>")
         ));
     }
+    // THE STATE. `ScanCompleteness::Complete` is the CALLER's account of how far
+    // it got; §13 puts the enumeration in the snapshot and says the rule turns on
+    // that value. Without this a scan declares itself complete, names a real
+    // snapshot of exactly the right surface and pull request, resolves it,
+    // re-digests it — and the snapshot itself records that the enumeration was
+    // cut short. Zero claims then comes back as a fact about the surface.
+    //
+    // §13 also closes the vocabulary to two, precisely because a reader that
+    // accepts an unrecognised state has to decide what it means and every
+    // available default is wrong: COMPLETE manufactures authority the adapter
+    // never claimed, INCOMPLETE silently discards evidence.
+    match snapshot.pointer("/enumeration").and_then(Value::as_str) {
+        Some("COMPLETE") => {}
+        Some(other @ "INCOMPLETE") => {
+            return Err(format!(
+                "the {} scan says it completed and its own evidence records enumeration                  {other}; the artifact is the authority on its enumeration state",
+                scan.surface
+            ))
+        }
+        Some(other) => {
+            return Err(format!(
+                "the scan's evidence records enumeration {other:?}, which is not one of §13's                  two states; refusing it is the only reading that does not invent a fact"
+            ))
+        }
+        None => {
+            return Err(
+                "the scan's evidence carries no /enumeration, which §13 makes REQUIRED"
+                    .to_owned(),
+            )
+        }
+    }
+
     let repository = snapshot
         .pointer("/binding/repository")
         .and_then(Value::as_str);
@@ -806,15 +894,30 @@ pub fn staleness<E: RetainedEvidence>(
     let mut observed = Vec::new();
     let mut unresolved = Vec::new();
 
-    for (role, r) in [("head_before", &read.before), ("head_after", &read.after)] {
+    // §8.1's "two reads are not two pointers" needs NO separate check here, and
+    // saying so is worth more than the check was. Each slot below requires its
+    // event to carry that slot's OWN role, and one event carries one role — so a
+    // single event offered as both reads is already refused, by the after slot,
+    // for naming a HEAD_BEFORE event. An explicit distinctness test would have no
+    // reachable failure. Mutation testing is what found it: deleting the
+    // distinctness check broke nothing, because the role check was already doing
+    // the work, and a check that cannot fire is not evidence of the property it
+    // is named after.
+
+    for (slot, expected_role, r) in [
+        ("head_before", "HEAD_BEFORE", &read.before),
+        ("head_after", "HEAD_AFTER", &read.after),
+    ] {
         match r {
             HeadRead::Failed { reason } => {
-                unresolved.push(format!("{role} did not happen ({reason})"));
+                unresolved.push(format!("{slot} did not happen ({reason})"));
             }
-            HeadRead::Observed { event_digest } => match resolve_head_sha(store, event_digest) {
-                Ok(sha) => observed.push(sha),
-                Err(why) => unresolved.push(format!("{role} {why}")),
-            },
+            HeadRead::Observed { event_digest } => {
+                match resolve_head_sha(store, event_digest, expected_role, subject) {
+                    Ok(sha) => observed.push(sha),
+                    Err(why) => unresolved.push(format!("{slot} {why}")),
+                }
+            }
         }
     }
 
@@ -842,7 +945,12 @@ pub fn staleness<E: RetainedEvidence>(
 
 /// One head read, followed from its event to the retained snapshot that carries
 /// the SHA.
-fn resolve_head_sha<E: RetainedEvidence>(store: &E, event_digest: &str) -> Result<String, String> {
+fn resolve_head_sha<E: RetainedEvidence>(
+    store: &E,
+    event_digest: &str,
+    expected_role: &str,
+    subject: &Subject,
+) -> Result<String, String> {
     let event = store
         .resolve(event_digest)
         .ok_or_else(|| format!("names an event that is not retained ({event_digest})"))?;
@@ -868,6 +976,19 @@ fn resolve_head_sha<E: RetainedEvidence>(store: &E, event_digest: &str) -> Resul
     if event.pointer("/acquisition").and_then(Value::as_str) != Some("AVAILABLE") {
         return Err("is an event whose acquisition is not AVAILABLE".to_owned());
     }
+
+    // THE ROLE. §8.1 tags every event HEAD_BEFORE or HEAD_AFTER. A slot that
+    // never reads the tag will accept the after-read as the before-read, and the
+    // pair then brackets no interval at all.
+    match event.pointer("/role").and_then(Value::as_str) {
+        Some(role) if role == expected_role => {}
+        Some(role) => {
+            return Err(format!(
+                "names an event whose role is {role}, and this slot is the {expected_role} read"
+            ))
+        }
+        None => return Err("names an event with no /role, which §8.1 requires".to_owned()),
+    }
     let snapshot_digest = event
         .pointer("/snapshotDigest")
         .and_then(Value::as_str)
@@ -889,6 +1010,26 @@ fn resolve_head_sha<E: RetainedEvidence>(store: &E, event_digest: &str) -> Resul
     }
     if snapshot.pointer("/sourceKind").and_then(Value::as_str) != Some("github-pull-request-head") {
         return Err("names a snapshot that is not a github-pull-request-head".to_owned());
+    }
+
+    // THE SUBJECT. §8.1 makes `repository` and `pullRequest` REQUIRED on this
+    // projection, and until now nothing read them. Two real, correctly digested,
+    // correctly roled reads of ANOTHER pull request agree with each other
+    // perfectly and report that this subject did not move. The identity they are
+    // checked against is the caller's, precisely so that it is not taken from the
+    // artifacts under examination.
+    let repository = snapshot.pointer("/repository").and_then(Value::as_str);
+    let pull_request = snapshot.pointer("/pullRequest").and_then(Value::as_str);
+    if repository != Some(subject.repository.as_str())
+        || pull_request != Some(subject.pull_request.as_str())
+    {
+        return Err(format!(
+            "names a head snapshot of {}#{}, and the subject is {}#{}; a consistent pair of              reads of another subject says nothing about this one",
+            repository.unwrap_or("<absent>"),
+            pull_request.unwrap_or("<absent>"),
+            subject.repository,
+            subject.pull_request
+        ));
     }
 
     snapshot

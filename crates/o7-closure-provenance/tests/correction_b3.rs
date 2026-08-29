@@ -28,7 +28,7 @@
 //! ARTIFACT VALIDITY — the assessment was checked member-by-member, not closed
 //!   S8   an extra top-level member (§9.4's exfiltration channel)
 //!   S9   an extra member inside `detector` (§9.5 — closed at EVERY level)
-//!   S10  `findings` present while outcome is RETAIN (§9's iff)
+//!   S10  `findings` present while outcome is RETAIN (§9.6's computation)
 //!   S11  `coverageComplete: false` with no `coverageFailureCode` (§5.4)
 //!   S12  a finding carrying a member beyond field/findingId (§9.3)
 //!
@@ -60,7 +60,26 @@
 //! BOUNDARY — the rule must not refuse what the contract permits
 //!   S29  a correctly computed BLOCK_SECRET partition is admitted
 //!   S30  an absent present-only field is not a hole in the partition
+//!
+//! THE ONE CHECK THIS ROUND REMOVES, pinned so it cannot drift further
+//!   S31  an ungated query snapshot needs no retention binding (§5.3)
+//!   S32  and an unretained one is still refused
+//!
+//! ADDED AFTER MUTATION TESTING — each isolates a rule another check masked
+//!   S33  an outcome its own findings and coverage do not produce (§9.6)
+//!   S34  BLOCK_SECRET with an empty findings list (§5.1)
+//!   S35  a record whose coverage contradicts its assessment's (§9.6)
 //! ```
+//!
+//! WHY S33-S35 EXIST. Every rule this round adds was deleted in turn and the
+//! suite re-run. Five deletions broke nothing: another check happened to refuse
+//! the same fixture first, so the rule had a green witness and no evidence. Two
+//! of the five turned out to be genuinely unreachable and were removed rather
+//! than witnessed — §8.1's distinctness of the two head events, which the
+//! per-slot role check already enforces, and §9's requirement that a finding
+//! name a field in the §5.3 set, which §7.1's two partition rules already
+//! enforce between them. The other three were real rules with fixtures that did
+//! not isolate them, and S33-S35 are those fixtures.
 //!
 //! WHY S26 FORCED AN API CHANGE. There is no way to check that a head read is
 //! about this pull request while the only identity available comes out of the
@@ -202,7 +221,10 @@ fn clean_assessment() -> Value {
 fn reduced(outcome: &str, retained: &[&str], blocked: &[&str]) -> Value {
     let mut fields = serde_json::Map::new();
     for pointer in retained {
-        fields.insert((*pointer).to_owned(), json!("value-as-the-projection-carries-it"));
+        fields.insert(
+            (*pointer).to_owned(),
+            json!("value-as-the-projection-carries-it"),
+        );
     }
     json!({
         "schemaVersion": 1,
@@ -348,7 +370,11 @@ fn s11_incomplete_coverage_without_a_failure_code_is_not_conforming() {
 fn s12_a_finding_carrying_more_than_field_and_finding_id_is_not_conforming() {
     let mut store = Store::default();
     let (retained, blocked) = body_blocked_partition();
-    let mut a = assessment("BLOCK_SECRET", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
+    let mut a = assessment(
+        "BLOCK_SECRET",
+        &REVIEW_REQUIRED,
+        &[("/body", "rule-aws-key")],
+    );
     a.pointer_mut("/findings/0")
         .and_then(Value::as_object_mut)
         .expect("the first finding is an object")
@@ -373,7 +399,11 @@ fn s12_a_finding_carrying_more_than_field_and_finding_id_is_not_conforming() {
 #[test]
 fn s13_a_block_secret_assessment_does_not_authorise_a_complete_projection() {
     let mut store = Store::default();
-    let a = assessment("BLOCK_SECRET", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
+    let a = assessment(
+        "BLOCK_SECRET",
+        &REVIEW_REQUIRED,
+        &[("/body", "rule-aws-key")],
+    );
     let d = store.retain_under(&review(), &a);
     let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
     assert!(
@@ -393,7 +423,11 @@ fn s13_a_block_secret_assessment_does_not_authorise_a_complete_projection() {
 fn s14_a_reduced_record_whose_outcome_contradicts_its_assessment_is_refused() {
     let mut store = Store::default();
     let (retained, blocked) = body_blocked_partition();
-    let a = assessment("BLOCK_SECRET", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
+    let a = assessment(
+        "BLOCK_SECRET",
+        &REVIEW_REQUIRED,
+        &[("/body", "rule-aws-key")],
+    );
     let d = store.retain_under(&reduced("CANNOT_ASSESS", &retained, &blocked), &a);
     let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(!why.is_empty(), "got {why:?}");
@@ -411,9 +445,20 @@ fn s15_a_reduced_record_retaining_an_unassessed_field_is_refused() {
         .copied()
         .filter(|p| *p != "/commit_id")
         .collect();
-    let a = assessment("BLOCK_SECRET", &assessed, &[("/body", "rule-aws-key")]);
+    let mut a = assessment("BLOCK_SECRET", &assessed, &[("/body", "rule-aws-key")]);
+    a.as_object_mut().expect("assessment is an object").insert(
+        "coverageFailureCode".to_owned(),
+        json!("INCOMPLETE_COVERAGE"),
+    );
     let (retained, blocked) = body_blocked_partition();
-    let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
+    // The record's own coverage AGREES with the assessment's, so the disagreement
+    // check cannot be what refuses this. What is left is the §7.1 rule itself.
+    let mut record = reduced("BLOCK_SECRET", &retained, &blocked);
+    record
+        .as_object_mut()
+        .expect("record is an object")
+        .insert("coverageComplete".to_owned(), json!(false));
+    let d = store.retain_under(&record, &a);
     let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         !why.is_empty(),
@@ -425,7 +470,11 @@ fn s15_a_reduced_record_retaining_an_unassessed_field_is_refused() {
 #[test]
 fn s16_a_reduced_record_retaining_a_flagged_field_is_refused() {
     let mut store = Store::default();
-    let a = assessment("BLOCK_SECRET", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
+    let a = assessment(
+        "BLOCK_SECRET",
+        &REVIEW_REQUIRED,
+        &[("/body", "rule-aws-key")],
+    );
     // The partition keeps the very field the finding names.
     let retained: Vec<&str> = REVIEW_REQUIRED.to_vec();
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &[]), &a);
@@ -444,7 +493,11 @@ fn s16_a_reduced_record_retaining_a_flagged_field_is_refused() {
 #[test]
 fn s17_a_partition_that_omits_a_required_field_is_refused() {
     let mut store = Store::default();
-    let a = assessment("BLOCK_SECRET", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
+    let a = assessment(
+        "BLOCK_SECRET",
+        &REVIEW_REQUIRED,
+        &[("/body", "rule-aws-key")],
+    );
     let retained: Vec<&str> = REVIEW_REQUIRED
         .iter()
         .copied()
@@ -463,7 +516,19 @@ fn s17_a_partition_that_omits_a_required_field_is_refused() {
 #[test]
 fn s18_a_partition_carrying_a_pointer_outside_the_required_set_is_refused() {
     let mut store = Store::default();
-    let a = assessment("BLOCK_SECRET", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
+    // The detector claims to have assessed the invented pointer too, so
+    // `retained ⊆ assessedFields` holds and cannot be what refuses this. What is
+    // left is §5.2's rule that the denominator comes from §5.3, not the producer.
+    let mut assessed = REVIEW_REQUIRED.to_vec();
+    assessed.push("/made_up_field");
+    assessed.sort_unstable();
+    let mut a = assessment("BLOCK_SECRET", &assessed, &[("/body", "rule-aws-key")]);
+    // Every §5.3 field WAS assessed — the invented pointer is a tenth, not a
+    // substitute — so coverage is genuinely complete on both artifacts, and
+    // neither the §5.2 coverage rule nor the agreement rule can fire.
+    a.as_object_mut()
+        .expect("assessment is an object")
+        .insert("coverageComplete".to_owned(), json!(true));
     let (mut retained, blocked) = body_blocked_partition();
     retained.push("/made_up_field");
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
@@ -477,7 +542,11 @@ fn s18_a_partition_carrying_a_pointer_outside_the_required_set_is_refused() {
 #[test]
 fn s19_a_reduced_record_with_an_ungated_locator_kind_is_refused() {
     let mut store = Store::default();
-    let a = assessment("BLOCK_SECRET", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
+    let a = assessment(
+        "BLOCK_SECRET",
+        &REVIEW_REQUIRED,
+        &[("/body", "rule-aws-key")],
+    );
     let (retained, blocked) = body_blocked_partition();
     let mut record = reduced("BLOCK_SECRET", &retained, &blocked);
     record
@@ -532,9 +601,20 @@ fn s21_a_finding_naming_an_unassessed_field_is_refused() {
         .copied()
         .filter(|p| *p != "/body")
         .collect();
-    let a = assessment("BLOCK_SECRET", &assessed, &[("/body", "rule-aws-key")]);
+    let mut a = assessment("BLOCK_SECRET", &assessed, &[("/body", "rule-aws-key")]);
+    a.as_object_mut().expect("assessment is an object").insert(
+        "coverageFailureCode".to_owned(),
+        json!("INCOMPLETE_COVERAGE"),
+    );
     let (retained, blocked) = body_blocked_partition();
-    let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
+    // Coverage AGREES between the two artifacts, so the disagreement check
+    // cannot be what refuses this. The finding rule is what is left.
+    let mut record = reduced("BLOCK_SECRET", &retained, &blocked);
+    record
+        .as_object_mut()
+        .expect("record is an object")
+        .insert("coverageComplete".to_owned(), json!(false));
+    let d = store.retain_under(&record, &a);
     let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(!why.is_empty(), "got {why:?}");
 }
@@ -557,9 +637,13 @@ fn s22_a_retain_assessment_that_did_not_assess_the_whole_required_set_is_refused
         .insert("coverageComplete".to_owned(), json!(true));
     let d = store.retain_under(&review(), &a);
     let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    // Relational, not intrinsic — and the distinction is the round's subject. An
+    // assessment cannot know its own denominator: §5.2 fixes that set in §5.3 by
+    // the kind of the record, so "did this assessment cover what it had to" is
+    // only answerable once the record it is bound to is in hand.
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::AssessmentDoesNotAuthorise { .. })),
         "/user/type was never assessed and the record says coverage is complete: got {why:?}"
     );
 }
@@ -646,6 +730,10 @@ fn head_snapshot(repository: &str, pull_request: &str, head_sha: &str) -> Value 
 }
 
 fn head_read(store: &mut Store, role: &str, snapshot: &Value) -> HeadRead {
+    head_read_at(store, role, snapshot, "2026-08-05T09:00:00Z")
+}
+
+fn head_read_at(store: &mut Store, role: &str, snapshot: &Value, observed_at: &str) -> HeadRead {
     let snapshot_digest = store.put(snapshot);
     let event = store.put(&json!({
         "schemaVersion": 1,
@@ -653,7 +741,7 @@ fn head_read(store: &mut Store, role: &str, snapshot: &Value) -> HeadRead {
         "role": role,
         "acquisition": "AVAILABLE",
         "snapshotDigest": snapshot_digest,
-        "observedAt": "2026-08-05T09:00:00Z",
+        "observedAt": observed_at,
     }));
     HeadRead::Observed {
         event_digest: event,
@@ -676,9 +764,16 @@ fn s24_an_event_in_the_wrong_slot_is_not_that_slot_s_read() {
     let mut store = Store::default();
     let snapshot = head_snapshot("PhysShell/007", "9001", "aaaa");
     let read = SubjectRead {
-        before: head_read(&mut store, "HEAD_AFTER", &snapshot),
-        after: head_read(&mut store, "HEAD_AFTER", &snapshot),
+        // Two DISTINCT events, both tagged HEAD_AFTER. They differ, so nothing
+        // about duplication can refuse them and the role relation is the only
+        // thing left that can — which is what makes this a witness for it.
+        before: head_read_at(&mut store, "HEAD_AFTER", &snapshot, "2026-08-05T09:00:00Z"),
+        after: head_read_at(&mut store, "HEAD_AFTER", &snapshot, "2026-08-05T09:30:00Z"),
     };
+    assert_ne!(
+        read.before, read.after,
+        "fixture: this witness is about the ROLE, not about one event used twice"
+    );
     let verdict = staleness(&subject("PhysShell/007", "9001", "aaaa"), &read, &store);
     assert!(
         matches!(verdict, Staleness::CannotCheck { .. }),
@@ -693,8 +788,12 @@ fn s24_an_event_in_the_wrong_slot_is_not_that_slot_s_read() {
 ///
 /// One event answering for both slots is that sentence one level up: not one
 /// snapshot referenced twice, but one EVENT referenced twice. It resolves, it
-/// re-digests, its role can even be right for one of the two slots, and the two
-/// SHAs agree because they are the same SHA.
+/// re-digests, and the two SHAs agree because they are the same SHA.
+///
+/// What refuses it is the per-slot ROLE check, not a distinctness test: one
+/// event carries one role, so it cannot satisfy both slots. An explicit
+/// distinctness check was written, found to have no reachable failure, and
+/// removed. This witness guards the property; it does not name an implementation.
 #[test]
 fn s25_one_event_cannot_be_both_reads() {
     let mut store = Store::default();
@@ -778,7 +877,11 @@ fn s28_an_expected_query_digest_that_is_not_a_query_snapshot_is_refused() {
 fn s29_a_correctly_computed_partition_is_admitted() {
     let mut store = Store::default();
     let (retained, blocked) = body_blocked_partition();
-    let a = assessment("BLOCK_SECRET", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
+    let a = assessment(
+        "BLOCK_SECRET",
+        &REVIEW_REQUIRED,
+        &[("/body", "rule-aws-key")],
+    );
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
     let outcome = admissibility(&basis(&d, "/commit_id"), &store);
     assert!(
@@ -839,5 +942,164 @@ fn s30_an_absent_present_only_field_is_not_a_hole_in_the_partition() {
         matches!(outcome, Admissible::Yes { .. }),
         "/conclusion, /started_at and /completed_at are present-only and this check has none \
          of them: got {outcome:?}"
+    );
+}
+
+// ---- The one check this round REMOVES, pinned so it cannot drift further.
+
+/// §5.3 places `github-query-snapshot` outside the gate: it is constructed
+/// rather than fetched, and retains only enumeration facts and digests of
+/// objects that passed the gate on their own. §9.2 requires a `RetentionBinding`
+/// for "every retained record produced through this gate — complete projection
+/// or reduced record", and this is neither.
+///
+/// So demanding one demands a permission-shaped artifact with an empty
+/// denominator: an assessment that assessed nothing, authorising nothing, whose
+/// mere presence would read as evidence that a gate ran. The demand is dropped
+/// and this witness is why it may not quietly return.
+#[test]
+fn s31_an_ungated_query_snapshot_needs_no_retention_binding() {
+    let mut store = Store::default();
+    let d = store.retain_under(&review(), &clean_assessment());
+    let mut b = basis(&d, "/body");
+    b.expected_query_digest = Some(store.put(&query_snapshot("COMPLETE")));
+    assert!(
+        store
+            .binding_for(b.expected_query_digest.as_deref().unwrap_or(""))
+            .is_none(),
+        "fixture: this witness is about a snapshot with NO binding"
+    );
+    let outcome = admissibility(&b, &store);
+    assert!(
+        matches!(outcome, Admissible::Yes { .. }),
+        "no assessment about an ungated record can exist, so requiring one is requiring a \
+         rubber stamp: got {outcome:?}"
+    );
+}
+
+/// And the removal took nothing else with it. The basis still names the digest,
+/// the store is still only asked to resolve it, and a digest it cannot resolve
+/// is still `CANNOT_CHECK` rather than an absent expectation.
+#[test]
+fn s32_an_unretained_query_snapshot_is_still_refused() {
+    let mut store = Store::default();
+    let d = store.retain_under(&review(), &clean_assessment());
+    let mut b = basis(&d, "/body");
+    let never_stored = format!("sha256:{}", "c".repeat(64));
+    b.expected_query_digest = Some(never_stored.clone());
+    let why = refused(&admissibility(&b, &store)).to_vec();
+    assert!(
+        why.iter()
+            .any(|u| matches!(u, Unresolved::NoSuchRecord { digest } if *digest == never_stored)),
+        "got {why:?}"
+    );
+}
+
+// ---- Witnesses that isolate a relation another check was masking.
+//
+// Each of these exists because mutation testing found a rule whose deletion
+// broke nothing: another check happened to refuse the same fixture first. A
+// green suite over a masked rule is the same false comfort as a green witness
+// over a property that was never enforced.
+
+/// §9.6: `outcome` MUST equal the §5.1 computation over this assessment's own
+/// findings and coverage.
+///
+/// This assessment is internally impossible rather than merely mismatched. It
+/// assessed the whole §5.3 set, coverage is complete, no finding was emitted —
+/// and it reports `CANNOT_ASSESS`, which §5.1 reaches only when a retained field
+/// was NOT assessed. Every presence rule in §9 is satisfied, both conditionals
+/// are correct, and the two halves of the record still describe different runs.
+#[test]
+fn s33_an_outcome_its_own_findings_and_coverage_do_not_produce_is_refused() {
+    let mut store = Store::default();
+    let mut a = assessment("CANNOT_ASSESS", &REVIEW_REQUIRED, &[]);
+    assert_eq!(
+        a.pointer("/coverageComplete"),
+        Some(&Value::Bool(true)),
+        "fixture: §5.1 reaches CANNOT_ASSESS only through incomplete coverage, so this witness \
+         needs coverage to be complete"
+    );
+    assert!(
+        a.pointer("/findings").is_none(),
+        "fixture: and it needs no findings, or BLOCK_SECRET would be the honest outcome"
+    );
+    a.as_object_mut()
+        .expect("assessment is an object")
+        .insert("outcome".to_owned(), json!("CANNOT_ASSESS"));
+    let d = store.retain_under(&review(), &a);
+    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    assert!(
+        why.iter()
+            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+        "got {why:?}"
+    );
+}
+
+/// §5.1 defines `BLOCK_SECRET` as *at least one assessed field carries a
+/// blocking finding*. An empty `findings` under it is the project's oldest
+/// demon in miniature — `failure -> empty set -> green` — and it satisfies the
+/// presence half of §9's iff exactly.
+#[test]
+fn s34_block_secret_with_an_empty_findings_list_is_refused() {
+    let mut store = Store::default();
+    let mut a = assessment(
+        "BLOCK_SECRET",
+        &REVIEW_REQUIRED,
+        &[("/body", "rule-aws-key")],
+    );
+    a.as_object_mut()
+        .expect("assessment is an object")
+        .insert("findings".to_owned(), json!([]));
+    let (retained, blocked) = body_blocked_partition();
+    let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
+    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    assert!(
+        why.iter()
+            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+        "got {why:?}"
+    );
+}
+
+/// §9.6 again, one field along: `coverageComplete` lives in the assessment, and
+/// the reduced record carries a copy. The copy is an expectation checked against
+/// the retained authority, never a substitute for it.
+///
+/// A record claiming complete coverage over an assessment that recorded a
+/// coverage failure is the same self-certification as a disagreeing `outcome` —
+/// and it is the half that decides how §7.1's partition should have been
+/// computed in the first place.
+#[test]
+fn s35_a_reduced_record_whose_coverage_contradicts_its_assessment_is_refused() {
+    let mut store = Store::default();
+    let assessed: Vec<&str> = REVIEW_REQUIRED
+        .iter()
+        .copied()
+        .filter(|p| *p != "/state")
+        .collect();
+    let mut a = assessment("BLOCK_SECRET", &assessed, &[("/body", "rule-aws-key")]);
+    a.as_object_mut().expect("assessment is an object").insert(
+        "coverageFailureCode".to_owned(),
+        json!("INCOMPLETE_COVERAGE"),
+    );
+    assert_eq!(
+        a.pointer("/coverageComplete"),
+        Some(&Value::Bool(false)),
+        "fixture: this witness needs the assessment to record incomplete coverage"
+    );
+    // /state was never assessed, so §7.1 blocks it. The record's partition does
+    // that correctly, and then claims coverage was complete anyway.
+    let blocked = ["/body", "/state"];
+    let retained: Vec<&str> = REVIEW_REQUIRED
+        .iter()
+        .copied()
+        .filter(|p| !blocked.contains(p))
+        .collect();
+    let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
+    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    assert!(
+        why.iter()
+            .any(|u| matches!(u, Unresolved::AssessmentDoesNotAuthorise { .. })),
+        "got {why:?}"
     );
 }

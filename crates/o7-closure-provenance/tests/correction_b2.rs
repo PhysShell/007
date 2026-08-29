@@ -147,7 +147,22 @@ fn conforming_assessment() -> Value {
             "configDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
         },
         "representation": "decoded-source-field-values",
-        "assessedFields": ["/body", "/commitId", "/stableId"],
+        // §5.3's pointers are into the DECODED source object — GitHub's field
+        // names, not the §8 projection's. §9 fixes the assessment's
+        // `representation` as `decoded-source-field-values` to match. An earlier
+        // revision of this fixture listed `/commitId` and `/stableId`, which are
+        // the same fields named in the wrong space.
+        "assessedFields": [
+            "/author_association",
+            "/body",
+            "/commit_id",
+            "/id",
+            "/state",
+            "/submitted_at",
+            "/user/id",
+            "/user/login",
+            "/user/type",
+        ],
         "coverageComplete": true,
         "outcome": "RETAIN",
         "observedAt": "2026-08-05T09:03:00Z",
@@ -443,7 +458,10 @@ fn s5c_two_properly_evidenced_matching_head_reads_are_not_stale() {
             event_digest: after,
         },
     };
-    assert_eq!(staleness(&subject("deadbeef"), &read, &store), Staleness::NotStale);
+    assert_eq!(
+        staleness(&subject("deadbeef"), &read, &store),
+        Staleness::NotStale
+    );
 }
 
 /// And a genuinely moved head is still `Stale`, read out of retained bytes.

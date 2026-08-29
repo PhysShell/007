@@ -74,7 +74,7 @@ impl Store {
         // assessment's canonical bytes retained and reachable, and a test store
         // that cannot satisfy its own contract is modelling a store production
         // must refuse.
-        let assessment = conforming_assessment();
+        let assessment = conforming_assessment(object);
         let assessment_digest = digest(&assessment).expect("digest").as_str().to_owned();
         self.records
             .insert(assessment_digest.clone(), assessment.clone());
@@ -91,6 +91,15 @@ impl Store {
         d
     }
 
+    /// Retain an object with NO retention binding. §5.3 places
+    /// `github-query-snapshot` outside the gate, so no assessment about one can
+    /// exist and none is demanded.
+    fn put(&mut self, object: &Value) -> String {
+        let d = digest(object).expect("digest").as_str().to_owned();
+        self.records.insert(d.clone(), object.clone());
+        d
+    }
+
     /// Store `bytes` under a key that does NOT name them. Models a resolver
     /// returning the wrong object for a correct request.
     fn substitute(&mut self, under: &str, bytes: &Value) {
@@ -100,7 +109,13 @@ impl Store {
     /// Re-bind a record to a DIFFERENT retained assessment, for the cases about
     /// which assessment authorised what.
     fn bind_to_another_assessment(&mut self, record_digest: &str) -> String {
-        let mut other = conforming_assessment();
+        let mut other = conforming_assessment(
+            &self
+                .records
+                .get(record_digest)
+                .cloned()
+                .expect("the record being re-bound is retained"),
+        );
         other
             .as_object_mut()
             .expect("the assessment is an object")
@@ -134,9 +149,67 @@ impl RetainedEvidence for Store {
     }
 }
 
-/// A conforming §9 `RetentionAssessment`, retained alongside every record.
-fn conforming_assessment() -> Value {
-    json!({
+/// The §5.3 always-set, in §5.5 order, for the kinds these fixtures use.
+///
+/// Pointers into the DECODED source object — §5.3 says in as many words that
+/// these are GitHub's field names rather than the canonical projection's, and
+/// §9 fixes the assessment's `representation` as `decoded-source-field-values`
+/// to match. An earlier revision of this file listed `/commitId` and `/stableId`
+/// here, which is the §8 projection's vocabulary and a different set of names
+/// for a different space.
+fn required_fields(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "github-submitted-review" => &[
+            "/author_association",
+            "/body",
+            "/commit_id",
+            "/id",
+            "/state",
+            "/submitted_at",
+            "/user/id",
+            "/user/login",
+            "/user/type",
+        ],
+        "github-review-comment" => &[
+            "/author_association",
+            "/body",
+            "/commit_id",
+            "/created_at",
+            "/id",
+            "/original_commit_id",
+            "/path",
+            "/pull_request_review_id",
+            "/updated_at",
+            "/user/id",
+            "/user/login",
+            "/user/type",
+        ],
+        other => panic!("no §5.3 required set is transcribed for {other}"),
+    }
+}
+
+/// A conforming §9 `RetentionAssessment` that authorises `record`.
+///
+/// Derived from the record rather than fixed, because an assessment only means
+/// anything relative to one: §5.2 fixes the denominator by source kind, and
+/// §7.1 computes the partition from this assessment's own findings and coverage.
+/// A single constant assessment could not be the authority for two records of
+/// different kinds, and pretending otherwise is what let a `RETAIN` assessment
+/// stand behind a reduced record that blocked a field.
+fn conforming_assessment(record: &Value) -> Value {
+    let is_reduced = record.pointer("/sourceKind").and_then(Value::as_str)
+        == Some("github-reduced-source-record");
+    let kind = record
+        .pointer(if is_reduced {
+            "/locatorKind"
+        } else {
+            "/sourceKind"
+        })
+        .and_then(Value::as_str)
+        .expect("the fixture names its kind");
+    let assessed = required_fields(kind);
+
+    let mut assessment = json!({
         "schemaVersion": 1,
         "sourceKind": "closure-retention-assessment",
         "redactionPolicyVersion": "1",
@@ -146,11 +219,31 @@ fn conforming_assessment() -> Value {
             "configDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
         },
         "representation": "decoded-source-field-values",
-        "assessedFields": ["/body", "/commitId", "/stableId"],
+        "assessedFields": assessed,
         "coverageComplete": true,
         "outcome": "RETAIN",
         "observedAt": "2026-08-05T09:03:00Z",
-    })
+    });
+
+    if is_reduced {
+        // §7.1 runs the other way: the record's blocked set is what the findings
+        // produced, so the fixture's assessment has to name exactly those fields
+        // or the two artifacts describe different gate runs.
+        let blocked = record
+            .pointer("/blockedFields")
+            .and_then(Value::as_array)
+            .expect("a reduced record carries blockedFields");
+        let findings: Vec<Value> = blocked
+            .iter()
+            .map(|field| json!({"field": field, "findingId": "rule-aws-key"}))
+            .collect();
+        let object = assessment
+            .as_object_mut()
+            .expect("the assessment is an object");
+        object.insert("outcome".to_owned(), json!("BLOCK_SECRET"));
+        object.insert("findings".to_owned(), Value::Array(findings));
+    }
+    assessment
 }
 
 // ---- Fixtures.
@@ -184,11 +277,46 @@ fn review_comment(stable_id: &str, owning_review: &str) -> Value {
 }
 
 /// A `github-reduced-source-record` per redaction policy §7: `/body` blocked,
-/// `/commitId` assessed clean and retained.
+/// every other §5.3 field assessed clean and retained.
 ///
 /// This is the R6/R7 shape — the artifact whose whole purpose is that two
 /// decisions over the same gate outcome come out differently.
+///
+/// The partition is the §7.1 COMPUTATION and not a selection: `blockedFields` is
+/// what the findings flagged, `retainedFields` is the rest of the §5.3 set, and
+/// together they account for every required field exactly once. An earlier
+/// revision of this fixture retained two pointers out of nine and named them in
+/// the §8 projection's vocabulary; it satisfied every check that existed at the
+/// time and was not a conformant record.
 fn reduced_review(stable_id: &str, commit_id: &str) -> Value {
+    reduced_review_blocking(stable_id, commit_id, &["/body"])
+}
+
+/// The same, with the blocked set chosen by the caller.
+fn reduced_review_blocking(stable_id: &str, commit_id: &str, blocked: &[&str]) -> Value {
+    let mut retained = serde_json::Map::new();
+    for pointer in required_fields("github-submitted-review") {
+        if blocked.contains(pointer) {
+            continue;
+        }
+        // §7.2: each retained pointer holds exactly the value the COMPLETE §8
+        // projection would have carried for it.
+        let value = match *pointer {
+            "/commit_id" => json!(commit_id),
+            "/id" => json!(stable_id),
+            "/user/id" => json!("9000000901"),
+            "/user/login" => json!("synthetic-external-reviewer"),
+            "/user/type" => json!("User"),
+            "/author_association" => json!("NONE"),
+            "/state" => json!("CHANGES_REQUESTED"),
+            "/submitted_at" => json!("2026-08-05T09:02:47Z"),
+            "/body" => json!("The manifest member is still unreachable.\n"),
+            other => panic!("no §7.2 value is defined for {other}"),
+        };
+        retained.insert((*pointer).to_owned(), value);
+    }
+    let mut sorted = blocked.to_vec();
+    sorted.sort_unstable();
     json!({
         "schemaVersion": 1,
         "sourceKind": "github-reduced-source-record",
@@ -201,11 +329,36 @@ fn reduced_review(stable_id: &str, commit_id: &str) -> Value {
         "redactionPolicyVersion": "1",
         "outcome": "BLOCK_SECRET",
         "coverageComplete": true,
-        "retainedFields": {
-            "/commitId": commit_id,
-            "/stableId": stable_id,
+        "retainedFields": Value::Object(retained),
+        "blockedFields": sorted,
+    })
+}
+
+/// A §13 `github-query-snapshot`. §5.3 places this kind OUTSIDE the gate — it is
+/// constructed rather than fetched, and retains only enumeration facts and
+/// digests of objects that passed the gate on their own — so it carries no
+/// retention binding and none is demanded of it.
+fn query_snapshot() -> Value {
+    json!({
+        "schemaVersion": 1,
+        "sourceKind": "github-query-snapshot",
+        "surface": "pull-request-submitted-reviews",
+        "requiredObservationId": "review/external",
+        "binding": {"repository": "PhysShell/007", "pullRequest": "9001"},
+        "pagination": {
+            "perPage": 100,
+            "pagesRequested": ["1"],
+            "pagesObtained": ["1"],
+            "nextPagePresent": false,
         },
-        "blockedFields": ["/body"],
+        "enumeration": "COMPLETE",
+        "matcher": {
+            "id": "review-by-expected-author-login",
+            "version": "1",
+            "parameters": {"expectedAuthorLogin": "synthetic-external-reviewer"},
+        },
+        "allReturnedSnapshotDigests": [],
+        "matchedSnapshotDigests": [],
     })
 }
 
@@ -301,7 +454,11 @@ fn b1_the_value_read_comes_from_the_record_the_basis_named() {
     assert_ne!(d1, d2, "the two snapshots must be genuinely different");
 
     let mut b = basis("review/external", vec![reads(&d1, "/commitId")]);
-    b.expected_query_digest = Some(d1.clone());
+    // The expected query digest is a QUERY SNAPSHOT. An earlier revision pointed
+    // it at `d1` — the submitted review this decision reads — which resolved and
+    // re-digested perfectly while standing in for an artifact of a different
+    // kind, in a role only a query snapshot can fill.
+    b.expected_query_digest = Some(store.put(&query_snapshot()));
 
     let outcome = admissibility(&b, &store);
     assert_eq!(
@@ -389,8 +546,12 @@ fn b4_a_blocked_field_this_decision_does_not_read_is_survivable() {
         "1f2e3d4c5b6a798807162534435261708f9e0d1c",
     ));
 
+    // A reduced record's partition is keyed in §5.3's DECODED-source space, so
+    // the pointer that reads it is `/commit_id` where the same decision over a
+    // complete §8 projection reads `/commitId`. The basis pointer's space follows
+    // the record kind, which `read_pointer` already dispatches on.
     let outcome = admissibility(
-        &basis("review/external", vec![reads(&d, "/commitId")]),
+        &basis("review/external", vec![reads(&d, "/commit_id")]),
         &store,
     );
     assert_eq!(
@@ -428,26 +589,26 @@ fn b5_a_blocked_field_this_decision_reads_is_cannot_check() {
 #[test]
 fn b5b_a_locator_value_does_not_satisfy_a_decision_pointer() {
     let mut store = Store::default();
-    let mut record = reduced_review("9000000202", "1f2e3d4c5b6a798807162534435261708f9e0d1c");
-    // Block the very field the locator also carries.
-    record
-        .pointer_mut("/retainedFields")
-        .and_then(Value::as_object_mut)
-        .expect("retainedFields is an object")
-        .remove("/stableId");
-    record
-        .as_object_mut()
-        .expect("the record is an object")
-        .insert("blockedFields".to_owned(), json!(["/body", "/stableId"]));
+    // Block the very field the locator also carries. §5.3 calls it `/id` in the
+    // decoded source, and `locator.stableId` is the same source-derived value
+    // under the §8 projection's name — which is exactly the aliasing §7.3 exists
+    // to close.
+    let record = reduced_review_blocking(
+        "9000000202",
+        "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+        &["/body", "/id"],
+    );
+    assert_eq!(
+        record.pointer("/locator/stableId"),
+        Some(&json!("9000000202")),
+        "fixture: the locator must still carry the id this witness blocks"
+    );
     let d = store.retain(&record);
 
-    let outcome = admissibility(
-        &basis("review/external", vec![reads(&d, "/stableId")]),
-        &store,
-    );
+    let outcome = admissibility(&basis("review/external", vec![reads(&d, "/id")]), &store);
     let why = cannot_check(&outcome);
     assert!(
-        matches!(why, [Unresolved::PointerBlocked { pointer, .. }] if pointer == "/stableId"),
+        matches!(why, [Unresolved::PointerBlocked { pointer, .. }] if pointer == "/id"),
         "the locator must not be readable as surviving evidence: got {why:?}"
     );
 }
