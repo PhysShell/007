@@ -833,7 +833,18 @@ with what it blocks. No classifier change is made here.
   a pointer that was simply never in the projection — collapsing the two would
   lose exactly the distinction §10 is built on.
 - ~~**Where retention bindings live.**~~ **DISCHARGED**, and not where this
-  document guessed. §9.2 asked where "the set of them" is carried, which assumed
+  document guessed. The first implementation of it was also wrong in two ways
+  external review caught: it accepted a binding that answered a request about one
+  record while naming another, and it never resolved the assessment the binding
+  named. §9.2 says the assessment's canonical bytes are RETAINED; a consumer that
+  reads only the digest string has confirmed that a permission was *cited*, not
+  that it exists. Both are closed, and the assessment is checked against §9's
+  closed shape — some other retained object, correctly digested and honestly
+  bound, does not authorise a retention.
+
+  One deliberate limit: the assessment is **not** itself required to carry a
+  `RetentionBinding`. It is a control artifact, and requiring one would make every
+  permission depend on a permission — a recursion with no base case. §9.2 asked where "the set of them" is carried, which assumed
   the set travels with the decision. It does not: the binding is retained
   alongside the record and looked up by `recordDigest`, and the decision basis
   may only *assert* one, which is then compared against the retained binding and

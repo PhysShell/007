@@ -927,14 +927,46 @@ store.query_snapshot() -> (snapshot, digest)     FORBIDDEN
 
 That shape is self-consistency wearing the costume of verification — a thing and
 its certificate written by the same act — and it passes every local check. A
-retained-evidence interface therefore MUST NOT expose any operation returning a
-digest; the absence of that method is the mechanism, and a convention not to call
-it would not be.
+retained-evidence interface may still legitimately return artifacts that contain
+further references — a retention binding names the assessment that authorised it,
+a head-read event names the snapshot it read — so a rule forbidding a digest to
+appear in a returned value would forbid the evidence chain itself. An earlier
+revision stated exactly that rule, and **it is withdrawn as wrong** rather than as
+poorly enforced. The correct rule is about **authority**, not about where a digest
+may appear:
 
-The store is not trusted with its own answer either. A consumer recomputes the
-digest of whatever the store returns and refuses a mismatch, because a resolver
-that can answer a correct request with a different object is the substitution the
-content-addressed chain exists to prevent.
+```text
+A retained store is never an authority merely because it returned a value.
+Every value the store returns is an untrusted claim.
+
+A digest or reference returned INSIDE such a value may be consumed only when
+  1. its subject relation is checked against the independently requested subject
+  2. every referenced artifact required for admissibility is resolved
+  3. the resolved bytes are re-digested against the reference
+  4. the required type, schema and relationship checks succeed
+
+The store MAY resolve an independently supplied digest.
+It MAY return artifacts containing further digest references.
+It MAY NEVER make those references authoritative merely by returning them.
+```
+
+Each clause is there because omitting it was reachable, and three of the four
+were reached in one implementation at once. Without (1), a binding answering a
+request about record A while naming record B is accepted — a well-formed pointer
+at the wrong subject, which resolves. Without (2), a binding may name an
+assessment nobody retained, so the permission is a rumour about a document.
+Without (4), a scan may be evidenced by a snapshot that is real, complete and
+correctly digested and is **about a different query**; "the evidence is genuine,
+just of another question" is a distinct escape from "the evidence is missing",
+and only a relation check closes it.
+
+**A structural test over an API surface is not evidence of this law.** Asserting
+the exact set of methods on the interface is worth doing — it makes a change to
+the trust surface deliberate rather than silent — but it establishes only that
+the surface did not change unnoticed. The law is behavioural and is carried by
+witnesses that exercise each relation. Documenting a surface guard as though it
+enforced the law is how the withdrawn rule survived review: the guard was green,
+so the property was believed.
 
 ## 18. Derived facts must not masquerade as source fields
 
@@ -1144,6 +1176,11 @@ it as open — necessary conditions presented as sufficient ones.
 | What does a derivation that cannot read its inputs return? | §18 — no answer; never `false` |
 | Does a blocked field defeat an observation? | redaction §10 — only the decisions that read it |
 | Who is authoritative about which assessment permitted a retention? | redaction §9.2 — the retained binding, not the basis asserting one |
+| May a store return an artifact containing a digest? | §17 — yes; that is what an evidence chain is |
+| When may a reference inside a store-returned value be consumed? | §17 — subject relation, resolution, re-digest, shape, all four |
+| Is a resolved scan snapshot sufficient evidence for a scan? | §16, §17 — no; it must also answer THAT scan's query |
+| What does a successful head read carry? | §8.1 — a reference to a retained event, never a bare SHA |
+| Does an API-surface test establish the authority law? | §17 — no; it establishes only that the surface did not change unnoticed |
 
 ## 23. Residuals — OWED, not decided here
 
@@ -1523,3 +1560,56 @@ the enumeration value set was the one thing in this fix that the contract had no
 previously stated, so writing it only into the code would have made the code the
 authority on what §13 permits. Both directions were checked by mutation — editing
 the table fails the parity test, and so does editing the document.
+
+### 24.7 Added in the store-authority correction round
+
+The first paired external round on the classifier provenance slice returned six
+findings from two reviewers, both terminal. Four were one law at four surfaces;
+two were about the evidence rather than the mechanism, and those two are the more
+useful ones to have on the record.
+
+- **§17 — the "no digest may leave the store" rule is WITHDRAWN as wrong.** Not
+  strengthened. A store returns bindings that name assessments and events that
+  name snapshots, so the rule as written forbade the evidence chain it was meant
+  to protect. What replaces it is the four-clause authority rule above, which
+  permits references to be returned and forbids them to become authoritative by
+  being returned.
+
+- **A green witness is not evidence of the property it names.** The withdrawn
+  rule had a test. The test searched the interface's source for the substrings
+  `-> String` and `-> Digest`; the interface returned `Option<RetentionBinding>`,
+  whose two digest fields the caller reads. So the property was already absent
+  when the witness was written, the witness was green, and a commit message
+  asserted the property as established fact. Three of the six findings were
+  instances of exactly what that witness claimed to prevent.
+
+  This is worth stating as a general result rather than as an incident: a witness
+  can pass while the property it is named for does not hold, and the failure mode
+  is invisible from inside because the witness is doing what it says. The
+  countermeasure is not a better structural test. It is knowing which tests are
+  behavioural — those carry the law — and which merely guard a surface, and never
+  writing the second kind's documentation as though it were the first.
+
+- **A justification comment can describe code that does not exist.** A
+  restriction-lint allowance was added over a file with no `unwrap`, `expect` or
+  `panic` site, carrying a comment explaining why "every panic path below" was
+  sound. It was written by copying the shape of the two files beside it. A false
+  comment at a provenance boundary is worse than no comment: the next reader
+  believes a check was considered. The rule now has a test — an allowance must
+  suppress something — rather than a convention.
+
+**Preregistration did not prevent any of this, and that is not an argument
+against it.** The escape set for the first round was frozen before the
+implementation, which is what stopped the tests being shaped to the code after
+the fact. It did nothing about the set being incomplete: it made the store
+untrusted for record bytes and the basis untrusted for its assertions, and left
+the store trusted for everything else it returns. The same argument this document
+already makes about conformance vectors — no finite set discharges "any input" —
+applies to escape sets, and applies to the ones written in good faith by whoever
+is about to be wrong.
+
+**Mutation testing found a gap the reviewers did not.** Deleting the
+`acquisition == AVAILABLE` check on a head-read event failed no test, because the
+only malformed-event case covered was a missing `snapshotDigest`, which the next
+check caught anyway. A relation with no witness is a relation nobody is holding,
+and the only way to find that is to break the check and watch nothing complain.
