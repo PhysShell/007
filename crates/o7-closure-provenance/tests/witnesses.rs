@@ -64,17 +64,28 @@ struct Store {
 
 impl Store {
     fn retain(&mut self, object: &Value) -> String {
+        // The authorising assessment is RETAINED, not merely named.
+        //
+        // An earlier version of this helper bound every record to a fixed
+        // `sha256:aaaa…` that was never stored. Every "admitted" test in this
+        // file therefore passed with an unreachable assessment, and external
+        // review found the defect by reading this helper rather than the
+        // implementation — the fixture was the witness. §9.2 requires the
+        // assessment's canonical bytes retained and reachable, and a test store
+        // that cannot satisfy its own contract is modelling a store production
+        // must refuse.
+        let assessment = conforming_assessment();
+        let assessment_digest = digest(&assessment).expect("digest").as_str().to_owned();
+        self.records
+            .insert(assessment_digest.clone(), assessment.clone());
+
         let d = digest(object).expect("digest").as_str().to_owned();
         self.records.insert(d.clone(), object.clone());
-        // Everything retained through the gate carries an authorising
-        // assessment; a record without one is inadmissible per redaction policy
-        // §9.2, and B10's witness supplies its own instead of this default.
-        let assessment = format!("sha256:{}", "a".repeat(64));
         self.bindings.insert(
             d.clone(),
             RetentionBinding {
                 record_digest: d.clone(),
-                assessment_digest: assessment,
+                assessment_digest,
             },
         );
         d
@@ -86,14 +97,24 @@ impl Store {
         self.substituted.insert(under.to_owned(), bytes.clone());
     }
 
-    fn bind(&mut self, record_digest: &str, assessment_digest: &str) {
+    /// Re-bind a record to a DIFFERENT retained assessment, for the cases about
+    /// which assessment authorised what.
+    fn bind_to_another_assessment(&mut self, record_digest: &str) -> String {
+        let mut other = conforming_assessment();
+        other
+            .as_object_mut()
+            .expect("the assessment is an object")
+            .insert("observedAt".to_owned(), json!("2026-08-05T11:11:11Z"));
+        let other_digest = digest(&other).expect("digest").as_str().to_owned();
+        self.records.insert(other_digest.clone(), other);
         self.bindings.insert(
             record_digest.to_owned(),
             RetentionBinding {
                 record_digest: record_digest.to_owned(),
-                assessment_digest: assessment_digest.to_owned(),
+                assessment_digest: other_digest.clone(),
             },
         );
+        other_digest
     }
 
     fn unbind(&mut self, record_digest: &str) {
@@ -111,6 +132,25 @@ impl RetainedEvidence for Store {
     fn binding_for(&self, record_digest: &str) -> Option<RetentionBinding> {
         self.bindings.get(record_digest).cloned()
     }
+}
+
+/// A conforming §9 `RetentionAssessment`, retained alongside every record.
+fn conforming_assessment() -> Value {
+    json!({
+        "schemaVersion": 1,
+        "sourceKind": "closure-retention-assessment",
+        "redactionPolicyVersion": "1",
+        "detector": {
+            "id": "synthetic-detector",
+            "version": "1",
+            "configDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
+        "representation": "decoded-source-field-values",
+        "assessedFields": ["/body", "/commitId", "/stableId"],
+        "coverageComplete": true,
+        "outcome": "RETAIN",
+        "observedAt": "2026-08-05T09:03:00Z",
+    })
 }
 
 // ---- Fixtures.
@@ -577,14 +617,16 @@ fn b10b_a_declared_binding_that_contradicts_the_retained_one_is_refused() {
         "9000000202",
         "1111111111111111111111111111111111111111",
     ));
-    let a1 = format!("sha256:{}", "1".repeat(64));
-    let a2 = format!("sha256:{}", "2".repeat(64));
-    store.bind(&d, &a1);
+    // Both assessments are real and retained — the question is which one
+    // authorised THIS record, and the basis does not get to choose.
+    let retained = store.bind_to_another_assessment(&d);
+    let asserted = format!("sha256:{}", "2".repeat(64));
+    assert_ne!(retained, asserted);
 
     let mut b = basis("review/external", vec![reads(&d, "/commitId")]);
     b.bindings = vec![DeclaredBinding {
         record_digest: d.clone(),
-        assessment_digest: a2.clone(),
+        assessment_digest: asserted.clone(),
     }];
 
     let outcome = admissibility(&b, &store);
@@ -592,8 +634,8 @@ fn b10b_a_declared_binding_that_contradicts_the_retained_one_is_refused() {
     assert!(
         why.iter().any(|u| matches!(
             u,
-            Unresolved::BindingMismatch { declared, retained, .. }
-                if declared == &a2 && retained == &a1
+            Unresolved::BindingMismatch { declared, retained: r, .. }
+                if declared == &asserted && r == &retained
         )),
         "got {why:?}"
     );

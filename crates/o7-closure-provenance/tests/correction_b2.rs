@@ -376,6 +376,47 @@ fn s5b_a_head_read_whose_event_is_malformed_is_refused() {
     ));
 }
 
+/// An event that records a FAILED read cannot be consumed as a successful one.
+///
+/// §8.1 tags each event by its acquisition status and forbids `snapshotDigest`
+/// on a FAILED one, precisely so a failed read cannot look like a successful read
+/// of unchanged bytes. This witness carries the contradiction — FAILED *with* a
+/// digest — because that is the shape a producer would have to construct, and
+/// without it nothing tests that the status is read at all.
+///
+/// Added after mutation testing: deleting the `acquisition == AVAILABLE` check
+/// failed no test, because the only malformed-event case covered was a missing
+/// `snapshotDigest`, which the next check catches anyway. A relation with no
+/// witness is a relation nobody is holding.
+#[test]
+fn s5e_an_event_recording_a_failed_read_is_not_a_successful_one() {
+    let mut store = Store::default();
+    let snapshot = store.put(&head_snapshot("deadbeef"));
+    let contradictory = store.put(&json!({
+        "schemaVersion": 1,
+        "sourceKind": "github-head-read-event",
+        "role": "HEAD_AFTER",
+        "acquisition": "FAILED",
+        "reason": "HTTP 502",
+        "snapshotDigest": snapshot,
+        "observedAt": "2026-08-05T09:00:00Z",
+    }));
+    let read = SubjectRead {
+        before: HeadRead::Observed {
+            event_digest: contradictory.clone(),
+        },
+        after: HeadRead::Observed {
+            event_digest: contradictory,
+        },
+    };
+    let verdict = staleness(&read, "deadbeef", &store);
+    assert!(
+        matches!(verdict, Staleness::CannotCheck { .. }),
+        "an event that says the read failed must not be consumed as one that says it \
+         succeeded, whatever digest somebody attached to it: got {verdict:?}"
+    );
+}
+
 /// The positive control, so the fix for S5 is not "refuse every head read".
 #[test]
 fn s5c_two_properly_evidenced_matching_head_reads_are_not_stale() {

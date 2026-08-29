@@ -252,6 +252,54 @@ fn resolve_record<E: RetainedEvidence>(
         return None;
     };
 
+    // THE SUBJECT RELATION. A binding is a claim about a particular record, and
+    // the store answering a request about A with a binding naming B is a
+    // well-formed pointer at the wrong subject — worse than a missing one,
+    // because it resolves. Nothing else in the chain would notice.
+    if binding.record_digest != requested {
+        into.push(Unresolved::BindingSubjectMismatch {
+            requested: requested.to_owned(),
+            binding_names: binding.record_digest.clone(),
+        });
+        return None;
+    }
+
+    // THE REFERENCE MUST RESOLVE. §9.2 requires the assessment's canonical bytes
+    // retained and reachable: a binding naming an assessment nobody kept
+    // authorises nothing, and reading only the digest string makes the
+    // permission a rumour about a document.
+    let Some(assessment) = store.resolve(&binding.assessment_digest) else {
+        into.push(Unresolved::NoSuchAssessment {
+            record_digest: requested.to_owned(),
+            assessment_digest: binding.assessment_digest.clone(),
+        });
+        return None;
+    };
+    match digest(&assessment) {
+        Ok(computed) if computed.as_str() == binding.assessment_digest => {}
+        Ok(computed) => {
+            into.push(Unresolved::AssessmentDigestMismatch {
+                requested: binding.assessment_digest.clone(),
+                computed: computed.as_str().to_owned(),
+            });
+            return None;
+        }
+        Err(e) => {
+            into.push(Unresolved::AssessmentDigestMismatch {
+                requested: binding.assessment_digest.clone(),
+                computed: format!("<not canonicalizable: {e}>"),
+            });
+            return None;
+        }
+    }
+    if let Err(why) = check_assessment_shape(&assessment) {
+        into.push(Unresolved::MalformedAssessment {
+            assessment_digest: binding.assessment_digest.clone(),
+            why,
+        });
+        return None;
+    }
+
     // The retained binding is the authority on its own outcome. A basis that
     // names another assessment is asserting a permission that was never
     // granted, and it resolves perfectly well if nobody compares the two.
@@ -267,6 +315,70 @@ fn resolve_record<E: RetainedEvidence>(
     }
 
     Some(record)
+}
+
+/// A resolved assessment is a conforming §9 `RetentionAssessment`.
+///
+/// The REQUIRED members only. This deliberately does not re-derive the redaction
+/// gate's own decisions — `closure-redaction-policy-v1.md` froze those and this
+/// crate consumes the outcome rather than re-deciding it. What it establishes is
+/// that the object authorising a retention is the kind of object that can
+/// authorise one at all: some other retained record, correctly digested and
+/// honestly bound, is not a permission.
+///
+/// The assessment is NOT itself required to carry a `RetentionBinding`. It is a
+/// control artifact, and requiring one would make every permission depend on a
+/// permission — a recursion with no base case that would outlive the evidence it
+/// was meant to protect.
+fn check_assessment_shape(assessment: &Value) -> Result<(), String> {
+    let kind = assessment
+        .pointer("/sourceKind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "/sourceKind is absent or not a string".to_owned())?;
+    if kind != "closure-retention-assessment" {
+        return Err(format!(
+            "/sourceKind is {kind:?}; an authorising assessment is a \
+             closure-retention-assessment, not merely some retained object"
+        ));
+    }
+
+    for required in [
+        "/schemaVersion",
+        "/redactionPolicyVersion",
+        "/detector/id",
+        "/detector/version",
+        "/detector/configDigest",
+        "/representation",
+        "/assessedFields",
+        "/coverageComplete",
+        "/outcome",
+        "/observedAt",
+    ] {
+        if assessment.pointer(required).is_none() {
+            return Err(format!("{required} is REQUIRED by §9 and absent"));
+        }
+    }
+
+    let outcome = assessment
+        .pointer("/outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "/outcome is not a string".to_owned())?;
+    if !["RETAIN", "BLOCK_SECRET", "CANNOT_ASSESS"].contains(&outcome) {
+        return Err(format!(
+            "/outcome is {outcome:?}; §9.3 defines RETAIN, BLOCK_SECRET, CANNOT_ASSESS"
+        ));
+    }
+
+    // §9: a RETAIN outcome MUST NOT appear without coverageComplete: true.
+    if outcome == "RETAIN" && assessment.pointer("/coverageComplete") != Some(&Value::Bool(true)) {
+        return Err(
+            "/outcome is RETAIN with /coverageComplete not true, which §9 forbids: a clean \
+             verdict over an incomplete examination is not a clean verdict"
+                .to_owned(),
+        );
+    }
+
+    Ok(())
 }
 
 /// Read one pointer out of a resolved record, honouring the per-field retention
@@ -494,35 +606,122 @@ pub enum ScanVerdict {
 /// What a scan is permitted to mean, given how far it actually got AND what it
 /// is evidenced by.
 ///
-/// FIRST CUT of the evidence half — see the note on [`admissibility`]. The
-/// completeness ordering is already correct; nothing yet resolves
-/// `snapshot_digest` or checks that the evidencing snapshot answers the query
-/// this scan claims. `tests/correction_b2.rs` is the frozen record of what that
-/// omission admits.
+/// Completeness is read first, then the evidence, and only then the claim count.
+/// Reading the count first was the original defect: zero is the same number
+/// whether the surface was empty or the request died, and once it has been
+/// reported as an answer nothing downstream can recover which it was.
+///
+/// RESOLVING THE SNAPSHOT IS NOT ENOUGH. §16 requires a scan to be evidenced by a
+/// retained snapshot, and a snapshot that resolves may still be about a different
+/// pull request or a different surface — real, complete, correctly digested, and
+/// answering another question. So the scan's declared binding is checked against
+/// the snapshot's own. "The scan is genuine, just of another query" is a distinct
+/// escape from "the scan is unevidenced", and only the relation closes it.
 pub fn scan_verdict<E: RetainedEvidence>(
     scan: &FalsificationSurfaceScan,
     claims: usize,
     store: &E,
 ) -> ScanVerdict {
-    let _ = store;
     match &scan.completeness {
-        ScanCompleteness::Complete if claims == 0 => ScanVerdict::ZeroClaimsMeaningful,
-        ScanCompleteness::Complete => ScanVerdict::Claims(claims),
-        ScanCompleteness::Incomplete { reason } => ScanVerdict::CannotCheck {
-            why: format!(
-                "the {} scan did not complete ({reason}), so {claims} is a lower bound and \
-                 not a total; zero claims from it would say nothing about the surface",
-                scan.surface
-            ),
-        },
-        ScanCompleteness::Failed { reason } => ScanVerdict::CannotCheck {
-            why: format!(
-                "the {} scan failed ({reason}); a failed query that yielded no values is \
-                 not an empty result",
-                scan.surface
-            ),
-        },
+        ScanCompleteness::Incomplete { reason } => {
+            return ScanVerdict::CannotCheck {
+                why: format!(
+                    "the {} scan did not complete ({reason}), so {claims} is a lower bound and \
+                     not a total; zero claims from it would say nothing about the surface",
+                    scan.surface
+                ),
+            }
+        }
+        ScanCompleteness::Failed { reason } => {
+            return ScanVerdict::CannotCheck {
+                why: format!(
+                    "the {} scan failed ({reason}); a failed query that yielded no values is \
+                     not an empty result",
+                    scan.surface
+                ),
+            }
+        }
+        ScanCompleteness::Complete => {}
     }
+
+    if let Err(why) = check_scan_evidence(scan, store) {
+        return ScanVerdict::CannotCheck { why };
+    }
+
+    if claims == 0 {
+        ScanVerdict::ZeroClaimsMeaningful
+    } else {
+        ScanVerdict::Claims(claims)
+    }
+}
+
+/// The snapshot a scan names is retained, is what its digest names, is a query
+/// snapshot, and answers THIS scan's query.
+fn check_scan_evidence<E: RetainedEvidence>(
+    scan: &FalsificationSurfaceScan,
+    store: &E,
+) -> Result<(), String> {
+    let snapshot = store.resolve(&scan.snapshot_digest).ok_or_else(|| {
+        format!(
+            "the {} scan names snapshot {} and it is not retained; §16 requires the scan to \
+             be evidenced, and a COMPLETE flag on its own is a caller's assertion about \
+             itself",
+            scan.surface, scan.snapshot_digest
+        )
+    })?;
+
+    match digest(&snapshot) {
+        Ok(computed) if computed.as_str() == scan.snapshot_digest => {}
+        Ok(computed) => {
+            return Err(format!(
+                "the scan's evidence resolved to bytes that are not the ones {} names (they \
+                 hash to {})",
+                scan.snapshot_digest,
+                computed.as_str()
+            ))
+        }
+        Err(e) => return Err(format!("the scan's evidence cannot be canonicalized: {e}")),
+    }
+
+    if snapshot.pointer("/sourceKind").and_then(Value::as_str) != Some("github-query-snapshot") {
+        return Err(format!(
+            "the {} scan is evidenced by an object that is not a github-query-snapshot; only \
+             a query snapshot carries the binding and enumeration a scan asserts, so a single \
+             source object cannot evidence a scan of a surface",
+            scan.surface
+        ));
+    }
+
+    // The relation. Everything above establishes that the evidence is real; this
+    // establishes that it is evidence about THIS query.
+    let evidenced_surface = snapshot.pointer("/surface").and_then(Value::as_str);
+    if evidenced_surface != Some(scan.surface.as_str()) {
+        return Err(format!(
+            "the scan claims surface {:?} and its evidence is a snapshot of {:?}",
+            scan.surface,
+            evidenced_surface.unwrap_or("<absent>")
+        ));
+    }
+    let repository = snapshot
+        .pointer("/binding/repository")
+        .and_then(Value::as_str);
+    let pull_request = snapshot
+        .pointer("/binding/pullRequest")
+        .and_then(Value::as_str);
+    if repository != Some(scan.binding.repository.as_str())
+        || pull_request != Some(scan.binding.pull_request.as_str())
+    {
+        return Err(format!(
+            "the scan claims {}#{} and its evidence is a snapshot of {}#{}; a real scan of \
+             another query is not evidence about this one",
+            scan.binding.repository,
+            scan.binding.pull_request,
+            repository.unwrap_or("<absent>"),
+            pull_request.unwrap_or("<absent>")
+        ));
+    }
+
+    Ok(())
 }
 
 // ---- Subject read — provenance V1 §8.1.
@@ -567,58 +766,115 @@ pub enum Staleness {
 /// Whether the subject moved, given two head reads that may not both have
 /// happened.
 ///
-/// FIRST CUT of the evidence half — see the note on [`admissibility`]. The
-/// missing-read handling is already correct; nothing yet resolves a
-/// `HeadReadEvent`, validates its §8.1 shape, or reads the SHA out of the
-/// retained snapshot rather than out of the caller's hand.
+/// A successful read is a REFERENCE to a retained `HeadReadEvent`, and the SHA is
+/// read out of that chain: event -> `snapshotDigest` -> `github-pull-request-head`
+/// -> `headSha`. Each hop is resolved and re-digested. The earlier shape took the
+/// SHA from the caller, so two fabricated matching values reported `NotStale`
+/// with the store never consulted — the party whose subject was in question
+/// supplying the evidence that it had not changed.
+///
+/// BOTH reads must resolve before either answer is available. Absence of a
+/// contradiction is not evidence of consistency, and a read that did not happen
+/// is exactly where the head is most likely to have moved unobserved.
+///
+/// An observed contradiction still wins when the other end failed: a fact is a
+/// fact, and discarding it because its partner broke is the mirror-image error.
 pub fn staleness<E: RetainedEvidence>(
     read: &SubjectRead,
     expected_sha: &str,
     store: &E,
 ) -> Staleness {
-    let observed_sha = |r: &HeadRead| -> Option<String> {
-        match r {
-            HeadRead::Observed { event_digest } => store
-                .resolve(event_digest)
-                .and_then(|event| {
-                    event
-                        .pointer("/snapshotDigest")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                })
-                .and_then(|snapshot_digest| store.resolve(&snapshot_digest))
-                .and_then(|snapshot| {
-                    snapshot
-                        .pointer("/headSha")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                }),
-            HeadRead::Failed { .. } => None,
-        }
-    };
+    let mut observed = Vec::new();
+    let mut unresolved = Vec::new();
 
-    for r in [&read.before, &read.after] {
-        if let Some(sha) = observed_sha(r) {
-            if sha != expected_sha {
-                return Staleness::Stale { observed: sha };
+    for (role, r) in [("head_before", &read.before), ("head_after", &read.after)] {
+        match r {
+            HeadRead::Failed { reason } => {
+                unresolved.push(format!("{role} did not happen ({reason})"));
             }
+            HeadRead::Observed { event_digest } => match resolve_head_sha(store, event_digest) {
+                Ok(sha) => observed.push(sha),
+                Err(why) => unresolved.push(format!("{role} {why}")),
+            },
         }
     }
 
-    let missing: Vec<&str> = [("head_before", &read.before), ("head_after", &read.after)]
-        .into_iter()
-        .filter_map(|(name, r)| matches!(r, HeadRead::Failed { .. }).then_some(name))
-        .collect();
+    // A resolved disagreement is decisive even if the other end did not resolve.
+    for sha in &observed {
+        if sha != expected_sha {
+            return Staleness::Stale {
+                observed: sha.clone(),
+            };
+        }
+    }
 
-    if missing.is_empty() {
+    if unresolved.is_empty() {
         Staleness::NotStale
     } else {
         Staleness::CannotCheck {
             why: format!(
-                "{} did not happen, so nothing witnesses that the head did not move; \
-                 an unread head is not an unchanged one",
-                missing.join(" and ")
+                "{}; nothing witnesses that the head did not move, and an unread head is not \
+                 an unchanged one",
+                unresolved.join("; ")
             ),
         }
     }
+}
+
+/// One head read, followed from its event to the retained snapshot that carries
+/// the SHA.
+fn resolve_head_sha<E: RetainedEvidence>(store: &E, event_digest: &str) -> Result<String, String> {
+    let event = store
+        .resolve(event_digest)
+        .ok_or_else(|| format!("names an event that is not retained ({event_digest})"))?;
+    match digest(&event) {
+        Ok(computed) if computed.as_str() == event_digest => {}
+        Ok(computed) => {
+            return Err(format!(
+                "resolved to bytes that are not the ones {event_digest} names (they hash to \
+                 {computed})",
+                computed = computed.as_str()
+            ))
+        }
+        Err(e) => {
+            return Err(format!(
+                "resolved to bytes that cannot be canonicalized: {e}"
+            ))
+        }
+    }
+
+    // §8.1: an AVAILABLE event carries a REQUIRED snapshotDigest; a FAILED one
+    // MUST NOT. An event claiming success without one is malformed, and inventing
+    // a digest for it is precisely what that rule exists to prevent.
+    if event.pointer("/acquisition").and_then(Value::as_str) != Some("AVAILABLE") {
+        return Err("is an event whose acquisition is not AVAILABLE".to_owned());
+    }
+    let snapshot_digest = event
+        .pointer("/snapshotDigest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            "is an AVAILABLE event with no snapshotDigest, which §8.1 requires".to_owned()
+        })?;
+
+    let snapshot = store
+        .resolve(snapshot_digest)
+        .ok_or_else(|| format!("names a snapshot that is not retained ({snapshot_digest})"))?;
+    match digest(&snapshot) {
+        Ok(computed) if computed.as_str() == snapshot_digest => {}
+        Ok(_) => return Err("names a snapshot whose bytes are not the ones it names".to_owned()),
+        Err(e) => {
+            return Err(format!(
+                "names a snapshot that cannot be canonicalized: {e}"
+            ))
+        }
+    }
+    if snapshot.pointer("/sourceKind").and_then(Value::as_str) != Some("github-pull-request-head") {
+        return Err("names a snapshot that is not a github-pull-request-head".to_owned());
+    }
+
+    snapshot
+        .pointer("/headSha")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "names a head snapshot with no headSha".to_owned())
 }
