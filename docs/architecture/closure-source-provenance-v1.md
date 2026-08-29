@@ -503,10 +503,19 @@ REQUIRED             schemaVersion  sourceKind
                      pagination.nextPagePresent
                      enumeration
                      matcher.id  matcher.version  matcher.parameters
+                     matcher.implementationDigest   (schemaVersion 2 only)
                      allReturnedSnapshotDigests
                      matchedSnapshotDigests
 OPTIONAL-IF-PRESENT  incompleteReason  binding.sha
 ```
+
+**`schemaVersion` 2 adds `matcher.implementationDigest`.** The two shapes are
+closed key sets and neither may borrow from the other: a version-1 snapshot
+carrying the field and a version-2 snapshot missing it are both malformed.
+Version-1 snapshots remain valid records of what the contract required when they
+were written; replaying one yields CANNOT_CHECK on the implementation axis — an
+axis with no evidence, never a pass. The reason the field exists is §13.1's
+second half, below.
 
 `allReturnedSnapshotDigests` is the **complete candidate set** — every object the
 enumeration returned, each retained as a source snapshot under §11, including the
@@ -524,6 +533,31 @@ NotProduced is legal ONLY when
 
 Digests, not ids: a bare `stable_id` in a matched set is a reference to a mutable
 object, which §3 forbids as evidence.
+
+`enumeration` is a **closed set of two**:
+
+```text
+enumeration states   COMPLETE  INCOMPLETE
+```
+
+Closed, because the rule above turns on the value: a reader that accepts an
+unrecognised state has to decide what it means, and every available default is
+wrong. Treating it as complete manufactures authority the adapter never claimed;
+treating it as incomplete silently discards evidence. Refusing it is the only
+answer that does not invent a fact.
+
+`FAILED` is deliberately not one of them. It is §16's vocabulary for a
+falsification surface scan, which is a different record about a different
+question, and specimen D is the frozen witness that a failed page fetch is
+recorded *here* as `INCOMPLETE` with an `incompleteReason`. A shape that borrows
+a neighbouring record's states is not closed either.
+
+An `INCOMPLETE` snapshot is a **well-formed** record. §14 forbids it from
+supporting authoritative absence; it does not forbid it from existing, and
+specimen D exists precisely so the non-authoritative empty result stays
+recordable and distinguishable from the authoritative one. Conformance and
+admissibility are separate questions and a consumer that collapses them destroys
+the distinction this section was written to create.
 
 Both `allReturnedSnapshotDigests` and `matchedSnapshotDigests` MUST be present
 even when both are empty. An empty candidate set is a fact about the enumeration;
@@ -547,7 +581,42 @@ matcher.id          names a deterministic, total, pure predicate
                     f(candidate canonical snapshot, parameters) -> bool
 matcher.version     changes whenever f's behaviour changes for ANY input
 matcher.parameters  every value f reads that is not the candidate snapshot
+matcher.implementationDigest
+                    which implementation actually ran (schemaVersion 2)
 ```
+
+`matcher.version` is a **semantic name**: it says which rule was intended.
+`matcher.implementationDigest` is the **replay binding**: it says which code
+carried that intention out. The two are different obligations and the second
+does not follow from the first, because `version` is a string an implementer
+chooses and `ANY input` is not provable by any finite check that implementer can
+run. The triple
+
+```text
+(matcher.id, matcher.version, matcher.implementationDigest)
+```
+
+is what a replay is entitled to rely on. An implementation whose digest differs
+from the one a snapshot recorded is a *different* implementation regardless of
+what version it claims, and MUST be refused rather than reconciled.
+
+The digest MUST be over the implementation itself — bytes that the running code
+is built from — and MUST NOT be over a sample of the implementation's behaviour.
+A digest over results on a finite vector set binds a finite observation of `f`
+and not `f`, so a behaviour change on any input outside that set passes it
+unchanged. Behavioural vectors remain useful as regression witnesses and are not
+a substitute for this.
+
+The expected value MUST be recoverable from something other than the tree that
+holds the implementation. A constant sitting beside the implementation is edited
+by the same act that edits the implementation, so it establishes that two current
+fields agree and not that a version is what it was. That is why the digest is
+carried in the **snapshot** — an artifact written at acquisition time, whose own
+canonical digest is covered by whatever retained it — rather than only in a
+registry. This does not make an implementation unforgeable by whoever controls
+both the code and the corpus; it makes drift a change to a durable record instead
+of a change to a neighbouring line, and it makes an artifact already emitted
+unreplayable under changed code.
 
 The rules that make re-execution possible:
 
@@ -575,6 +644,156 @@ then   matchedSnapshotDigests MUST be exactly recomputable
 
 If it is not recomputable, the absence claim is an assertion with provenance
 decoration. That is the whole difference this section exists to protect.
+
+Two things follow that an implementation can get wrong while still looking like
+it satisfies the paragraph above.
+
+**Replay runs over the complete declared set, or it does not run.** The candidate
+sequence is `allReturnedSnapshotDigests` exactly, in observation order. A replay
+given a prefix, a subset, or a reordering MUST be refused, not performed over
+what is present. Resolving only part of a bundle — a retained blob that will not
+load — and recomputing over the part that loaded answers a different question
+than the snapshot recorded, and the two answers agree most often in exactly the
+case that matters: an empty claim reproduces against an empty slice. *Partial
+success is not success.*
+
+**A candidate that does not conform to its §8 schema is not admissible input.** A
+matcher is defined over *canonical source snapshots*; an object that declares a
+`sourceKind` and then omits a field that kind requires is not one, and MUST be
+refused rather than passed to the matcher. Scoring it produces `false` — a
+snapshot that could not be read, recorded as a candidate that did not qualify.
+Note that the digest binding does not catch this: a truncated projection hashes
+to its own digest correctly, so every candidate can verify while the set as a
+whole is unreadable. *An absent signal is not a negative result.*
+
+"Conform to its §8 schema" means the **whole** closed shape for that
+`sourceKind`, not the subset a particular matcher happens to read. A review
+missing `commitId` is not a canonical source snapshot even though no registered
+matcher reads `commitId`, and admitting it because the selection rule would not
+have looked at that field lets an empty matched set be assembled out of objects
+that are not evidence. Both directions of the closed key set are checked, since a
+member outside the declared set is a §8 violation exactly as a missing one is,
+and `null` never stands in for an absent optional member.
+
+**§7's universal members are checked on every candidate, whatever kind it names.**
+An object with no `sourceKind`, or a non-string one, is not a canonical object at
+all, so it is not "a candidate of a different surface" — the delivery-surface
+path is for objects that legitimately declare *another* kind, not for objects
+that declare none. The same holds for `schemaVersion`. Treating an undeclared
+object as a foreign one lets a truncated snapshot that still carries the expected
+login be scored as a candidate that did not qualify.
+
+**Conformance is judged against the kind the candidate declares, not the kind the
+running matcher scores.** A candidate of another surface is still an ordinary
+non-match — that is the delivery-surface law — but it has to be a well-formed
+object *of that surface* first. Validating only the matcher's own kind leaves a
+malformed foreign object scored `false` and joining an absence claim, which is
+the same defect as a malformed same-kind one wearing a different `sourceKind`.
+A `sourceKind` §8 does not define is likewise unreadable: a canonical source
+snapshot comes from an enumerated surface, so an object claiming another one is
+refused rather than scored.
+
+**An unregistered `schemaVersion` is unreadable evidence, not a non-match.** §8
+gives a changed projection a new version, so a candidate declaring a version the
+consumer does not know is an object whose shape is unknown. Applying the shape it
+does know, because the object happens to satisfy that key set, scores evidence
+the consumer was never taught to read. Checking that `schemaVersion` is an
+integer establishes only that the field is well-typed; admissibility turns on its
+value, since that value is what says which key set the object was built to.
+
+**The claim is read from the snapshot, never supplied alongside it.** A verifier
+handed `matchedSnapshotDigests` as a separate argument is a verifier whose caller
+chooses what it is checking against, and passing the recomputed value in place of
+the artifact's own reports agreement for a snapshot that contradicts itself.
+`matchedSnapshotDigests`, `allReturnedSnapshotDigests` and
+`matcher.implementationDigest` are all fields of the recorded matcher for the
+same reason: every one of them is the thing being checked, and none may arrive
+from the party being checked.
+
+**The query snapshot joins the content-addressed chain.** §11 retains snapshots
+BY digest, so the authority is the mapping `digest -> retained bytes`, never the
+bytes on their own. Candidates were already bound that way — each candidate's
+digest is recomputed and checked against what the query snapshot declared — while
+the query snapshot itself was checked against nothing, so the chain terminated on
+an unbound object one step above the part that was careful. A consumer MUST
+therefore recompute the canonical digest of the **whole** query snapshot and
+compare it against a digest supplied from outside, before reading any recorded
+value out of it. Checking a subset leaves every unchecked member free to differ
+from the artifact the digest names, including the members replay is checked
+against.
+
+What that establishes, and what it does not, stated together because the second
+half is the part that gets dropped:
+
+```text
+bytes + expected digest, mismatched   ->  REFUSE
+bytes + expected digest, matching     ->  these are the bytes that digest names
+```
+
+A forged snapshot presented together with the digest of that same forgery is
+internally consistent and passes. This is **content binding relative to an
+expectation, not authentication**. The expectation's *authority* comes from the
+layer that retained it — which digest is in the decision basis is a provenance
+question, not a matcher one; its *production* from acquisition, which computes
+the digest of the bytes it retained; and its *authenticity* from attestation.
+The mechanical comparison MUST NOT be deferred to the producer: a producer that
+is the sole attester of its own bytes hashing to its own digest has verified
+nothing. Naming follows the same discipline — no type or field in this chain may
+carry an adjective like "trusted" or "authenticated" that a later reader could
+mistake for a property the mechanism has.
+
+**A digest-bound query snapshot is not a checked one.** The rule above binds the
+snapshot's *bytes*; it establishes nothing about their *shape*, because a
+malformed snapshot hashes to its own digest exactly as a well-formed one does.
+A consumer MUST therefore validate the whole closed §13 shape of the version the
+snapshot declares — `sourceKind`, a registered `schemaVersion`, every REQUIRED
+member present and correctly typed, the nested `binding`, `pagination` and
+`matcher` shapes closed in turn, optional members never `null`, and no member
+outside the set — **before** reading any recorded value out of it.
+
+This is the same obligation §8 places on candidates, applied to the object that
+*declares* the candidates, and it was missed for the reason all nine of its
+predecessors were missed:
+
+```text
+checking several significant members of an object is not checking the object,
+  when the contract defines admissibility by the whole closed form
+```
+
+Reading the seven members a matcher parser needs left the other ten free to be
+anything, which is not a cosmetic gap: without `sourceKind` any canonical object
+carrying a matcher block reads as a query snapshot, and without `enumeration` an
+absence claim can be assembled from a snapshot that never said its enumeration
+finished. A closed shape has two sides — a missing REQUIRED member and a member
+outside the set are the same violation — and a validator that closes one side
+closes neither. Both are checked here, and the earlier decision to carry the
+superset side forward as a cosmetic residual was wrong on exactly that ground.
+
+**Conformance is not admissibility, and this layer decides only the first.** That
+`enumeration` is present and carries one of the two states §13 defines is a fact
+about the object's shape. Whether a given state is sufficient input for a given
+decision — §13's `NotProduced` is legal ONLY when `enumeration = COMPLETE` — is a
+fact about that decision, and belongs to whoever makes it. A consumer that
+refuses `INCOMPLETE` at construction has not enforced the rule; it has made
+specimen D unrepresentable and destroyed the distinction §13 exists to create. A
+consumer that treats construction as evidence of admissibility has made the
+opposite error. The two questions are answered in different layers on purpose.
+
+**A type that carries recorded values must not let a caller assign to them.**
+Reading the claim from the snapshot instead of taking it as an argument closes
+the bypass only if the parsed value is then immutable. Otherwise a caller parses
+a snapshot whose claim is false, overwrites the field with the recomputed list,
+and the verifier agrees — the same defect reopened through assignment rather than
+through a parameter. The rule is enforced by construction: one constructor, which
+reads an artifact, and no public fields.
+
+The second rule is a precondition of the pipeline, not a branch of the predicate.
+Placing it inside `f` would make the matcher's own bytes carry schema knowledge
+and would make a schema correction a matcher behaviour change under §13.1 —
+requiring a new `version` for a fix that has nothing to do with the selection
+rule. Which fields are checked is a property of the matcher (it is exactly what
+that matcher reads) and is declared alongside it; the checking happens before
+`f` is called.
 
 ### 13.2 The digest arrays are ordered sequences
 
@@ -775,8 +994,9 @@ redaction decision (§20)
       ↓         retains the bytes, so acquisition without it stores whatever
       ↓         was pasted into a comment, content-addressed
       ↓
-matcher implementation binding (§13.1)
-      ↓         blocks the first consumer that APPLIES a matcher, which is
+matcher implementation binding (§13.1)          [DONE: o7-closure-matcher,
+                                                 incl. §13 schemaVersion 2]
+      ↓         blocked the first consumer that APPLIES a matcher, which is
       ↓         the acquisition adapter, because it computes
       ↓         matchedSnapshotDigests
       ↓
@@ -793,12 +1013,15 @@ verification witness binding (§19)
 
 **Redaction decision.** A precondition for acquisition, not for this contract.
 
-**Matcher implementation binding.** §13.1 obliges `matcher.id` +
-`matcher.version` to resolve to exactly one predicate and does not say how. Until
-that exists, an adapter told to compute `matchedSnapshotDigests` has no choice
-but to pick a matcher implementation itself — which is the behaviour §13.1 was
-written to forbid, arriving through a missing prerequisite rather than through a
-missing rule.
+**Matcher implementation binding.** ~~§13.1 obliges `matcher.id` +
+`matcher.version` to resolve to exactly one predicate and does not say how.~~
+**DISCHARGED** by `crates/o7-closure-matcher` — see §23 for the mechanism, for
+the false start that preceded it, and for what it still does not cover. Specimen
+G's contradiction is now executed rather than read
+(`crates/o7-closure-matcher/tests/frozen_specimens.rs`).
+
+This paragraph is a status annotation. No normative clause of §13 or §13.1 is
+changed by it, and the binding was built to satisfy them as written.
 
 **Classifier provenance binding.** The merged classifier must learn to carry:
 
@@ -848,7 +1071,17 @@ it as open — necessary conditions presented as sufficient ones.
 | What if the second head read failed? | §8.1 — `CANNOT_CHECK`, not "not stale" |
 | What proves a matcher did not simply miss the object? | §13 candidate set + matcher id |
 | What inputs must be retained for matcher re-execution? | §13.1 — id, version, parameters, retained candidates |
-| How does id + version resolve to exactly one predicate? | §23 — **OWED**: matcher implementation binding |
+| How does id + version resolve to exactly one predicate? | §23 — **DISCHARGED**: const registry in `crates/o7-closure-matcher` |
+| What binds that pair to the code that actually ran? | §13.1 — `matcher.implementationDigest`, recorded in the snapshot |
+| May a replay run over the candidates it managed to resolve? | §13.1 — no; the complete declared sequence or refusal |
+| What happens to a candidate that violates its own §8 schema? | §13.1 — refused as inadmissible, never scored as a non-match |
+| What happens to a query snapshot that violates its own §13 shape? | §13.1 — refused; a digest binds bytes, not shape |
+| Does a matching digest establish that an object is a query snapshot? | §13.1 — no; a malformed snapshot hashes to its own digest |
+| Which `enumeration` values are admissible? | §13 — `COMPLETE`, `INCOMPLETE`; a closed set of two |
+| Is an `INCOMPLETE` snapshot malformed? | §13 — no; well-formed, and §14 bars it from authoritative absence |
+| Who applies `enumeration = COMPLETE`? | §13.1 — the layer that decides, not the layer that parses |
+| What does a snapshot written before that field prove about the implementation? | §13 — nothing; CANNOT_CHECK, not a pass |
+| What stops a version's predicate from changing under it? | §23 — a digest over the implementation's bytes, **not** over its results |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
 | What order do the digest arrays use? | §13.2 — observation order, duplicates kept |
 | What does a failed head read record? | §8.1 — `reason`, and no `snapshotDigest` |
@@ -896,19 +1129,85 @@ statements rather than written alongside them.
   the adapter deciding for itself what `Reproduced` means.
 - **Semantic normalization** of bodies (§9). V1 is byte-exact; any
   whitespace-insensitive comparison is a later, separately versioned decision.
-- **Matcher implementation binding** (§13.1). The contract obliges
-  `matcher.id` + `matcher.version` to resolve to exactly one predicate, and says
-  nothing about *how* that resolution happens — a registry file, a crate path
-  plus a version, a digest over the implementation. Until it is decided, a
-  matcher named only in prose is a locator pointing at something mutable, which
-  is what §3 objects to everywhere else. The specimens here name such a matcher
-  and say so rather than implying the binding already exists.
+- ~~**Matcher implementation binding** (§13.1).~~ **DISCHARGED** by
+  `crates/o7-closure-matcher`. The resolution mechanism is a flat const registry
+  — an identity pair resolves to one `fn`, and resolution fails closed on the id
+  and on the version separately. The *immutability* half, which is the half
+  §13.1 actually turns on, is a SHA-256 over the exact bytes of the file that
+  defines the predicate: each version's predicate lives alone in
+  `src/matchers/<id>_v<n>.rs`, the registry embeds that file verbatim at compile
+  time, and the same path is what the compiler builds — so the hashed bytes are
+  the running code. Editing a version's file breaks that version's binding;
+  changing behaviour means adding `_v2.rs` and a new entry.
 
-  *Blocks the first consumer that applies a matcher*, which is the acquisition
-  adapter, since it computes `matchedSnapshotDigests`. An adapter written before
-  this binding exists has no choice but to select a matcher implementation
-  itself — the behaviour §13.1 forbids, re-entering through a missing
-  prerequisite rather than a missing rule.
+  That digest is recorded in the durable artifact, not only in the registry:
+  `github-query-snapshot` `schemaVersion` 2 carries
+  `matcher.implementationDigest` (§13, §13.1), so a replay compares the running
+  code against a record written at acquisition time rather than against a
+  constant beside the code. Version-1 snapshots yield CANNOT_CHECK on that axis.
+
+  The original residual text is kept below because it stated the requirement
+  correctly and the first attempt at satisfying it did not.
+
+  > The contract obliges `matcher.id` + `matcher.version` to resolve to exactly
+  > one predicate, and says nothing about *how* that resolution happens — a
+  > registry file, a crate path plus a version, a digest over the
+  > implementation. Until it is decided, a matcher named only in prose is a
+  > locator pointing at something mutable, which is what §3 objects to
+  > everywhere else.
+  >
+  > *Blocks the first consumer that applies a matcher*, which is the acquisition
+  > adapter, since it computes `matchedSnapshotDigests`.
+
+  **The false start is part of the record.** The binding first shipped with a
+  digest over the predicate's *results on a frozen vector set* and was annotated
+  as discharging §13.1. It did not. §13.1 says `version` changes whenever
+  behaviour changes for **ANY** input, and a finite vector set cannot discharge
+  `ANY`: a change gated on a `state` value no vector used passed the entire
+  suite under an unchanged version and an unchanged digest. That escape is
+  recorded as an executable commit (RED-2) rather than as a sentence here, and
+  the conformance digest is now labelled what it always was — a behavioural
+  regression witness, kept because the bytes never state what the rule is
+  *supposed* to do.
+
+  **The second false start is also part of the record.** The bytes digest first
+  shipped with its expected value as a constant in `src/matchers.rs`, two lines
+  from the `include_str!` that supplied the bytes it judged, and was annotated
+  "append-only, enforced by the digest rather than by policy". It was not. One
+  commit edits both fields, and a matcher that had changed behaviour under an
+  unchanged version passed the entire suite — recorded as an executable commit
+  (RED-3) rather than as a sentence here. The correction was not a better digest
+  but a different **authority**: the expected value now lives in the snapshot.
+  The pattern across both false starts is the same one this document names
+  everywhere else — an artifact certifying the very thing it is checked against —
+  and it survived two rounds by moving up a level each time rather than by being
+  wrong in a new way.
+
+  **What remains uncovered, and is not being called discharged.**
+
+  1. A behaviour change that leaves the bytes alone: a dependency's semantics
+     shifting beneath them, a compiler change, a target difference. Identical
+     bytes are not identical behaviour across a moving substrate. The conformance
+     vectors are the witness for that residual and are the reason both digests
+     are kept; neither subsumes the other.
+  2. **The authority of an expected query digest.** Binding canonical bytes to a
+     digest supplied from outside proves those bytes are the ones that digest
+     names. It does not prove the digest is the right one to have asked for. A
+     forgery presented with its own digest is self-consistent and admissible, and
+     no arrangement inside one process closes that — the expected value has to
+     come from a retained evidence bundle or an attestation subject, neither of
+     which exists yet. Recorded here rather than in §13.1 because it is a
+     residual, not a rule, and because the two previous annotations in this
+     document were withdrawn for claiming exactly this kind of thing.
+  3. An author who edits the implementation, the registry constant and the
+     recorded digest in one commit. Nothing inside a single repository prevents
+     this, and claiming otherwise is how the previous two annotations went wrong.
+     What the mechanism buys is that drift stops being a local edit: the record
+     is a fixture whose digest comes from an independent canonicalizer, and an
+     artifact **already emitted** — an attestation, a snapshot handed to someone
+     — is outside the tree entirely and cannot be re-blessed at all. The binding
+     that holds against intent begins when artifacts leave; specimen I stands in
+     for that case until they do.
 - **Reaction surface** (§8). Still no Step 0B specimen; not added here.
 - **Pagination specimen** (§14). The rule is frozen; the historical witness does
   not exist and the contract vectors for it are synthetic.
@@ -1006,3 +1305,170 @@ document was already making about itself.
   defect class in this document: the normative text is fixed and a downstream
   summary keeps living in the previous version. Each cross-reference now points
   at the authoritative section rather than restating it.
+
+### 24.4 Added in the implementation-binding correction round
+
+This round is unusual: it corrects the document **after** the slice that was
+supposed to discharge one of its residuals, because two successive attempts at
+that discharge were annotated as complete while each was still short of what
+§13.1 requires. Both attempts failed the same way, one level apart.
+
+- **§13 — `github-query-snapshot` `schemaVersion` 2 adds
+  `matcher.implementationDigest`.** The two shapes are closed and neither may
+  borrow from the other. Version-1 snapshots stay valid and yield CANNOT_CHECK
+  on the implementation axis; specimens C, D and G are untouched and are the
+  witness for that case.
+- **§13.1 — `version` and `implementationDigest` are separate obligations.**
+  `version` is a semantic name for the rule intended; `implementationDigest` is
+  the replay binding for the code that carried it out. The second does not follow
+  from the first, because `version` is a string an implementer chooses and `ANY
+  input` is not provable by any finite check that implementer can run.
+  Additionally: the digest MUST be over the implementation, not over a sample of
+  its behaviour; and the expected value MUST be recoverable from something other
+  than the tree holding the implementation.
+- **§22 — two rows added.** What binds the identity pair to the code that ran,
+  and what a pre-field snapshot proves about it. The existing row answered
+  resolution and was, once again, being read as answering immutability.
+- **§23 — the residual keeps its full history.** Both false starts are recorded
+  with the executable commits that demonstrate them (RED-2, RED-3), and the
+  uncovered part is now enumerated as two distinct items rather than one, since
+  a moving substrate and a determined author are different gaps with different
+  answers. The word "append-only" is withdrawn.
+
+The generalisation worth keeping. Every round of this document has found the
+same defect wearing a different hat — an artifact certifying the very thing it
+is being checked against — and this round found it twice more in the code that
+was written to fix it. The pattern is not carelessness about hashing; it is that
+each fix moves the certificate closer to the thing certified and then stops,
+because at that distance the two now agree. The question that actually
+discriminates is not *what does the digest cover* but *who wrote the expected
+value, and when*. A check whose expectation was authored by the same act as its
+subject is a consistency check, whatever it is hashing.
+
+### 24.5 Added in the admissible-input correction round
+
+Two defects found in external review of the implementation slice, both of which
+the document already implied and neither of which it said outright. They are the
+same rule at two layers, and the rule is older than this document — it is the
+line in `AGENTS.md` about missing evidence not being a passed check.
+
+- **§13.1 — replay is bound to the complete declared candidate sequence.** A
+  prefix, a subset or a reordering is refused rather than replayed over what is
+  present. The failure this prevents is specific: a bundle that resolves to
+  nothing reproduces an empty absence claim, because an empty recomputation
+  agrees with an empty claim. Nothing about that outcome looks wrong from the
+  inside.
+- **§13.1 — a candidate that violates its own §8 schema is inadmissible.** It is
+  refused, never scored. Scoring it converts an unreadable snapshot into a
+  candidate that did not qualify, which is how an authoritative absence gets
+  built out of broken evidence. The digest binding is no defence here: a
+  truncated projection hashes to its own digest correctly.
+- **§13.1 — the schema precondition is placed outside the predicate**, with the
+  reason recorded, because the placement is load-bearing rather than stylistic:
+  inside `f` it would make every schema correction a matcher behaviour change
+  under §13.1's own versioning rule.
+- **§13.1 — conformance means the whole closed shape**, stated explicitly after
+  the first implementation of the rule above checked only the fields the matcher
+  reads. The document said "a field that kind requires" and the code said "a
+  field this matcher reads", and both were written in the same push, so nothing
+  compared them. `crates/o7-closure-matcher/tests/schema_parity.rs` now parses
+  §8.2 and §8.3 out of this document and fails if the two ever disagree again —
+  the expectation is the contract, not a second copy of the key set.
+- **§13.1 — §7's universal members are checked on every candidate**, so an object
+  declaring no `sourceKind` is refused rather than routed down the
+  delivery-surface path as though it were a different surface.
+- **§13.1 — the claim is a field of the recorded matcher**, not an argument to
+  the verifier. This is the fourth field to move from "supplied by the caller" to
+  "read from the artifact", after the implementation digest, the parameters and
+  the candidate sequence. The generalisation is now explicit and worth applying
+  ahead of the next reviewer: **nothing being checked may arrive from the party
+  being checked.** Each of these was found separately, by three reviewers across
+  five rounds, and each time the fix was applied to the one field named rather
+  than to the class — which is why there were five rounds.
+- **§13.1 — the query snapshot is bound to a digest supplied from outside.** The
+  ninth instance, and the first to point outward rather than inward: private
+  fields stopped a caller assembling a record, and left them free to mutate a
+  retained snapshot and parse the result. The fix completes the symmetry with
+  candidates and moves the trust boundary down one level; it does not close the
+  regress, and §23 carries what remains. Stated with the layer split so the
+  mechanical check is not deferred to the producer that computes the digest.
+- **§13.1 — the recorded values are immutable after parsing.** The eighth
+  instance, and the one that shows the previous seven were all fixed at the wrong
+  level: each moved a value from *argument* to *field* while leaving the field
+  assignable, so "read from the artifact" was a convention the API invited
+  callers to break. One constructor, no public fields. A test asserts both
+  against the source, because the compiler enforcing it today is not evidence
+  that a later `pub` would be noticed.
+- **§13.1 — conformance is judged against the declared kind.** The seventh
+  instance, found by a reviewer reading a test rather than the code: the
+  "legitimate foreign-surface candidate" in `admissible_input.rs` was itself
+  malformed — a `github-issue-comment` with no `user.login` — and the consumer
+  accepted it because it was not the matcher's kind. The test that existed to
+  show a correct non-match was the demonstration of the bypass. All five §8
+  shapes are now registered and every candidate is validated against its own.
+- **§13.1 — an unregistered candidate `schemaVersion` is refused.** The sixth
+  instance, and the one that does not fit the sentence above, so it earns its own:
+  *validating a field's type is not validating the value admissibility turns on.*
+  `schemaVersion` was checked as an integer, which is exactly the check that
+  cannot tell a V1 projection from a V2 one.
+
+Both were caught by review of the implementation, not of the contract, which is
+worth recording as a fact about where these defects live. §13's conformance
+obligation was stated correctly and completely; the two ways to satisfy its
+letter while defeating it were both in the layer that executes it. A contract
+that is right is not the same as a consumer that is right, and only one of them
+can be checked by reading.
+
+### 24.6 Added in the query-snapshot conformance round
+
+One defect, found in external review of the implementation slice. The tenth
+instance of the pattern this document has been chasing since §24.1, and the first
+to be found in the *fix for the ninth* — the round before this one bound the query
+snapshot's bytes to a digest, and stopped there.
+
+- **§13.1 — a digest-bound query snapshot is not a checked one.** §13 lists
+  seventeen REQUIRED members and the parser read seven. The other ten were free
+  to be absent, because the binding added last round establishes that these bytes
+  are the ones the expected digest names and says nothing whatever about their
+  shape: a malformed snapshot hashes to its own digest exactly as a well-formed
+  one does. Two consequences were reachable and neither is cosmetic. Without
+  `sourceKind`, any canonical object carrying a matcher block parses as a query
+  snapshot. Without `enumeration`, an absence claim can be assembled from a
+  snapshot that never declared its enumeration finished — the one precondition
+  §13 exists to impose.
+
+The rule, stated rather than the instance:
+
+```text
+checking several significant members of an object is not checking the object,
+  when the contract defines admissibility by the whole closed form
+```
+
+**A residual was reclassified rather than carried.** "An unknown key in the
+matcher block is accepted" was recorded as a cosmetic P2 and deferred to the next
+slice. That was wrong, and the way it was wrong is worth keeping: a closed shape
+has two sides, and only the superset side had been looked at. The subset side —
+a REQUIRED member simply absent — turned out to be a semantic escape rather than
+an untidiness. A validator that closes one side of a closed shape closes neither,
+so both are closed here and the P2 is discharged rather than inherited.
+
+**The layer split was held deliberately, and it is the reason this round did not
+grow.** Slice A now establishes two things about a query snapshot and exactly
+two: that the bytes are digest-bound, and that they are a conforming versioned
+`github-query-snapshot`. That `enumeration = COMPLETE` plus an empty reproduced
+selection makes `NotProduced` legal is classifier admissibility and stays with
+the layer that decides. The temptation was to require `COMPLETE` at construction
+while the validator was open on the desk; doing so would have made specimen D
+unrepresentable and destroyed the very distinction §13 was written to create —
+the matcher crate would have become a second classifier while fixing a schema
+bug. `incomplete_enumeration_is_well_formed_and_makes_no_claim` is the executable
+form of that boundary.
+
+**Where the expectation lives.** §13's member table and its enumeration states
+are now parsed out of this document by `tests/schema_parity.rs` and compared
+against the registered shapes, including the `(schemaVersion 2 only)` annotation,
+which is read rather than hardcoded. This matters more here than it did for §8:
+the enumeration value set was the one thing in this fix that the contract had not
+previously stated, so writing it only into the code would have made the code the
+authority on what §13 permits. Both directions were checked by mutation — editing
+the table fails the parity test, and so does editing the document.
