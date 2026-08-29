@@ -142,6 +142,38 @@ pub enum Unresolved {
         declared: String,
         retained: String,
     },
+    /// The store answered a binding request for one record with a binding that
+    /// names another. A well-formed pointer at the wrong subject, which is worse
+    /// than a missing one because it resolves.
+    BindingSubjectMismatch {
+        requested: String,
+        binding_names: String,
+    },
+    /// The authorising assessment is not retained. Redaction policy §9.2 requires
+    /// the assessment's canonical bytes RETAINED and reachable; a binding naming
+    /// an assessment nobody kept authorises nothing.
+    NoSuchAssessment {
+        record_digest: String,
+        assessment_digest: String,
+    },
+    /// The retained assessment bytes are not the ones its digest names.
+    AssessmentDigestMismatch { requested: String, computed: String },
+    /// The resolved assessment is not a conforming §9 `RetentionAssessment`.
+    MalformedAssessment {
+        assessment_digest: String,
+        why: String,
+    },
+    /// A head read claims to have happened and its event is not retained.
+    NoSuchHeadReadEvent { event_digest: String },
+    /// The retained head-read event or its snapshot is not what its digest names,
+    /// or does not conform to §8.1.
+    MalformedHeadRead { event_digest: String, why: String },
+    /// A scan claims evidence that is not retained, is not what its digest names,
+    /// or does not answer the query the scan says it does.
+    UnevidencedScan {
+        snapshot_digest: String,
+        why: String,
+    },
     /// A derived fact does not follow from the sources it names.
     DerivationDisagrees {
         derivation: String,
@@ -422,10 +454,28 @@ pub enum ScanCompleteness {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FalsificationSurfaceScan {
     pub surface: String,
-    pub query_binding: String,
+    /// What the scan says it enumerated.
+    ///
+    /// Structured rather than a display string because it is CHECKED against the
+    /// evidencing snapshot's own binding. An unchecked label would admit a real,
+    /// complete, correctly-digested scan of a DIFFERENT query — evidence that
+    /// resolves and answers another question.
+    pub binding: QueryBinding,
     pub completeness: ScanCompleteness,
-    /// The source or query snapshot digest this scan is evidenced by.
+    /// The query snapshot digest this scan is evidenced by.
+    ///
+    /// A QUERY snapshot specifically, not any source snapshot: a scan is a claim
+    /// about what an enumeration returned, and only a query snapshot carries the
+    /// binding and enumeration state that claim rests on. A single source object
+    /// cannot evidence a scan of a surface.
     pub snapshot_digest: String,
+}
+
+/// What a scan claims to have enumerated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryBinding {
+    pub repository: String,
+    pub pull_request: String,
 }
 
 /// What a scan plus its claim count is permitted to mean.
@@ -441,17 +491,20 @@ pub enum ScanVerdict {
     CannotCheck { why: String },
 }
 
-/// What a scan is permitted to mean, given how far it actually got.
+/// What a scan is permitted to mean, given how far it actually got AND what it
+/// is evidenced by.
 ///
-/// The completeness is read FIRST, and the claim count only afterwards. Reading
-/// the count first is the whole defect: zero is the same number whether the
-/// surface was empty or the request died, and once it has been reported as an
-/// answer nothing downstream can tell which it was.
-///
-/// An incomplete scan that DID find claims is also refused. Those claims are
-/// real, but the number is a lower bound rather than a total, and a count that
-/// travels without that qualifier gets treated as exhaustive by the next reader.
-pub fn scan_verdict(scan: &FalsificationSurfaceScan, claims: usize) -> ScanVerdict {
+/// FIRST CUT of the evidence half — see the note on [`admissibility`]. The
+/// completeness ordering is already correct; nothing yet resolves
+/// `snapshot_digest` or checks that the evidencing snapshot answers the query
+/// this scan claims. `tests/correction_b2.rs` is the frozen record of what that
+/// omission admits.
+pub fn scan_verdict<E: RetainedEvidence>(
+    scan: &FalsificationSurfaceScan,
+    claims: usize,
+    store: &E,
+) -> ScanVerdict {
+    let _ = store;
     match &scan.completeness {
         ScanCompleteness::Complete if claims == 0 => ScanVerdict::ZeroClaimsMeaningful,
         ScanCompleteness::Complete => ScanVerdict::Claims(claims),
@@ -477,12 +530,17 @@ pub fn scan_verdict(scan: &FalsificationSurfaceScan, claims: usize) -> ScanVerdi
 /// One head read, which either happened or did not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HeadRead {
-    Observed(String),
+    /// A read that happened, named by the digest of its retained `HeadReadEvent`.
+    ///
+    /// A REFERENCE and never a SHA. The earlier `Observed(String)` let a caller
+    /// assert two matching heads with nothing retained behind either; §8.1
+    /// requires a durable event per read, and an event with
+    /// `acquisition = AVAILABLE` carries a REQUIRED `snapshotDigest`. The SHA is
+    /// read out of that chain or it is not read at all.
+    Observed { event_digest: String },
     /// §8.1: a failed head read records a reason and carries no
-    /// `snapshotDigest`.
-    Failed {
-        reason: String,
-    },
+    /// `snapshotDigest` — there are no bytes to point at.
+    Failed { reason: String },
 }
 
 /// The pair of head reads bracketing an evaluation.
@@ -509,23 +567,40 @@ pub enum Staleness {
 /// Whether the subject moved, given two head reads that may not both have
 /// happened.
 ///
-/// BOTH reads must have happened before either answer is available. The first
-/// cut looked for a head that disagreed, found none because one was never read,
-/// and concluded agreement — absence of a contradiction taken as evidence of
-/// consistency. Provenance V1 §8.1 says outright that a failed head read is
-/// `CANNOT_CHECK` and never "not stale", and a missing read is exactly the case
-/// where the subject is most likely to have moved unobserved.
-///
-/// A read that disagrees is still `Stale` even if the other end failed: an
-/// observed contradiction is a fact, and losing it because the other read broke
-/// would be the mirror-image error.
-pub fn staleness(read: &SubjectRead, expected_sha: &str) -> Staleness {
-    for observed in [&read.before, &read.after] {
-        if let HeadRead::Observed(sha) = observed {
+/// FIRST CUT of the evidence half — see the note on [`admissibility`]. The
+/// missing-read handling is already correct; nothing yet resolves a
+/// `HeadReadEvent`, validates its §8.1 shape, or reads the SHA out of the
+/// retained snapshot rather than out of the caller's hand.
+pub fn staleness<E: RetainedEvidence>(
+    read: &SubjectRead,
+    expected_sha: &str,
+    store: &E,
+) -> Staleness {
+    let observed_sha = |r: &HeadRead| -> Option<String> {
+        match r {
+            HeadRead::Observed { event_digest } => store
+                .resolve(event_digest)
+                .and_then(|event| {
+                    event
+                        .pointer("/snapshotDigest")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .and_then(|snapshot_digest| store.resolve(&snapshot_digest))
+                .and_then(|snapshot| {
+                    snapshot
+                        .pointer("/headSha")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                }),
+            HeadRead::Failed { .. } => None,
+        }
+    };
+
+    for r in [&read.before, &read.after] {
+        if let Some(sha) = observed_sha(r) {
             if sha != expected_sha {
-                return Staleness::Stale {
-                    observed: sha.clone(),
-                };
+                return Staleness::Stale { observed: sha };
             }
         }
     }

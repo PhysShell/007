@@ -232,15 +232,23 @@ fn a_fully_resolvable_decision_is_admissible() {
 
 // ---- B1. Digest substitution.
 
-/// The store must not be able to choose which digest replay is checked against.
+/// The decision basis names the digest; the store resolves it.
 ///
-/// The decision basis names `D1`. The store holds a perfectly valid, correctly
-/// self-consistent query snapshot `Q2` under its own digest `D2`. If the
-/// expected digest can be read out of the store, `Q2` verifies against `D2` and
-/// the substitution is invisible: every local check passes and the artifact
-/// replayed is not the artifact the decision was made from.
+/// WITHDRAWN IN PART. This witness previously also asserted, against the trait's
+/// own source, that "RetainedEvidence has no method returning a digest". That
+/// claim was false when it was written — `binding_for` returns a
+/// `RetentionBinding` carrying two digest strings a caller reads — and the
+/// substring test that was meant to enforce it could not have seen them. A green
+/// witness for an absent property is worse than no witness, so it is removed
+/// rather than strengthened.
+///
+/// What survives here is the behavioural half, which was always the real content:
+/// the value read comes from the record the BASIS named. The API-surface guard
+/// now lives in `correction_b2.rs::e2_…`, which claims only that the trust
+/// surface cannot change unnoticed, and the law itself is carried by the
+/// semantic witnesses in that file.
 #[test]
-fn b1_the_store_cannot_supply_the_digest_it_is_checked_against() {
+fn b1_the_value_read_comes_from_the_record_the_basis_named() {
     let mut store = Store::default();
     let d1 = store.retain(&review(
         "9000000202",
@@ -252,7 +260,6 @@ fn b1_the_store_cannot_supply_the_digest_it_is_checked_against() {
     ));
     assert_ne!(d1, d2, "the two snapshots must be genuinely different");
 
-    // The basis names D1. Nothing the store can do may cause D2 to be read.
     let mut b = basis("review/external", vec![reads(&d1, "/commitId")]);
     b.expected_query_digest = Some(d1.clone());
 
@@ -262,24 +269,6 @@ fn b1_the_store_cannot_supply_the_digest_it_is_checked_against() {
         [json!("1111111111111111111111111111111111111111")],
         "the value read must come from the record the BASIS named, not from whatever else \
          the store holds"
-    );
-
-    // And the structural half, which is the part that actually holds: there is
-    // no way to ask the store for a digest at all. If this assertion ever needs
-    // relaxing, the trait has grown the method that makes B1 reachable.
-    let trait_source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
-        .expect("reading this crate's source");
-    let trait_body = trait_source
-        .split_once("pub trait RetainedEvidence")
-        .expect("the trait is declared")
-        .1
-        .split_once("\n}")
-        .expect("the trait body closes")
-        .0;
-    assert!(
-        !trait_body.contains("-> String") && !trait_body.contains("-> Digest"),
-        "RetainedEvidence must not return a digest: a store that can hand out the expectation \
-         is a store that certifies itself"
     );
 }
 

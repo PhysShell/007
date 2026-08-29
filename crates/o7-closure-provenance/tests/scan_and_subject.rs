@@ -5,23 +5,101 @@
 //! read that did not happen are both losses of evidence, and both have an
 //! obvious wrong answer that looks like an answer.
 
-// Justification for the restriction-lint allowance, per AGENTS.md rule 4 and the
-// precedent in `crates/o7-closure-classifier/tests/frozen_fixtures.rs`: every
-// panic path below is this test's own assertion failing on a literal written in
-// this file. Nothing here runs against production input.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4: exactly
+// one site, `digest(object).expect("digest")` in the `Store::put` helper below,
+// on a JSON literal written in this file. A literal this canonicalizer cannot
+// hash is a defect in the fixture and must fail loudly rather than be skipped.
+#![allow(clippy::expect_used)]
 
+use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    scan_verdict, staleness, FalsificationSurfaceScan, HeadRead, ScanCompleteness, ScanVerdict,
-    Staleness, SubjectRead,
+    scan_verdict, staleness, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
+    RetentionBinding, ScanCompleteness, ScanVerdict, Staleness, SubjectRead,
 };
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
-fn scan(completeness: ScanCompleteness) -> FalsificationSurfaceScan {
+/// The minimum store these verdicts now need. B8 and B9 are about completeness
+/// ordering and missing reads; the evidence-binding escapes they do NOT cover are
+/// in `correction_b2.rs`, which is the point of keeping both files.
+#[derive(Default)]
+struct Store {
+    records: BTreeMap<String, Value>,
+}
+impl Store {
+    fn put(&mut self, object: &Value) -> String {
+        let d = digest(object).expect("digest").as_str().to_owned();
+        self.records.insert(d.clone(), object.clone());
+        d
+    }
+}
+impl RetainedEvidence for Store {
+    fn resolve(&self, d: &str) -> Option<Value> {
+        self.records.get(d).cloned()
+    }
+    fn binding_for(&self, _record_digest: &str) -> Option<RetentionBinding> {
+        None
+    }
+}
+
+/// A retained head read: the §8.1 event plus the snapshot it points at.
+fn evidenced_head(store: &mut Store, role: &str, head_sha: &str) -> HeadRead {
+    let snapshot = store.put(&json!({
+        "schemaVersion": 1,
+        "sourceKind": "github-pull-request-head",
+        "repository": "PhysShell/007",
+        "pullRequest": "9001",
+        "headSha": head_sha,
+        "headRef": "claude/example",
+        "headRepoFullName": "PhysShell/007",
+    }));
+    let event = store.put(&json!({
+        "schemaVersion": 1,
+        "sourceKind": "github-head-read-event",
+        "role": role,
+        "acquisition": "AVAILABLE",
+        "snapshotDigest": snapshot,
+        "observedAt": "2026-08-05T09:00:00Z",
+    }));
+    HeadRead::Observed {
+        event_digest: event,
+    }
+}
+
+/// A retained query snapshot that evidences a scan of this surface and binding.
+fn evidence_for(store: &mut Store, surface: &str) -> String {
+    store.put(&json!({
+        "schemaVersion": 1,
+        "sourceKind": "github-query-snapshot",
+        "surface": surface,
+        "requiredObservationId": "falsification/scan",
+        "binding": {"repository": "PhysShell/007", "pullRequest": "9001"},
+        "pagination": {
+            "perPage": 100,
+            "pagesRequested": ["1"],
+            "pagesObtained": ["1"],
+            "nextPagePresent": false,
+        },
+        "enumeration": "COMPLETE",
+        "matcher": {
+            "id": "review-by-expected-author-login",
+            "version": "1",
+            "parameters": {"expectedAuthorLogin": "synthetic-external-reviewer"},
+        },
+        "allReturnedSnapshotDigests": [],
+        "matchedSnapshotDigests": [],
+    }))
+}
+
+fn scan(completeness: ScanCompleteness, snapshot_digest: &str) -> FalsificationSurfaceScan {
     FalsificationSurfaceScan {
         surface: "pull-request-review-comments".to_owned(),
-        query_binding: "PhysShell/007#9001".to_owned(),
+        binding: QueryBinding {
+            repository: "PhysShell/007".to_owned(),
+            pull_request: "9001".to_owned(),
+        },
         completeness,
-        snapshot_digest: format!("sha256:{}", "c".repeat(64)),
+        snapshot_digest: snapshot_digest.to_owned(),
     }
 }
 
@@ -31,8 +109,10 @@ fn scan(completeness: ScanCompleteness) -> FalsificationSurfaceScan {
 /// about the surface.
 #[test]
 fn b8a_zero_claims_after_a_complete_scan_is_meaningful() {
+    let mut store = Store::default();
+    let evidence = evidence_for(&mut store, "pull-request-review-comments");
     assert_eq!(
-        scan_verdict(&scan(ScanCompleteness::Complete), 0),
+        scan_verdict(&scan(ScanCompleteness::Complete, &evidence), 0, &store),
         ScanVerdict::ZeroClaimsMeaningful
     );
 }
@@ -45,11 +125,17 @@ fn b8a_zero_claims_after_a_complete_scan_is_meaningful() {
 /// which is precisely how "we didn't look" becomes "there is nothing there".
 #[test]
 fn b8b_zero_claims_after_an_incomplete_scan_is_cannot_check() {
+    let mut store = Store::default();
+    let evidence = evidence_for(&mut store, "pull-request-review-comments");
     let verdict = scan_verdict(
-        &scan(ScanCompleteness::Incomplete {
-            reason: "page 2 fetch returned HTTP 502; not retried".to_owned(),
-        }),
+        &scan(
+            ScanCompleteness::Incomplete {
+                reason: "page 2 fetch returned HTTP 502; not retried".to_owned(),
+            },
+            &evidence,
+        ),
         0,
+        &store,
     );
     assert!(
         matches!(verdict, ScanVerdict::CannotCheck { .. }),
@@ -60,11 +146,17 @@ fn b8b_zero_claims_after_an_incomplete_scan_is_cannot_check() {
 /// A FAILED scan finding nothing is `CANNOT_CHECK`.
 #[test]
 fn b8c_zero_claims_after_a_failed_scan_is_cannot_check() {
+    let mut store = Store::default();
+    let evidence = evidence_for(&mut store, "pull-request-review-comments");
     let verdict = scan_verdict(
-        &scan(ScanCompleteness::Failed {
-            reason: "surface unavailable".to_owned(),
-        }),
+        &scan(
+            ScanCompleteness::Failed {
+                reason: "surface unavailable".to_owned(),
+            },
+            &evidence,
+        ),
         0,
+        &store,
     );
     assert!(
         matches!(verdict, ScanVerdict::CannotCheck { .. }),
@@ -78,11 +170,17 @@ fn b8c_zero_claims_after_a_failed_scan_is_cannot_check() {
 /// for a partial scan invites the count to be treated as exhaustive later.
 #[test]
 fn b8d_an_incomplete_scan_with_claims_is_still_not_a_total() {
+    let mut store = Store::default();
+    let evidence = evidence_for(&mut store, "pull-request-review-comments");
     let verdict = scan_verdict(
-        &scan(ScanCompleteness::Incomplete {
-            reason: "pagination terminated early".to_owned(),
-        }),
+        &scan(
+            ScanCompleteness::Incomplete {
+                reason: "pagination terminated early".to_owned(),
+            },
+            &evidence,
+        ),
         2,
+        &store,
     );
     assert!(
         matches!(verdict, ScanVerdict::CannotCheck { .. }),
@@ -94,20 +192,25 @@ fn b8d_an_incomplete_scan_with_claims_is_still_not_a_total() {
 
 #[test]
 fn b9a_two_matching_head_reads_are_not_stale() {
+    let mut store = Store::default();
     let read = SubjectRead {
-        before: HeadRead::Observed("aaaa".to_owned()),
-        after: HeadRead::Observed("aaaa".to_owned()),
+        before: evidenced_head(&mut store, "HEAD_BEFORE", "aaaa"),
+        after: evidenced_head(&mut store, "HEAD_AFTER", "aaaa"),
     };
-    assert_eq!(staleness(&read, "aaaa"), Staleness::NotStale);
+    assert_eq!(staleness(&read, "aaaa", &store), Staleness::NotStale);
 }
 
 #[test]
 fn b9b_a_moved_head_is_stale() {
+    let mut store = Store::default();
     let read = SubjectRead {
-        before: HeadRead::Observed("aaaa".to_owned()),
-        after: HeadRead::Observed("bbbb".to_owned()),
+        before: evidenced_head(&mut store, "HEAD_BEFORE", "aaaa"),
+        after: evidenced_head(&mut store, "HEAD_AFTER", "bbbb"),
     };
-    assert!(matches!(staleness(&read, "aaaa"), Staleness::Stale { .. }));
+    assert!(matches!(
+        staleness(&read, "aaaa", &store),
+        Staleness::Stale { .. }
+    ));
 }
 
 /// An unavailable `head_after` is `CANNOT_CHECK`, never "not stale".
@@ -118,13 +221,14 @@ fn b9b_a_moved_head_is_stale() {
 /// Absence of a contradiction is not evidence of consistency.
 #[test]
 fn b9c_an_unavailable_head_after_is_cannot_check_not_not_stale() {
+    let mut store = Store::default();
     let read = SubjectRead {
-        before: HeadRead::Observed("aaaa".to_owned()),
+        before: evidenced_head(&mut store, "HEAD_BEFORE", "aaaa"),
         after: HeadRead::Failed {
             reason: "HTTP 502 on the second head read".to_owned(),
         },
     };
-    let verdict = staleness(&read, "aaaa");
+    let verdict = staleness(&read, "aaaa", &store);
     assert!(
         matches!(verdict, Staleness::CannotCheck { .. }),
         "a head read that did not happen cannot witness that the head did not move: got {verdict:?}"
@@ -134,14 +238,15 @@ fn b9c_an_unavailable_head_after_is_cannot_check_not_not_stale() {
 /// The same for `head_before`, so the fix is not written for one end.
 #[test]
 fn b9d_an_unavailable_head_before_is_cannot_check() {
+    let mut store = Store::default();
     let read = SubjectRead {
         before: HeadRead::Failed {
             reason: "permission denied".to_owned(),
         },
-        after: HeadRead::Observed("aaaa".to_owned()),
+        after: evidenced_head(&mut store, "HEAD_AFTER", "aaaa"),
     };
     assert!(matches!(
-        staleness(&read, "aaaa"),
+        staleness(&read, "aaaa", &store),
         Staleness::CannotCheck { .. }
     ));
 }
@@ -149,6 +254,7 @@ fn b9d_an_unavailable_head_before_is_cannot_check() {
 /// A read that failed at BOTH ends is still one verdict, and still not stale-ness.
 #[test]
 fn b9e_both_reads_unavailable_is_cannot_check() {
+    let store = Store::default();
     let read = SubjectRead {
         before: HeadRead::Failed {
             reason: "a".to_owned(),
@@ -158,7 +264,7 @@ fn b9e_both_reads_unavailable_is_cannot_check() {
         },
     };
     assert!(matches!(
-        staleness(&read, "aaaa"),
+        staleness(&read, "aaaa", &store),
         Staleness::CannotCheck { .. }
     ));
 }
