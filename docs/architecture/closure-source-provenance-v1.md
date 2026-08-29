@@ -534,6 +534,31 @@ NotProduced is legal ONLY when
 Digests, not ids: a bare `stable_id` in a matched set is a reference to a mutable
 object, which §3 forbids as evidence.
 
+`enumeration` is a **closed set of two**:
+
+```text
+enumeration states   COMPLETE  INCOMPLETE
+```
+
+Closed, because the rule above turns on the value: a reader that accepts an
+unrecognised state has to decide what it means, and every available default is
+wrong. Treating it as complete manufactures authority the adapter never claimed;
+treating it as incomplete silently discards evidence. Refusing it is the only
+answer that does not invent a fact.
+
+`FAILED` is deliberately not one of them. It is §16's vocabulary for a
+falsification surface scan, which is a different record about a different
+question, and specimen D is the frozen witness that a failed page fetch is
+recorded *here* as `INCOMPLETE` with an `incompleteReason`. A shape that borrows
+a neighbouring record's states is not closed either.
+
+An `INCOMPLETE` snapshot is a **well-formed** record. §14 forbids it from
+supporting authoritative absence; it does not forbid it from existing, and
+specimen D exists precisely so the non-authoritative empty result stays
+recordable and distinguishable from the authoritative one. Conformance and
+admissibility are separate questions and a consumer that collapses them destroys
+the distinction this section was written to create.
+
 Both `allReturnedSnapshotDigests` and `matchedSnapshotDigests` MUST be present
 even when both are empty. An empty candidate set is a fact about the enumeration;
 an absent one is a fact about the adapter.

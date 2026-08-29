@@ -27,7 +27,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_closure_matcher::{MatchError, RecordedQuerySnapshot};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 /// A complete, conforming version-1 `github-query-snapshot`.
 ///
@@ -60,6 +60,47 @@ fn conforming_v1() -> Value {
         "allReturnedSnapshotDigests": [],
         "matchedSnapshotDigests": []
     })
+}
+
+/// The snapshot's top-level object, or a nested one by pointer.
+///
+/// A helper rather than `snapshot["key"]` so that a witness which stops finding
+/// the member it means to mutate fails loudly instead of panicking on an index,
+/// and so a mistyped pointer cannot quietly mutate nothing and leave the witness
+/// asserting against an unmodified object.
+fn object_at<'a>(snapshot: &'a mut Value, pointer: &str) -> &'a mut Map<String, Value> {
+    snapshot
+        .pointer_mut(pointer)
+        .unwrap_or_else(|| panic!("the conforming snapshot has {pointer}"))
+        .as_object_mut()
+        .unwrap_or_else(|| panic!("{pointer} is an object"))
+}
+
+/// Replace one member, asserting it was there to replace.
+fn set(snapshot: &mut Value, pointer: &str, member: &str, to: Value) {
+    let object = object_at(snapshot, pointer);
+    assert!(
+        object.insert(member.to_owned(), to).is_some(),
+        "{pointer}/{member} was absent, so this witness replaced nothing"
+    );
+}
+
+/// Add a member that was NOT there.
+fn add(snapshot: &mut Value, pointer: &str, member: &str, to: Value) {
+    let object = object_at(snapshot, pointer);
+    assert!(
+        object.insert(member.to_owned(), to).is_none(),
+        "{pointer}/{member} was already present, so this witness added nothing"
+    );
+}
+
+/// Remove a member, asserting it was there to remove.
+fn remove(snapshot: &mut Value, pointer: &str, member: &str) {
+    let object = object_at(snapshot, pointer);
+    assert!(
+        object.remove(member).is_some(),
+        "{pointer}/{member} was absent, so this witness removed nothing"
+    );
 }
 
 /// Bind a snapshot to the digest of its own bytes and try to construct.
@@ -107,7 +148,7 @@ fn the_conforming_snapshot_constructs() {
 #[test]
 fn a_snapshot_without_source_kind_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap().remove("sourceKind");
+    remove(&mut snapshot, "", "sourceKind");
     refused_for_shape(&snapshot, "sourceKind");
 }
 
@@ -116,7 +157,12 @@ fn a_snapshot_without_source_kind_is_refused() {
 #[test]
 fn a_snapshot_declaring_another_source_kind_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap()["sourceKind"] = json!("github-submitted-review");
+    set(
+        &mut snapshot,
+        "",
+        "sourceKind",
+        json!("github-submitted-review"),
+    );
     refused_for_shape(&snapshot, "sourceKind");
 }
 
@@ -125,7 +171,7 @@ fn a_snapshot_declaring_another_source_kind_is_refused() {
 #[test]
 fn a_snapshot_without_enumeration_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap().remove("enumeration");
+    remove(&mut snapshot, "", "enumeration");
     refused_for_shape(&snapshot, "enumeration");
 }
 
@@ -135,7 +181,7 @@ fn a_snapshot_without_enumeration_is_refused() {
 #[test]
 fn a_snapshot_with_an_undefined_enumeration_state_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap()["enumeration"] = json!("PROBABLY_FINE");
+    set(&mut snapshot, "", "enumeration", json!("PROBABLY_FINE"));
     refused_for_shape(&snapshot, "enumeration");
 }
 
@@ -145,10 +191,7 @@ fn a_snapshot_with_an_undefined_enumeration_state_is_refused() {
 #[test]
 fn a_snapshot_without_binding_pull_request_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot["binding"]
-        .as_object_mut()
-        .unwrap()
-        .remove("pullRequest");
+    remove(&mut snapshot, "/binding", "pullRequest");
     refused_for_shape(&snapshot, "pullRequest");
 }
 
@@ -162,8 +205,10 @@ fn a_snapshot_without_binding_pull_request_is_refused() {
 #[test]
 fn a_snapshot_with_an_unknown_matcher_member_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot["matcher"].as_object_mut().unwrap().insert(
-        "implementationSource".to_owned(),
+    add(
+        &mut snapshot,
+        "/matcher",
+        "implementationSource",
         json!("fn predicate() -> bool { true }"),
     );
     refused_for_shape(&snapshot, "implementationSource");
@@ -173,10 +218,7 @@ fn a_snapshot_with_an_unknown_matcher_member_is_refused() {
 #[test]
 fn a_snapshot_with_an_unknown_top_level_member_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot
-        .as_object_mut()
-        .unwrap()
-        .insert("verdict".to_owned(), json!("PASS"));
+    add(&mut snapshot, "", "verdict", json!("PASS"));
     refused_for_shape(&snapshot, "verdict");
 }
 
@@ -186,8 +228,10 @@ fn a_snapshot_with_an_unknown_top_level_member_is_refused() {
 #[test]
 fn a_version_1_snapshot_carrying_an_implementation_digest_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot["matcher"].as_object_mut().unwrap().insert(
-        "implementationDigest".to_owned(),
+    add(
+        &mut snapshot,
+        "/matcher",
+        "implementationDigest",
         json!("sha256:0000000000000000000000000000000000000000000000000000000000000000"),
     );
     assert!(
@@ -200,7 +244,7 @@ fn a_version_1_snapshot_carrying_an_implementation_digest_is_refused() {
 #[test]
 fn a_version_2_snapshot_without_an_implementation_digest_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap()["schemaVersion"] = json!(2);
+    set(&mut snapshot, "", "schemaVersion", json!(2));
     assert!(
         construct(&snapshot).is_err(),
         "version 2 requires implementationDigest"
@@ -213,7 +257,7 @@ fn a_version_2_snapshot_without_an_implementation_digest_is_refused() {
 #[test]
 fn a_snapshot_declaring_an_unregistered_schema_version_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap()["schemaVersion"] = json!(3);
+    set(&mut snapshot, "", "schemaVersion", json!(3));
     refused_for_shape(&snapshot, "schemaVersion");
 }
 
@@ -222,7 +266,7 @@ fn a_snapshot_declaring_an_unregistered_schema_version_is_refused() {
 #[test]
 fn a_null_required_member_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap()["requiredObservationId"] = Value::Null;
+    set(&mut snapshot, "", "requiredObservationId", Value::Null);
     refused_for_shape(&snapshot, "requiredObservationId");
 }
 
@@ -231,7 +275,12 @@ fn a_null_required_member_is_refused() {
 #[test]
 fn a_mistyped_pagination_member_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot["pagination"].as_object_mut().unwrap()["nextPagePresent"] = json!("false");
+    set(
+        &mut snapshot,
+        "/pagination",
+        "nextPagePresent",
+        json!("false"),
+    );
     refused_for_shape(&snapshot, "nextPagePresent");
 }
 
@@ -239,7 +288,7 @@ fn a_mistyped_pagination_member_is_refused() {
 #[test]
 fn a_non_string_candidate_digest_is_refused() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap()["allReturnedSnapshotDigests"] = json!([1]);
+    set(&mut snapshot, "", "allReturnedSnapshotDigests", json!([1]));
     refused_for_shape(&snapshot, "allReturnedSnapshotDigests");
 }
 
@@ -260,9 +309,11 @@ fn a_non_string_candidate_digest_is_refused() {
 #[test]
 fn incomplete_enumeration_is_well_formed_and_makes_no_claim() {
     let mut snapshot = conforming_v1();
-    snapshot.as_object_mut().unwrap()["enumeration"] = json!("INCOMPLETE");
-    snapshot.as_object_mut().unwrap().insert(
-        "incompleteReason".to_owned(),
+    set(&mut snapshot, "", "enumeration", json!("INCOMPLETE"));
+    add(
+        &mut snapshot,
+        "",
+        "incompleteReason",
         json!("page 2 fetch returned HTTP 502; not retried"),
     );
 
@@ -288,10 +339,7 @@ fn incomplete_enumeration_is_well_formed_and_makes_no_claim() {
 #[test]
 fn an_optional_member_may_be_absent_but_not_null() {
     let mut snapshot = conforming_v1();
-    snapshot
-        .as_object_mut()
-        .unwrap()
-        .insert("incompleteReason".to_owned(), Value::Null);
+    add(&mut snapshot, "", "incompleteReason", Value::Null);
     refused_for_shape(&snapshot, "incompleteReason");
 }
 
@@ -300,8 +348,10 @@ fn an_optional_member_may_be_absent_but_not_null() {
 #[test]
 fn an_optional_binding_member_is_admitted_when_present() {
     let mut snapshot = conforming_v1();
-    snapshot["binding"].as_object_mut().unwrap().insert(
-        "sha".to_owned(),
+    add(
+        &mut snapshot,
+        "/binding",
+        "sha",
         json!("1f2e3d4c5b6a798807162534435261708f9e0d1c"),
     );
     construct(&snapshot).expect("§13 lists binding.sha OPTIONAL-IF-PRESENT");

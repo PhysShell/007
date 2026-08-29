@@ -98,17 +98,26 @@ fn parameters_must_be_exactly_what_the_matcher_reads() {
             "{bad} should be refused"
         );
     }
+    // A non-object `parameters` is refused one layer earlier than the three
+    // above: §13 fixes the matcher block's shape, so replay never receives this
+    // snapshot at all. The three cases above are the ones §13 deliberately does
+    // NOT fix — parameters is an open object whose admissible keys are whichever
+    // the *named* matcher reads, which is knowable only once the matcher is
+    // resolved. That split is why both checks exist and neither subsumes the
+    // other: the shape is the contract's, the key set is the matcher's.
+    let implementation = resolve("review-by-expected-author-login", "1")
+        .ok()
+        .map(|e| e.implementation_digest);
     assert!(matches!(
-        recompute_matched(
-            &named_over(
-                "review-by-expected-author-login",
-                "1",
-                &json!("nope"),
-                &candidates
-            ),
-            &candidates
-        ),
-        Err(MatchError::MalformedCandidate { .. })
+        try_construct(&snapshot_document(
+            "review-by-expected-author-login",
+            "1",
+            &json!("nope"),
+            &[],
+            &[],
+            implementation,
+        )),
+        Err(MatchError::MalformedQuerySnapshot { .. })
     ));
 }
 
@@ -159,6 +168,27 @@ fn snapshot(
     claimed: &[String],
     implementation: Option<&str>,
 ) -> RecordedMatcher {
+    let document = snapshot_document(
+        id,
+        version,
+        parameters,
+        all_returned,
+        claimed,
+        implementation,
+    );
+    try_construct(&document).expect("a well-formed query snapshot parses")
+}
+
+/// The document `snapshot` builds, for the cases that need to watch it be
+/// refused rather than parsed.
+fn snapshot_document(
+    id: &str,
+    version: &str,
+    parameters: &Value,
+    all_returned: &[String],
+    claimed: &[String],
+    implementation: Option<&str>,
+) -> Value {
     let mut matcher = json!({
         "id": id,
         "version": version,
@@ -180,18 +210,40 @@ fn snapshot(
     // discriminating witnesses live in `recorded_implementation.rs`, where the
     // expected digest is read out of a frozen fixture computed outside this
     // workspace.
-    let document = json!({
+    // Complete per §13, not merely the members these tests read. A partial
+    // document is refused at construction now, which is the point of that check:
+    // a test helper able to build a snapshot production could never accept would
+    // be exercising a shape no artifact can have. The members below are fixed
+    // because nothing here varies them; `query_snapshot_schema.rs` is where each
+    // one is varied on purpose.
+    json!({
         "schemaVersion": schema_version,
         "sourceKind": "github-query-snapshot",
+        "surface": "pull-request-reviews",
+        "requiredObservationId": "review/external-auditor",
+        "binding": {"repository": "PhysShell/007", "pullRequest": "9001"},
+        "pagination": {
+            "perPage": 100,
+            "pagesRequested": ["1"],
+            "pagesObtained": ["1"],
+            "nextPagePresent": false,
+        },
+        "enumeration": "COMPLETE",
         "matcher": matcher,
         "allReturnedSnapshotDigests": all_returned,
         "matchedSnapshotDigests": claimed,
-    });
-    let bound = o7_closure_canonical::digest(&document).expect("digest");
-    RecordedQuerySnapshot::from_canonical(&document, bound.as_str())
-        .expect("a well-formed query snapshot parses")
-        .recorded_matcher()
-        .clone()
+    })
+}
+
+/// The same construction without the `expect`, for the cases that are about the
+/// snapshot being refused rather than about what replay does with it.
+fn try_construct(document: &Value) -> Result<RecordedMatcher, MatchError> {
+    let bound = o7_closure_canonical::digest(document).expect("digest");
+    Ok(
+        RecordedQuerySnapshot::from_canonical(document, bound.as_str())?
+            .recorded_matcher()
+            .clone(),
+    )
 }
 
 fn review(stable_id: &str, login: &str) -> Value {

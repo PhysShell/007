@@ -11,7 +11,7 @@
 //! out of §8 and fails if any table here disagrees with the document, so these
 //! are a transcription that is checked rather than a second source of truth.
 
-use crate::{CandidateSchema, Member, ValueKind};
+use crate::{CandidateSchema, Member, QuerySnapshotSchema, ValueKind};
 
 const fn req(name: &'static str) -> Member {
     Member {
@@ -25,6 +25,13 @@ const fn opt(name: &'static str) -> Member {
         name,
         required: false,
         kind: ValueKind::Text,
+    }
+}
+const fn text_array(name: &'static str) -> Member {
+    Member {
+        name,
+        required: true,
+        kind: ValueKind::TextArray,
     }
 }
 const fn int(name: &'static str) -> Member {
@@ -152,5 +159,111 @@ pub(crate) const ALL: &[CandidateSchema] = &[
         source_kind: "github-issue-comment",
         schema_version: 1,
         members: ISSUE_COMMENT_V1,
+    },
+];
+
+/// The `matcher` block at `schemaVersion` 1 — an identity pair and its
+/// parameters, with no record of which implementation ran.
+const MATCHER_V1: &[Member] = &[
+    req("id"),
+    req("version"),
+    Member {
+        name: "parameters",
+        required: true,
+        kind: ValueKind::OpenObject,
+    },
+];
+
+/// The same block at `schemaVersion` 2, which §13.1 adds `implementationDigest`
+/// to. REQUIRED here, and absent from [`MATCHER_V1`] entirely: the closed key
+/// sets are what make a version-1 snapshot carrying the field, and a version-2
+/// snapshot missing it, both malformed rather than mutually convertible.
+const MATCHER_V2: &[Member] = &[
+    req("id"),
+    req("version"),
+    req("implementationDigest"),
+    Member {
+        name: "parameters",
+        required: true,
+        kind: ValueKind::OpenObject,
+    },
+];
+
+/// §13: `binding.repository` and `binding.pullRequest` REQUIRED, `binding.sha`
+/// OPTIONAL-IF-PRESENT.
+const BINDING: &[Member] = &[req("repository"), req("pullRequest"), opt("sha")];
+
+/// §13's four pagination members. §14 turns on `nextPagePresent`, which is why
+/// its type is checked rather than assumed: a string `"false"` is truthy in
+/// every language that would read this artifact loosely.
+const PAGINATION: &[Member] = &[
+    int("perPage"),
+    text_array("pagesRequested"),
+    text_array("pagesObtained"),
+    Member {
+        name: "nextPagePresent",
+        required: true,
+        kind: ValueKind::Bool,
+    },
+];
+
+/// The enumeration states §13 defines.
+///
+/// A closed set, so an unrecognised value is refused rather than treated as some
+/// unknown-but-probably-fine condition. `FAILED` is deliberately NOT here: it is
+/// §16's vocabulary for a falsification surface scan, a different record, and
+/// specimen D witnesses that a failed page fetch is recorded on this object as
+/// `INCOMPLETE` with an `incompleteReason`. Borrowing a neighbouring record's
+/// vocabulary would admit a state no §13 artifact has ever carried.
+const ENUMERATION_STATES: &[&str] = &["COMPLETE", "INCOMPLETE"];
+
+const fn query_snapshot(matcher: &'static [Member]) -> [Member; 11] {
+    [
+        int("schemaVersion"),
+        Member {
+            name: "sourceKind",
+            required: true,
+            kind: ValueKind::OneOf(&["github-query-snapshot"]),
+        },
+        req("surface"),
+        req("requiredObservationId"),
+        Member {
+            name: "binding",
+            required: true,
+            kind: ValueKind::Object(BINDING),
+        },
+        Member {
+            name: "pagination",
+            required: true,
+            kind: ValueKind::Object(PAGINATION),
+        },
+        Member {
+            name: "enumeration",
+            required: true,
+            kind: ValueKind::OneOf(ENUMERATION_STATES),
+        },
+        opt("incompleteReason"),
+        Member {
+            name: "matcher",
+            required: true,
+            kind: ValueKind::Object(matcher),
+        },
+        text_array("allReturnedSnapshotDigests"),
+        text_array("matchedSnapshotDigests"),
+    ]
+}
+
+const QUERY_SNAPSHOT_V1: [Member; 11] = query_snapshot(MATCHER_V1);
+const QUERY_SNAPSHOT_V2: [Member; 11] = query_snapshot(MATCHER_V2);
+
+/// Both versions of the §13 query snapshot.
+pub(crate) const QUERY_SNAPSHOTS: &[QuerySnapshotSchema] = &[
+    QuerySnapshotSchema {
+        schema_version: 1,
+        members: &QUERY_SNAPSHOT_V1,
+    },
+    QuerySnapshotSchema {
+        schema_version: 2,
+        members: &QUERY_SNAPSHOT_V2,
     },
 ];

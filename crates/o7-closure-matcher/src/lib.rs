@@ -129,6 +129,30 @@ pub struct Member {
 pub enum ValueKind {
     Text,
     Integer,
+    Bool,
+    /// An array whose every element is a string — the digest arrays and the
+    /// pagination page lists.
+    ///
+    /// The element type is checked, not merely the container: a digest array
+    /// holding a number is not a list of digests, and admitting it would let a
+    /// candidate reference survive as something no lookup can resolve.
+    TextArray,
+    /// A string whose value must be one of a closed set.
+    ///
+    /// Distinct from [`Self::Text`] because that is the distinction the sixth
+    /// P1 turned on: validating a field's type is not validating the value
+    /// admissibility turns on. `sourceKind` and `enumeration` are both strings
+    /// and neither is admissible at an arbitrary string.
+    OneOf(&'static [&'static str]),
+    /// An object whose members the contract deliberately does not fix.
+    ///
+    /// Exactly one member is this: `matcher.parameters`, whose keys are
+    /// whichever values the named matcher reads. Its closure is checked against
+    /// the resolved matcher's declared `parameter_keys` by [`check_parameters`]
+    /// at replay, where the matcher is known — a shape check here would have to
+    /// guess. This variant therefore asserts only "an object", and says where
+    /// the rest of the obligation is discharged rather than dropping it.
+    OpenObject,
     /// A nested object with its own closed shape, e.g. `user`.
     Object(&'static [Member]),
 }
@@ -156,6 +180,36 @@ pub struct CandidateSchema {
     pub schema_version: i64,
     pub members: &'static [Member],
 }
+
+/// The closed §13 shape of a `github-query-snapshot` at one `schemaVersion`.
+///
+/// A separate type from [`CandidateSchema`] rather than another row in it: a
+/// query snapshot is not a candidate. It is the object that *declares* the
+/// candidates, and admitting one into the candidate registry would let a
+/// snapshot be scored by a matcher.
+///
+/// §13 makes the two versions closed key sets that "may not borrow from the
+/// other", so each version carries its own complete member table. The V2 table
+/// is not V1 plus a field at the type level, even though that is what it is on
+/// paper — deriving it would make "which members does version 2 have" a
+/// computation rather than a transcription, and it is the transcription that
+/// `tests/schema_parity.rs` checks against the document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuerySnapshotSchema {
+    pub schema_version: i64,
+    pub members: &'static [Member],
+}
+
+/// The `sourceKind` of the object §13 defines.
+pub const QUERY_SNAPSHOT_SOURCE_KIND: &str = "github-query-snapshot";
+
+/// Every `schemaVersion` of `github-query-snapshot` this crate can read.
+///
+/// A snapshot declaring a version outside this list is refused. §13 gives a
+/// changed shape a new version, so an unregistered one is an object whose shape
+/// is unknown — the same law [`check_candidate_shape`] applies to candidates,
+/// applied to the object that declares them.
+pub const QUERY_SNAPSHOT_SCHEMAS: &[QuerySnapshotSchema] = schemas::QUERY_SNAPSHOTS;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchError {
@@ -568,6 +622,14 @@ impl RecordedQuerySnapshot {
     /// is read out of it. Checking a subset would leave every unchecked member
     /// free to differ from the artifact the digest names — including the members
     /// replay is checked against.
+    ///
+    /// Then the whole snapshot is checked against §13's closed shape, before any
+    /// recorded value is read out of it. **The digest is not that check and
+    /// cannot stand in for it**: it binds bytes to an expectation held outside
+    /// them, and a snapshot malformed anywhere hashes to its own digest exactly
+    /// as a well-formed one does. Reading seven members and constructing from
+    /// them left the other ten free to be absent — including `enumeration`, whose
+    /// presence §13 makes the precondition for a legal absence claim.
     pub fn from_canonical(
         snapshot: &Value,
         expected_query_digest: &str,
@@ -579,6 +641,7 @@ impl RecordedQuerySnapshot {
                 computed: computed.as_str().to_owned(),
             });
         }
+        check_query_snapshot_shape(snapshot)?;
         Ok(Self {
             digest: computed.as_str().to_owned(),
             matcher: RecordedMatcher::from_query_snapshot(snapshot)?,
@@ -666,8 +729,17 @@ impl RecordedMatcher {
     /// `schemaVersion` 1 yields [`RecordedImplementation::Unrecorded`];
     /// `schemaVersion` 2 REQUIRES `implementationDigest`. A version-2 snapshot
     /// missing the field and a version-1 snapshot carrying it are both refused:
-    /// §8 schemas are closed key sets, and a shape that can borrow a field from
-    /// its neighbour is not closed.
+    /// §13's schemas are closed key sets, and a shape that can borrow a field
+    /// from its neighbour is not closed.
+    ///
+    /// Those refusals are now unreachable in practice, because
+    /// [`check_query_snapshot_shape`] has already checked the whole closed shape
+    /// by the time this runs, and the version tables express the same rule. They
+    /// are kept rather than deleted: this function must branch on the version
+    /// anyway in order to *extract*, and an extraction that assumed its caller
+    /// had validated would be one refactor away from being wrong silently. The
+    /// duplication is a fail-closed default, not a second opinion — both arms
+    /// refuse, so they cannot disagree about what to admit.
     /// NOT public. The only way to obtain a `RecordedMatcher` is through
     /// [`RecordedQuerySnapshot`], which binds the snapshot's bytes to a digest
     /// supplied from outside before anything is extracted from it. A public
@@ -958,6 +1030,72 @@ fn check_candidate_shape(candidate: &Candidate) -> Result<(), MatchError> {
     check_shape(&candidate.snapshot, schema.members, "").map_err(refuse)
 }
 
+/// The whole §13 query snapshot against the closed shape of the version it
+/// declares.
+///
+/// Ordered exactly as [`check_candidate_shape`] is, and for the same reasons:
+/// the universals first, because an object that does not declare what it is
+/// cannot be looked up; then the version, because §13 gives a changed shape a
+/// new version and applying the V1 table to a V2 object reads a projection this
+/// crate was never taught; then the whole closed key set.
+///
+/// WHAT THIS DOES NOT DECIDE. Conformance is not admissibility. That
+/// `enumeration` is present and carries a value §13 defines is a fact about the
+/// object's shape. Whether a particular value is sufficient input for a
+/// particular decision — §13's `NotProduced` is legal ONLY when
+/// `enumeration = COMPLETE` — is a fact about that decision, and belongs to
+/// whoever makes it. Refusing `INCOMPLETE` here would be this crate deciding a
+/// classifier question, and would make specimen D, whose whole purpose is to
+/// keep the non-authoritative empty result representable and distinguishable
+/// from the authoritative one, unrepresentable.
+fn check_query_snapshot_shape(snapshot: &Value) -> Result<(), MatchError> {
+    let refuse = |why: String| MatchError::MalformedQuerySnapshot { why };
+
+    let Some(declared_kind) = snapshot.pointer("/sourceKind").and_then(Value::as_str) else {
+        return Err(refuse(
+            "/sourceKind is absent or not a string; §7 requires every canonical object \
+             to carry it, and without it any object holding a matcher block reads as a \
+             query snapshot"
+                .to_owned(),
+        ));
+    };
+    if declared_kind != QUERY_SNAPSHOT_SOURCE_KIND {
+        return Err(refuse(format!(
+            "/sourceKind is {declared_kind:?}, not {QUERY_SNAPSHOT_SOURCE_KIND:?}; an \
+             object of another kind that happens to carry a matcher block is not the \
+             record §13 defines"
+        )));
+    }
+
+    let Some(declared_version) = snapshot.pointer("/schemaVersion").and_then(|v| {
+        v.as_i64()
+            .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))
+    }) else {
+        return Err(refuse(
+            "/schemaVersion is absent or not an integer; §7 requires every canonical \
+             object to carry it"
+                .to_owned(),
+        ));
+    };
+
+    let Some(schema) = QUERY_SNAPSHOT_SCHEMAS
+        .iter()
+        .find(|s| s.schema_version == declared_version)
+    else {
+        let known: Vec<i64> = QUERY_SNAPSHOT_SCHEMAS
+            .iter()
+            .map(|s| s.schema_version)
+            .collect();
+        return Err(refuse(format!(
+            "/schemaVersion is {declared_version}, and this registry knows only {known:?} \
+             of {QUERY_SNAPSHOT_SOURCE_KIND}; §13 gives a changed shape a new version, so \
+             an unregistered one is an object whose shape is unknown"
+        )));
+    };
+
+    check_shape(snapshot, schema.members, "").map_err(refuse)
+}
+
 /// Both directions of a closed shape: nothing required missing, nothing outside
 /// the declared set present.
 fn check_shape(value: &Value, members: &[Member], path: &str) -> Result<(), String> {
@@ -984,6 +1122,33 @@ fn check_shape(value: &Value, members: &[Member], path: &str) -> Result<(), Stri
                 }
                 ValueKind::Integer if !found.is_i64() && !found.is_u64() => {
                     return Err(format!("{at} is not an integer"))
+                }
+                ValueKind::Bool if !found.is_boolean() => {
+                    return Err(format!("{at} is not a boolean"))
+                }
+                ValueKind::TextArray => {
+                    let items = found
+                        .as_array()
+                        .ok_or_else(|| format!("{at} is not an array"))?;
+                    if let Some(position) = items.iter().position(|i| i.as_str().is_none()) {
+                        return Err(format!("{at}[{position}] is not a string"));
+                    }
+                }
+                ValueKind::OneOf(admissible) => {
+                    let text = found
+                        .as_str()
+                        .ok_or_else(|| format!("{at} is not a string"))?;
+                    if !admissible.contains(&text) {
+                        return Err(format!(
+                            "{at} is {text:?}, and the contract defines only {admissible:?}. \
+                             A value outside the set is not an unrecognised state to be \
+                             treated leniently — it is an object whose meaning this \
+                             reader cannot establish"
+                        ));
+                    }
+                }
+                ValueKind::OpenObject if !found.is_object() => {
+                    return Err(format!("{at} is not an object"))
                 }
                 ValueKind::Object(nested) => check_shape(found, nested, &at)?,
                 _ => {}

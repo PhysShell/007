@@ -347,8 +347,16 @@ fn every_recorded_implementation_in_the_corpus_binds() {
     );
 }
 
-/// §8's schemas are closed key sets. A shape that can borrow a field from its
-/// neighbour is not closed, so both directions are refused.
+/// §13's two shapes are closed key sets. A shape that can borrow a field from
+/// its neighbour is not closed, so both directions are refused.
+///
+/// The refusal now comes from the closed-shape check over the whole snapshot
+/// rather than from the matcher parser's own version match: `implementationDigest`
+/// is simply absent from the version-1 member table and REQUIRED in the
+/// version-2 one, so the general rule produces this specific outcome instead of
+/// the two being stated separately. The matcher parser still branches on the
+/// version, because it has to in order to extract, and its refusals are now a
+/// redundant second statement of the same rule.
 #[test]
 fn the_two_snapshot_shapes_do_not_borrow_fields_from_each_other() {
     let mut v1_with_digest = fixture("matcher-candidate-set-v1.json")
@@ -365,7 +373,7 @@ fn the_two_snapshot_shapes_do_not_borrow_fields_from_each_other() {
         );
     assert!(matches!(
         self_bound(&v1_with_digest),
-        Err(MatchError::MalformedRecordedMatcher { .. })
+        Err(MatchError::MalformedQuerySnapshot { .. })
     ));
 
     let mut v2_without_digest = specimen_i_snapshot();
@@ -376,7 +384,7 @@ fn the_two_snapshot_shapes_do_not_borrow_fields_from_each_other() {
         .remove("implementationDigest");
     assert!(matches!(
         self_bound(&v2_without_digest),
-        Err(MatchError::MalformedRecordedMatcher { .. })
+        Err(MatchError::MalformedQuerySnapshot { .. })
     ));
 }
 

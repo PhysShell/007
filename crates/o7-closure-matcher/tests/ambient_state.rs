@@ -101,9 +101,25 @@ fn snapshot(
     // discriminating witnesses live in `recorded_implementation.rs`, where the
     // expected digest is read out of a frozen fixture computed outside this
     // workspace.
+    // Complete per §13, not merely the members these tests read. A partial
+    // document is refused at construction now, which is the point of that check:
+    // a test helper able to build a snapshot production could never accept would
+    // be exercising a shape no artifact can have. The members below are fixed
+    // because nothing here varies them; `query_snapshot_schema.rs` is where each
+    // one is varied on purpose.
     let document = json!({
         "schemaVersion": schema_version,
         "sourceKind": "github-query-snapshot",
+        "surface": "pull-request-reviews",
+        "requiredObservationId": "review/external-auditor",
+        "binding": {"repository": "PhysShell/007", "pullRequest": "9001"},
+        "pagination": {
+            "perPage": 100,
+            "pagesRequested": ["1"],
+            "pagesObtained": ["1"],
+            "nextPagePresent": false,
+        },
+        "enumeration": "COMPLETE",
         "matcher": matcher,
         "allReturnedSnapshotDigests": all_returned,
         "matchedSnapshotDigests": claimed,
