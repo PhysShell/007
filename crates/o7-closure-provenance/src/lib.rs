@@ -763,6 +763,24 @@ pub enum Staleness {
     },
 }
 
+/// The subject an evaluation is about, supplied INDEPENDENTLY of the evidence.
+///
+/// The whole point is where this comes from. Deriving the target repository and
+/// pull request from the same retained events being checked is the party under
+/// examination supplying the identity it is examined against: two head reads of
+/// some other pull request agree with each other perfectly, and a subject read
+/// that never touched this subject reports that it did not move.
+///
+/// So the caller states the subject, and the retained artifacts are checked
+/// against it. `expected_sha` travels with the other two because a SHA without a
+/// repository and a pull request does not identify a subject either.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subject {
+    pub repository: String,
+    pub pull_request: String,
+    pub expected_sha: String,
+}
+
 /// Whether the subject moved, given two head reads that may not both have
 /// happened.
 ///
@@ -780,10 +798,11 @@ pub enum Staleness {
 /// An observed contradiction still wins when the other end failed: a fact is a
 /// fact, and discarding it because its partner broke is the mirror-image error.
 pub fn staleness<E: RetainedEvidence>(
+    subject: &Subject,
     read: &SubjectRead,
-    expected_sha: &str,
     store: &E,
 ) -> Staleness {
+    let expected_sha = subject.expected_sha.as_str();
     let mut observed = Vec::new();
     let mut unresolved = Vec::new();
 

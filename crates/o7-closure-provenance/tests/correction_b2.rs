@@ -68,7 +68,7 @@ use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     admissibility, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
     FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, RetentionBinding,
-    ScanCompleteness, ScanVerdict, Staleness, SubjectRead, Unresolved,
+    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -202,6 +202,16 @@ fn query_snapshot(repository: &str, pull_request: &str, surface: &str) -> Value 
         "allReturnedSnapshotDigests": [],
         "matchedSnapshotDigests": [],
     })
+}
+
+/// The subject these reads are supposed to be about, stated INDEPENDENTLY of
+/// the evidence checked against it.
+fn subject(expected_sha: &str) -> Subject {
+    Subject {
+        repository: "PhysShell/007".to_owned(),
+        pull_request: "9001".to_owned(),
+        expected_sha: expected_sha.to_owned(),
+    }
 }
 
 fn basis(digest_of: &str, pointer: &str) -> DecisionBasis {
@@ -345,7 +355,7 @@ fn s5_a_fabricated_head_read_is_not_evidence_of_a_still_subject() {
             event_digest: fabricated.clone(),
         },
     };
-    let verdict = staleness(&read, "deadbeef", &store);
+    let verdict = staleness(&subject("deadbeef"), &read, &store);
     assert!(
         matches!(verdict, Staleness::CannotCheck { .. }),
         "two references to an event nobody retained cannot witness that the head did not \
@@ -371,7 +381,7 @@ fn s5b_a_head_read_whose_event_is_malformed_is_refused() {
         after: HeadRead::Observed { event_digest: bad },
     };
     assert!(matches!(
-        staleness(&read, "deadbeef", &store),
+        staleness(&subject("deadbeef"), &read, &store),
         Staleness::CannotCheck { .. }
     ));
 }
@@ -409,7 +419,7 @@ fn s5e_an_event_recording_a_failed_read_is_not_a_successful_one() {
             event_digest: contradictory,
         },
     };
-    let verdict = staleness(&read, "deadbeef", &store);
+    let verdict = staleness(&subject("deadbeef"), &read, &store);
     assert!(
         matches!(verdict, Staleness::CannotCheck { .. }),
         "an event that says the read failed must not be consumed as one that says it \
@@ -433,7 +443,7 @@ fn s5c_two_properly_evidenced_matching_head_reads_are_not_stale() {
             event_digest: after,
         },
     };
-    assert_eq!(staleness(&read, "deadbeef", &store), Staleness::NotStale);
+    assert_eq!(staleness(&subject("deadbeef"), &read, &store), Staleness::NotStale);
 }
 
 /// And a genuinely moved head is still `Stale`, read out of retained bytes.
@@ -454,7 +464,7 @@ fn s5d_an_evidenced_moved_head_is_stale() {
         },
     };
     assert!(matches!(
-        staleness(&read, "deadbeef", &store),
+        staleness(&subject("deadbeef"), &read, &store),
         Staleness::Stale { .. }
     ));
 }

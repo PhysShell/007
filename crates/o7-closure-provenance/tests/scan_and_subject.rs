@@ -14,7 +14,7 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     scan_verdict, staleness, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
-    RetentionBinding, ScanCompleteness, ScanVerdict, Staleness, SubjectRead,
+    RetentionBinding, ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -89,6 +89,16 @@ fn evidence_for(store: &mut Store, surface: &str) -> String {
         "allReturnedSnapshotDigests": [],
         "matchedSnapshotDigests": [],
     }))
+}
+
+/// The subject these reads are supposed to be about, stated INDEPENDENTLY of
+/// the evidence checked against it.
+fn subject(expected_sha: &str) -> Subject {
+    Subject {
+        repository: "PhysShell/007".to_owned(),
+        pull_request: "9001".to_owned(),
+        expected_sha: expected_sha.to_owned(),
+    }
 }
 
 fn scan(completeness: ScanCompleteness, snapshot_digest: &str) -> FalsificationSurfaceScan {
@@ -197,7 +207,7 @@ fn b9a_two_matching_head_reads_are_not_stale() {
         before: evidenced_head(&mut store, "HEAD_BEFORE", "aaaa"),
         after: evidenced_head(&mut store, "HEAD_AFTER", "aaaa"),
     };
-    assert_eq!(staleness(&read, "aaaa", &store), Staleness::NotStale);
+    assert_eq!(staleness(&subject("aaaa"), &read, &store), Staleness::NotStale);
 }
 
 #[test]
@@ -208,7 +218,7 @@ fn b9b_a_moved_head_is_stale() {
         after: evidenced_head(&mut store, "HEAD_AFTER", "bbbb"),
     };
     assert!(matches!(
-        staleness(&read, "aaaa", &store),
+        staleness(&subject("aaaa"), &read, &store),
         Staleness::Stale { .. }
     ));
 }
@@ -228,7 +238,7 @@ fn b9c_an_unavailable_head_after_is_cannot_check_not_not_stale() {
             reason: "HTTP 502 on the second head read".to_owned(),
         },
     };
-    let verdict = staleness(&read, "aaaa", &store);
+    let verdict = staleness(&subject("aaaa"), &read, &store);
     assert!(
         matches!(verdict, Staleness::CannotCheck { .. }),
         "a head read that did not happen cannot witness that the head did not move: got {verdict:?}"
@@ -246,7 +256,7 @@ fn b9d_an_unavailable_head_before_is_cannot_check() {
         after: evidenced_head(&mut store, "HEAD_AFTER", "aaaa"),
     };
     assert!(matches!(
-        staleness(&read, "aaaa", &store),
+        staleness(&subject("aaaa"), &read, &store),
         Staleness::CannotCheck { .. }
     ));
 }
@@ -264,7 +274,7 @@ fn b9e_both_reads_unavailable_is_cannot_check() {
         },
     };
     assert!(matches!(
-        staleness(&read, "aaaa", &store),
+        staleness(&subject("aaaa"), &read, &store),
         Staleness::CannotCheck { .. }
     ));
 }
