@@ -742,6 +742,43 @@ nothing. Naming follows the same discipline — no type or field in this chain m
 carry an adjective like "trusted" or "authenticated" that a later reader could
 mistake for a property the mechanism has.
 
+**A digest-bound query snapshot is not a checked one.** The rule above binds the
+snapshot's *bytes*; it establishes nothing about their *shape*, because a
+malformed snapshot hashes to its own digest exactly as a well-formed one does.
+A consumer MUST therefore validate the whole closed §13 shape of the version the
+snapshot declares — `sourceKind`, a registered `schemaVersion`, every REQUIRED
+member present and correctly typed, the nested `binding`, `pagination` and
+`matcher` shapes closed in turn, optional members never `null`, and no member
+outside the set — **before** reading any recorded value out of it.
+
+This is the same obligation §8 places on candidates, applied to the object that
+*declares* the candidates, and it was missed for the reason all nine of its
+predecessors were missed:
+
+```text
+checking several significant members of an object is not checking the object,
+  when the contract defines admissibility by the whole closed form
+```
+
+Reading the seven members a matcher parser needs left the other ten free to be
+anything, which is not a cosmetic gap: without `sourceKind` any canonical object
+carrying a matcher block reads as a query snapshot, and without `enumeration` an
+absence claim can be assembled from a snapshot that never said its enumeration
+finished. A closed shape has two sides — a missing REQUIRED member and a member
+outside the set are the same violation — and a validator that closes one side
+closes neither. Both are checked here, and the earlier decision to carry the
+superset side forward as a cosmetic residual was wrong on exactly that ground.
+
+**Conformance is not admissibility, and this layer decides only the first.** That
+`enumeration` is present and carries one of the two states §13 defines is a fact
+about the object's shape. Whether a given state is sufficient input for a given
+decision — §13's `NotProduced` is legal ONLY when `enumeration = COMPLETE` — is a
+fact about that decision, and belongs to whoever makes it. A consumer that
+refuses `INCOMPLETE` at construction has not enforced the rule; it has made
+specimen D unrepresentable and destroyed the distinction §13 exists to create. A
+consumer that treats construction as evidence of admissibility has made the
+opposite error. The two questions are answered in different layers on purpose.
+
 **A type that carries recorded values must not let a caller assign to them.**
 Reading the claim from the snapshot instead of taking it as an argument closes
 the bypass only if the parsed value is then immutable. Otherwise a caller parses
@@ -1038,6 +1075,11 @@ it as open — necessary conditions presented as sufficient ones.
 | What binds that pair to the code that actually ran? | §13.1 — `matcher.implementationDigest`, recorded in the snapshot |
 | May a replay run over the candidates it managed to resolve? | §13.1 — no; the complete declared sequence or refusal |
 | What happens to a candidate that violates its own §8 schema? | §13.1 — refused as inadmissible, never scored as a non-match |
+| What happens to a query snapshot that violates its own §13 shape? | §13.1 — refused; a digest binds bytes, not shape |
+| Does a matching digest establish that an object is a query snapshot? | §13.1 — no; a malformed snapshot hashes to its own digest |
+| Which `enumeration` values are admissible? | §13 — `COMPLETE`, `INCOMPLETE`; a closed set of two |
+| Is an `INCOMPLETE` snapshot malformed? | §13 — no; well-formed, and §14 bars it from authoritative absence |
+| Who applies `enumeration = COMPLETE`? | §13.1 — the layer that decides, not the layer that parses |
 | What does a snapshot written before that field prove about the implementation? | §13 — nothing; CANNOT_CHECK, not a pass |
 | What stops a version's predicate from changing under it? | §23 — a digest over the implementation's bytes, **not** over its results |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
@@ -1376,3 +1418,57 @@ obligation was stated correctly and completely; the two ways to satisfy its
 letter while defeating it were both in the layer that executes it. A contract
 that is right is not the same as a consumer that is right, and only one of them
 can be checked by reading.
+
+### 24.6 Added in the query-snapshot conformance round
+
+One defect, found in external review of the implementation slice. The tenth
+instance of the pattern this document has been chasing since §24.1, and the first
+to be found in the *fix for the ninth* — the round before this one bound the query
+snapshot's bytes to a digest, and stopped there.
+
+- **§13.1 — a digest-bound query snapshot is not a checked one.** §13 lists
+  seventeen REQUIRED members and the parser read seven. The other ten were free
+  to be absent, because the binding added last round establishes that these bytes
+  are the ones the expected digest names and says nothing whatever about their
+  shape: a malformed snapshot hashes to its own digest exactly as a well-formed
+  one does. Two consequences were reachable and neither is cosmetic. Without
+  `sourceKind`, any canonical object carrying a matcher block parses as a query
+  snapshot. Without `enumeration`, an absence claim can be assembled from a
+  snapshot that never declared its enumeration finished — the one precondition
+  §13 exists to impose.
+
+The rule, stated rather than the instance:
+
+```text
+checking several significant members of an object is not checking the object,
+  when the contract defines admissibility by the whole closed form
+```
+
+**A residual was reclassified rather than carried.** "An unknown key in the
+matcher block is accepted" was recorded as a cosmetic P2 and deferred to the next
+slice. That was wrong, and the way it was wrong is worth keeping: a closed shape
+has two sides, and only the superset side had been looked at. The subset side —
+a REQUIRED member simply absent — turned out to be a semantic escape rather than
+an untidiness. A validator that closes one side of a closed shape closes neither,
+so both are closed here and the P2 is discharged rather than inherited.
+
+**The layer split was held deliberately, and it is the reason this round did not
+grow.** Slice A now establishes two things about a query snapshot and exactly
+two: that the bytes are digest-bound, and that they are a conforming versioned
+`github-query-snapshot`. That `enumeration = COMPLETE` plus an empty reproduced
+selection makes `NotProduced` legal is classifier admissibility and stays with
+the layer that decides. The temptation was to require `COMPLETE` at construction
+while the validator was open on the desk; doing so would have made specimen D
+unrepresentable and destroyed the very distinction §13 was written to create —
+the matcher crate would have become a second classifier while fixing a schema
+bug. `incomplete_enumeration_is_well_formed_and_makes_no_claim` is the executable
+form of that boundary.
+
+**Where the expectation lives.** §13's member table and its enumeration states
+are now parsed out of this document by `tests/schema_parity.rs` and compared
+against the registered shapes, including the `(schemaVersion 2 only)` annotation,
+which is read rather than hardcoded. This matters more here than it did for §8:
+the enumeration value set was the one thing in this fix that the contract had not
+previously stated, so writing it only into the code would have made the code the
+authority on what §13 permits. Both directions were checked by mutation — editing
+the table fails the parity test, and so does editing the document.
