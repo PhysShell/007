@@ -257,6 +257,25 @@ pub enum Unresolved {
         expected: usize,
         cited: usize,
     },
+    /// A derived fact fills a derivation's source slot with an artifact of a
+    /// kind that slot does not take.
+    ///
+    /// A defect in the CLAIM, like [`Unresolved::DerivationArityMismatch`] and
+    /// for the same reason: the citation is malformed, so nothing was lost and
+    /// nothing disagreed. Reported before the rule is allowed to read anything,
+    /// because a rule that read the wrong surface has recomputed a different
+    /// fact and reported it under this one's name.
+    ///
+    /// `expected` and `found` are contract kind names — §8 `sourceKind` for a
+    /// complete projection, §7.3 `locatorKind` for a reduced record. They are
+    /// one vocabulary, which `tests/correction_g1.rs` holds rather than assumes.
+    DerivationSlotKindMismatch {
+        derivation: String,
+        version: String,
+        slot: usize,
+        expected: &'static str,
+        found: String,
+    },
     /// A field the derivation reads did not resolve in the source that carries
     /// it — blocked by the gate, or absent from the projection.
     ///
