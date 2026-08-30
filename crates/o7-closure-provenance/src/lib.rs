@@ -40,7 +40,7 @@
 use crate::artifact::{ArtifactKind, Gate, ValidatedArtifact};
 use crate::derivations::DerivationInput;
 use o7_closure_canonical::digest;
-use o7_closure_matcher::{verify_matched, Candidate};
+use o7_closure_matcher::verify_matched;
 use serde_json::{Map, Value};
 
 pub mod artifact;
@@ -335,6 +335,9 @@ enum ConsumedAs {
     RetentionAssessment,
     /// The §9.2 binding that names that assessment.
     RetentionBinding,
+    /// One of the source snapshots a §13 query snapshot enumerates, consumed as
+    /// input to matcher replay.
+    QueryCandidate,
 }
 
 impl ConsumedAs {
@@ -347,6 +350,7 @@ impl ConsumedAs {
             Self::SubjectHead => "a subject head projection",
             Self::RetentionAssessment => "an authorising retention assessment",
             Self::RetentionBinding => "a retention binding",
+            Self::QueryCandidate => "a query snapshot's replay candidate",
         }
     }
 
@@ -366,6 +370,14 @@ impl ConsumedAs {
             }
             Self::RetentionAssessment => matches!(kind, ArtifactKind::RetentionAssessment),
             Self::RetentionBinding => matches!(kind, ArtifactKind::RetentionBinding),
+            // NOT `GatedSource`, though both are gated. §13's matcher is defined
+            // over canonical §8 source snapshots, and `GatedSource` also admits
+            // a reduced source record — which is a legitimate thing to read a
+            // decision pointer out of and not a thing a matcher can score. The
+            // role has to say which, because the gate classification alone
+            // cannot: both kinds are gated, and being gated is what §9.2 turns
+            // on, not what §13 does.
+            Self::QueryCandidate => matches!(kind, ArtifactKind::CompleteProjection(_)),
         }
     }
 }
@@ -687,6 +699,7 @@ impl QualifiedQuery {
 fn qualify_query<E: RetainedEvidence>(
     snapshot: &ValidatedArtifact,
     store: &E,
+    declared: &[DeclaredBinding],
 ) -> Result<QualifiedQuery, String> {
     // 1. THE STATE. §13 puts the enumeration in the artifact and closes the
     //    vocabulary to two, precisely because a reader that accepts an
@@ -731,24 +744,60 @@ fn qualify_query<E: RetainedEvidence>(
     //    is "partial success is not success" with the failure hidden inside a
     //    shorter list.
     let mut candidates = Vec::new();
-    for declared in recorded.recorded_matcher().all_returned_snapshot_digests() {
-        let Some(bytes) = store.resolve(declared) else {
+    for cited in recorded.recorded_matcher().all_returned_snapshot_digests() {
+        // Retention first, and named, because §13's reason is specific: this is
+        // the COMPLETE candidate set, so a candidate nobody kept makes replay
+        // over the rest a shorter list reported as a complete one. Same pattern
+        // as `NoSuchAssessment` and `NoSuchRetentionBinding` — a bare digest in
+        // a refusal does not say which link went missing.
+        if store.resolve(cited).is_none() {
             return Err(format!(
-                "the query snapshot declares candidate {declared} and nothing is retained \
-                 under it; §13 requires the complete candidate set, so replay over the rest \
-                 would be a shorter list reported as a complete one"
+                "the query snapshot declares candidate {cited} and nothing is retained under \
+                 it; §13 requires the complete candidate set, so replay over the rest would \
+                 be a shorter list reported as a complete one"
+            ));
+        }
+
+        // THEN THE DOOR — the whole of it, not clause 1.
+        //
+        // This used to be `store.resolve` followed by `artifact::validate`, and
+        // the comment beside it called that "the door". It was not.
+        // `artifact::validate` establishes that an object is a conforming
+        // artifact; `resolve_artifact` is where the ROLE, the gate
+        // classification and §9.2's authority chain are, and the candidate loop
+        // did not call it. So a conforming §8 projection with no
+        // `RetentionBinding` — bytes somebody kept, not evidence somebody was
+        // permitted to keep — could join a replay and support an absence claim.
+        //
+        // §5.3 places `github-query-snapshot` outside the gate precisely because
+        // it holds only enumeration facts and the digests of objects that passed
+        // the gate ON THEIR OWN. The candidates are the objects; being named by
+        // an ungated artifact does not make them ungated.
+        //
+        // Nothing gate-specific is written here. `ArtifactKind::gate()` classifies
+        // a complete projection as gated, and `resolve_artifact` applies §9.2 to
+        // it — the same way the subject head acquires authority by being a gated
+        // kind rather than by a lookup bolted into the head path.
+        let mut why = Vec::new();
+        let Some(candidate) =
+            resolve_artifact(store, cited, ConsumedAs::QueryCandidate, declared, &mut why)
+        else {
+            return Err(format!(
+                "the query snapshot's candidate {cited} did not pass the door: {why:?}"
             ));
         };
-        // The door, on the candidate itself, before the matcher sees it. Replay
-        // re-digests and shape-checks each candidate too — this is not that
-        // check repeated but the same law applied on this side of the boundary.
-        artifact::validate(declared, &bytes).map_err(|e| {
-            format!("the query snapshot's candidate {declared} did not pass validation: {e:?}")
-        })?;
-        candidates.push(Candidate {
-            declared_digest: declared.clone(),
-            snapshot: bytes,
-        });
+        let Some(candidate) = candidate.matcher_candidate() else {
+            // Unreachable while `ConsumedAs::QueryCandidate` accepts exactly the
+            // complete projections `matcher_candidate` answers for. Stated
+            // rather than assumed away, because the two are separate tables and
+            // a later kind added to one and not the other must not fall through
+            // to "scored as a non-match".
+            return Err(format!(
+                "the query snapshot's candidate {cited} passed the candidate role and is not \
+                 a complete §8 projection; the role table and the bridge disagree"
+            ));
+        };
+        candidates.push(candidate);
     }
 
     // 4. THE CLAIM AGAINST THE EVIDENCE. `verify_matched` takes the claim from
@@ -1059,8 +1108,8 @@ pub fn admissibility<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> A
             // contradict its claim is well-formed too. This is the same
             // qualification the scan path consumes, so the two cannot come to
             // disagree about one artifact.
-            let qualified =
-                qualify_query(&snapshot, store).and_then(|q| q.supports_absence().map(|()| q));
+            let qualified = qualify_query(&snapshot, store, &basis.bindings)
+                .and_then(|q| q.supports_absence().map(|()| q));
             if let Err(reason) = qualified {
                 why.push(Unresolved::QueryDoesNotSupportRole {
                     digest: expected.clone(),
@@ -1259,7 +1308,11 @@ fn check_scan_evidence<E: RetainedEvidence>(
     // surface and binding — because those are facts about a query the absence
     // path does not have; everything §13 says about the artifact itself is not
     // repeated here.
-    qualify_query(&snapshot, store)
+    // A scan carries no decision basis, so it declares no bindings. The retained
+    // binding is the authority either way; `declared` only ever ADDS the
+    // obligation that a basis's own claim about which assessment authorised a
+    // record agrees with the retained one, and a caller with no claim makes none.
+    qualify_query(&snapshot, store, &[])
 }
 
 // ---- Subject read — provenance V1 §8.1.

@@ -44,8 +44,8 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{
-    check_shape, MatchError, Member, RecordedQuerySnapshot, ValueKind, QUERY_SNAPSHOT_SCHEMAS,
-    SOURCE_SCHEMAS,
+    check_shape, Candidate, MatchError, Member, RecordedQuerySnapshot, ValueKind,
+    QUERY_SNAPSHOT_SCHEMAS, SOURCE_SCHEMAS,
 };
 use serde_json::Value;
 
@@ -316,6 +316,32 @@ impl ValidatedArtifact {
             &self.value,
             &self.digest,
         ))
+    }
+
+    /// This artifact as a §13 replay candidate, for a complete §8 projection and
+    /// nothing else.
+    ///
+    /// The second narrow bridge, and it follows [`Self::recorded_query`]'s rule
+    /// rather than reopening the general one. `as_value()` handed any artifact's
+    /// raw object to any caller; this hands a complete projection to the matcher
+    /// verifier, which re-digests the bytes against `declared_digest` and checks
+    /// them against the closed §8 shape of the kind they declare before scoring
+    /// anything. The kind check is what makes it narrow: on a reduced record, a
+    /// query snapshot, an event, an assessment or a binding there is no value to
+    /// return.
+    ///
+    /// §13's matcher is defined over canonical §8 source snapshots, which is why
+    /// `ReducedSourceRecord` is excluded here as well as by
+    /// `ConsumedAs::QueryCandidate`. A reduced record is a gated source; it is
+    /// not a query candidate.
+    pub(crate) fn matcher_candidate(&self) -> Option<Candidate> {
+        match self.kind {
+            ArtifactKind::CompleteProjection(_) => Some(Candidate {
+                declared_digest: self.digest.clone(),
+                snapshot: self.value.clone(),
+            }),
+            _ => None,
+        }
     }
 
     // `as_value()` WAS HERE, and it is REMOVED.

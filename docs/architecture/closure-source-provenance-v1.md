@@ -1139,6 +1139,37 @@ makes it a check, because §9.2 requires the binding to be *separately retained*
 a store that can produce the bytes but cannot produce them under their own digest
 has produced a claim nobody kept.
 
+**A reference inside a qualified artifact is not a lesser artifact.** A
+qualification reads other artifacts — §13's query snapshot names the candidate
+set replay runs over — and those references are a fourth arrow inside it:
+
+```text
+validated query snapshot
+        |
+        v   allReturnedSnapshotDigests
+ candidate references
+        |
+        +-- validated       necessary
+        +-- AUTHORISED      and not optional
+        |
+        v
+ matcher replay
+```
+
+Resolving a reference and checking it is a conforming artifact is clause 1 of
+§17.1 by itself. §5.3 places the query snapshot outside the gate precisely
+because it holds only enumeration facts and the digests of objects that passed
+the gate **on their own** — so the objects are gated even though the artifact
+naming them is not, and a candidate with no reachable `RetentionBinding` is
+bytes somebody kept taking part in proving an absence.
+
+The role is named rather than inherited. Both a complete projection and a
+reduced source record are gated, so the gate classification cannot separate
+them, and §13's matcher is defined over canonical §8 source snapshots: a reduced
+record is a legitimate thing to read a decision pointer out of and not a thing a
+matcher can score. What each role accepts is therefore part of the role, not a
+consequence of the gate.
+
 **A denominator drawn from the implementation confirms only that the
 implementation remembers itself.** `closure-retention-binding` is declared in
 full by redaction policy §9.2 and §9.5, and was absent from this crate's own idea
