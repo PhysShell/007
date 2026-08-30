@@ -110,6 +110,14 @@ pub enum DecisionProfile {
     Check,
     /// §17: `review` — observed commit_id, derived carries_finding.
     Review,
+    /// §17: `absence` — expected query snapshot digest.
+    ///
+    /// The one decision whose subject is that no object was found, and therefore
+    /// the one with no observed field to require: demanding `commit_id` and a
+    /// derived `carries_finding` would demand evidence OF THE OBJECT the
+    /// decision says is not there. `Review` is not a substitute for this
+    /// profile, it is its opposite.
+    Absence,
 }
 
 impl DecisionProfile {
@@ -119,6 +127,7 @@ impl DecisionProfile {
         match self {
             Self::Check => "check",
             Self::Review => "review",
+            Self::Absence => "absence",
         }
     }
 
@@ -128,6 +137,7 @@ impl DecisionProfile {
         match self {
             Self::Check => CHECK_BASIS,
             Self::Review => REVIEW_BASIS,
+            Self::Absence => ABSENCE_BASIS,
         }
     }
 }
@@ -189,6 +199,14 @@ const CHECK_BASIS: &[BasisRequirement] = &[
         },
     },
 ];
+
+/// §17: `absence` — expected query snapshot digest.
+///
+/// EMPTY AT THIS COMMIT, AND THAT IS THE DEFECT RATHER THAN AN OVERSIGHT. §17
+/// now carries the row; nothing here requires it yet, so an absence decision
+/// naming no query snapshot is admissible. `tests/correction_absence.rs` A1 is
+/// the witness, and it fails.
+const ABSENCE_BASIS: &[BasisRequirement] = &[];
 
 /// §17: `review` — observed commit_id, derived carries_finding.
 const REVIEW_BASIS: &[BasisRequirement] = &[

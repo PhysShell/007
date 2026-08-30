@@ -649,7 +649,7 @@ fn g2l_the_requirement_table_is_the_contracts() {
     let rows: Vec<&str> = contract.iter().map(|(r, _)| r.as_str()).collect();
     assert_eq!(
         rows,
-        vec!["check", "review", "subject", "falsification"],
+        vec!["check", "review", "absence", "subject", "falsification"],
         "§17's table changed shape. Every row below is read positionally, so a \
          reordering or a new row must be looked at rather than absorbed"
     );
@@ -657,6 +657,7 @@ fn g2l_the_requirement_table_is_the_contracts() {
     for (profile, row) in [
         (DecisionProfile::Check, "check"),
         (DecisionProfile::Review, "review"),
+        (DecisionProfile::Absence, "absence"),
     ] {
         let (_, expected) = contract
             .iter()
@@ -684,12 +685,16 @@ fn g2l_the_requirement_table_is_the_contracts() {
 /// it must say which row it is.
 #[test]
 fn g2k_two_of_four_contract_rows_are_basis_profiles() {
-    let profiles = [DecisionProfile::Check, DecisionProfile::Review];
+    let profiles = [
+        DecisionProfile::Check,
+        DecisionProfile::Review,
+        DecisionProfile::Absence,
+    ];
     let names: Vec<&str> = profiles.iter().map(|p| p.name()).collect();
     assert_eq!(
         names,
-        vec!["check", "review"],
-        "§17's four rows are check, review, subject and falsification. The first two describe a \
+        vec!["check", "review", "absence"],
+        "§17's five rows are check, review, absence, subject and falsification. The first three describe a \
          decision basis and are profiles; subject is the argument shape of `staleness` and \
          falsification that of `scan_verdict`, and neither takes a basis. A profile added here \
          without a §17 row to point at is this crate inventing a requirement; a §17 row that \

@@ -941,12 +941,43 @@ Minimum decision basis per observation:
 ```text
 check         observed head_sha, observed conclusion
 review        observed commit_id, derived carries_finding
+absence       expected query snapshot digest
 subject       head_before, head_after
 falsification subject_sha (if any), verification status
 ```
 
 Without this, source bytes can be retained perfectly while an adapter bug stays
 invisible.
+
+**The `absence` row was added after the other four, and the reason it was
+missing is worth stating.** An authoritative absence is the one decision whose
+subject is that no object was found, so it has no observed field to require:
+demanding `commit_id` and a derived `carries_finding` would be demanding
+evidence *of the very object the decision says is not there*. A consumer with
+only the four rows above therefore had no honest profile to evaluate an absence
+claim under, and the gap was invisible while nothing checked minimum basis at
+all — an absent requirement and a satisfied one look identical until something
+starts asking.
+
+The row requires one thing, and deliberately only one:
+
+```text
+absence  ->  the basis names the query snapshot the claim rests on
+```
+
+It does **not** restate that the snapshot must be `COMPLETE`, that its matcher
+must be bound to its implementation, that replay must reproduce the recorded
+selection, that `requiredObservationId` must equal the basis's observation, or
+that the matched set must be empty. §13 and §14 already impose all five, and a
+minimum-basis row that repeated them would be a second copy of a frozen rule —
+the failure §5.2 of the redaction policy names for denominators, in the place
+where this document states obligations.
+
+The division is exact. §13/§14 say what the query snapshot must BE; this row
+says what the basis must PROVIDE before those questions have a subject at all.
+A basis naming no snapshot does not fail the §13 checks — it never reaches
+them, which is precisely how a decision with no evidence reads as a decision
+with no problems.
 
 **The decision basis is also where an expected digest lives, and the direction
 is load-bearing.** §13.1 establishes that a consumer checks retained bytes
