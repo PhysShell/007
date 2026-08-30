@@ -98,12 +98,30 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    admissibility, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
+    relations_checked, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
     FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, ScanCompleteness,
     ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 /// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
 ///
@@ -303,7 +321,7 @@ fn s8_an_assessment_with_an_extra_top_level_member_is_not_conforming() {
         .expect("assessment is an object")
         .insert("debug".to_owned(), json!("ghp_the_secret_the_gate_refused"));
     let d = store.retain_under(&review(), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
@@ -323,7 +341,7 @@ fn s9_an_assessment_with_an_extra_member_inside_detector_is_not_conforming() {
         .expect("detector is an object")
         .insert("note".to_owned(), json!("ghp_the_secret_the_gate_refused"));
     let d = store.retain_under(&review(), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
@@ -338,7 +356,7 @@ fn s10_findings_present_on_a_retain_outcome_is_not_conforming() {
     let mut store = Store::default();
     let a = assessment("RETAIN", &REVIEW_REQUIRED, &[("/body", "rule-aws-key")]);
     let d = store.retain_under(&review(), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
@@ -365,7 +383,7 @@ fn s11_incomplete_coverage_without_a_failure_code_is_not_conforming() {
     );
     let (retained, blocked) = (&REVIEW_REQUIRED[..8], &REVIEW_REQUIRED[8..]);
     let d = store.retain_under(&reduced("CANNOT_ASSESS", retained, blocked), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
@@ -392,7 +410,7 @@ fn s12_a_finding_carrying_more_than_field_and_finding_id_is_not_conforming() {
         .expect("the first finding is an object")
         .insert("matchedLength".to_owned(), json!(40));
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
@@ -417,7 +435,7 @@ fn s13_a_block_secret_assessment_does_not_authorise_a_complete_projection() {
         &[("/body", "rule-aws-key")],
     );
     let d = store.retain_under(&review(), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         !why.is_empty(),
         "a conforming assessment refusing this content is not a permission to keep it: got {why:?}"
@@ -441,7 +459,7 @@ fn s14_a_reduced_record_whose_outcome_contradicts_its_assessment_is_refused() {
         &[("/body", "rule-aws-key")],
     );
     let d = store.retain_under(&reduced("CANNOT_ASSESS", &retained, &blocked), &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(!why.is_empty(), "got {why:?}");
 }
 
@@ -471,7 +489,7 @@ fn s15_a_reduced_record_retaining_an_unassessed_field_is_refused() {
         .expect("record is an object")
         .insert("coverageComplete".to_owned(), json!(false));
     let d = store.retain_under(&record, &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         !why.is_empty(),
         "an unexamined field retained as though it had passed: got {why:?}"
@@ -490,7 +508,7 @@ fn s16_a_reduced_record_retaining_a_flagged_field_is_refused() {
     // The partition keeps the very field the finding names.
     let retained: Vec<&str> = REVIEW_REQUIRED.to_vec();
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &[]), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         !why.is_empty(),
         "the detector found a secret in /body and the record kept /body: got {why:?}"
@@ -516,7 +534,7 @@ fn s17_a_partition_that_omits_a_required_field_is_refused() {
         .filter(|p| *p != "/body" && *p != "/user/type")
         .collect();
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &["/body"]), &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         !why.is_empty(),
         "/user/type appears in neither list, so the record does not account for it: got {why:?}"
@@ -544,7 +562,7 @@ fn s18_a_partition_carrying_a_pointer_outside_the_required_set_is_refused() {
     let (mut retained, blocked) = body_blocked_partition();
     retained.push("/made_up_field");
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(!why.is_empty(), "got {why:?}");
 }
 
@@ -566,7 +584,7 @@ fn s19_a_reduced_record_with_an_ungated_locator_kind_is_refused() {
         .expect("record is an object")
         .insert("locatorKind".to_owned(), json!("github-query-snapshot"));
     let d = store.retain_under(&record, &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         !why.is_empty(),
         "§5.3 places github-query-snapshot outside the gate, so it cannot be the kind a gate \
@@ -595,7 +613,7 @@ fn s20_a_finding_naming_a_field_outside_the_required_set_is_refused() {
     );
     let retained: Vec<&str> = REVIEW_REQUIRED.to_vec();
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &[]), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         !why.is_empty(),
         "a finding that could not have been produced blocks nothing while reporting \
@@ -627,7 +645,7 @@ fn s21_a_finding_naming_an_unassessed_field_is_refused() {
         .expect("record is an object")
         .insert("coverageComplete".to_owned(), json!(false));
     let d = store.retain_under(&record, &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(!why.is_empty(), "got {why:?}");
 }
 
@@ -648,7 +666,7 @@ fn s22_a_retain_assessment_that_did_not_assess_the_whole_required_set_is_refused
         .expect("assessment is an object")
         .insert("coverageComplete".to_owned(), json!(true));
     let d = store.retain_under(&review(), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     // Relational, not intrinsic — and the distinction is the round's subject. An
     // assessment cannot know its own denominator: §5.2 fixes that set in §5.3 by
     // the kind of the record, so "did this assessment cover what it had to" is
@@ -884,7 +902,7 @@ fn s28_an_expected_query_digest_that_is_not_a_query_snapshot_is_refused() {
     let d = store.retain_under(&review(), &clean_assessment());
     let mut b = basis(&d, "/body");
     b.expected_query_digest = Some(d.clone());
-    let why = refused(&admissibility(&b, &store)).to_vec();
+    let why = refused(&relations(&b, &store)).to_vec();
     assert!(
         !why.is_empty(),
         "a submitted review standing in for the query snapshot an absence claim rests on: \
@@ -908,7 +926,7 @@ fn s29_a_correctly_computed_partition_is_admitted() {
         &[("/body", "rule-aws-key")],
     );
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
-    let outcome = admissibility(&basis(&d, "/commit_id"), &store);
+    let outcome = relations(&basis(&d, "/commit_id"), &store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "the §7.1 computation over this assessment is exactly this partition: got {outcome:?}"
@@ -963,7 +981,7 @@ fn s30_an_absent_present_only_field_is_not_a_hole_in_the_partition() {
         "blockedFields": ["/name"],
     });
     let d = store.retain_under(&record, &a);
-    let outcome = admissibility(&basis(&d, "/head_sha"), &store);
+    let outcome = relations(&basis(&d, "/head_sha"), &store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "/conclusion, /started_at and /completed_at are present-only and this check has none \
@@ -995,7 +1013,7 @@ fn s31_an_ungated_query_snapshot_needs_no_retention_binding() {
             .is_none(),
         "fixture: this witness is about a snapshot with NO binding"
     );
-    let outcome = admissibility(&b, &store);
+    let outcome = relations(&b, &store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "no assessment about an ungated record can exist, so requiring one is requiring a \
@@ -1013,7 +1031,7 @@ fn s32_an_unretained_query_snapshot_is_still_refused() {
     let mut b = basis(&d, "/body");
     let never_stored = format!("sha256:{}", "c".repeat(64));
     b.expected_query_digest = Some(never_stored.clone());
-    let why = refused(&admissibility(&b, &store)).to_vec();
+    let why = refused(&relations(&b, &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::NoSuchRecord { digest } if *digest == never_stored)),
@@ -1054,7 +1072,7 @@ fn s33_an_outcome_its_own_findings_and_coverage_do_not_produce_is_refused() {
         .expect("assessment is an object")
         .insert("outcome".to_owned(), json!("CANNOT_ASSESS"));
     let d = store.retain_under(&review(), &a);
-    let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
@@ -1079,7 +1097,7 @@ fn s34_block_secret_with_an_empty_findings_list_is_refused() {
         .insert("findings".to_owned(), json!([]));
     let (retained, blocked) = body_blocked_partition();
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
@@ -1122,7 +1140,7 @@ fn s35_a_reduced_record_whose_coverage_contradicts_its_assessment_is_refused() {
         .filter(|p| !blocked.contains(p))
         .collect();
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
-    let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
+    let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         why.iter()
             .any(|u| matches!(u, Unresolved::AssessmentDoesNotAuthorise { .. })),

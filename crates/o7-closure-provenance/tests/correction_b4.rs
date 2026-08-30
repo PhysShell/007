@@ -116,12 +116,30 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    admissibility, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
+    relations_checked, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
     FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, ScanCompleteness,
     ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 /// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
 ///
@@ -575,21 +593,21 @@ fn refused(probe: Probe, artifact: &Value) -> bool {
         } => {
             let d = store.retain_under(artifact, &retain_assessment(assessment_kind));
             matches!(
-                admissibility(&basis(&d, pointer), &store),
+                relations(&basis(&d, pointer), &store),
                 Admissible::CannotCheck { .. }
             )
         }
         Probe::ReducedSource { pointer } => {
             let d = store.retain_under(artifact, &block_secret_assessment());
             matches!(
-                admissibility(&basis(&d, pointer), &store),
+                relations(&basis(&d, pointer), &store),
                 Admissible::CannotCheck { .. }
             )
         }
         Probe::Assessment => {
             let d = store.retain_under(&submitted_review(), artifact);
             matches!(
-                admissibility(&basis(&d, "/body"), &store),
+                relations(&basis(&d, "/body"), &store),
                 Admissible::CannotCheck { .. }
             )
         }
@@ -603,7 +621,7 @@ fn refused(probe: Probe, artifact: &Value) -> bool {
                 bindings: Vec::new(),
             };
             b.expected_query_digest = Some(expected);
-            matches!(admissibility(&b, &store), Admissible::CannotCheck { .. })
+            matches!(relations(&b, &store), Admissible::CannotCheck { .. })
         }
         Probe::ScanEvidence => {
             let evidence = store.put(artifact);
@@ -874,7 +892,7 @@ fn b1_an_unassessed_member_is_never_an_admitted_value() {
         .insert("debug".to_owned(), json!(EXFILTRATED));
     let d = store.retain_under(&record, &retain_assessment("github-submitted-review"));
 
-    let outcome = admissibility(&basis(&d, "/debug"), &store);
+    let outcome = relations(&basis(&d, "/debug"), &store);
     let Admissible::CannotCheck { why } = &outcome else {
         panic!("the gate was defeated at the consumer: {outcome:?}");
     };
@@ -904,7 +922,7 @@ fn b2_retention_semantics_are_not_computed_for_an_artifact_that_may_not_exist() 
         .insert("debug".to_owned(), json!(EXFILTRATED));
     let d = store.retain_under(&record, &block_secret_assessment());
 
-    let outcome = admissibility(&basis(&d, "/debug"), &store);
+    let outcome = relations(&basis(&d, "/debug"), &store);
     let Admissible::CannotCheck { why } = &outcome else {
         panic!("admitted: {outcome:?}");
     };

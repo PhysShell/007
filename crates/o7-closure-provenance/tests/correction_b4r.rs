@@ -112,11 +112,29 @@ use o7_closure_matcher::{
     ImplementationCheck, RecordedQuerySnapshot,
 };
 use o7_closure_provenance::{
-    admissibility, scan_verdict, Admissible, DecisionBasis, DecisionInput,
+    relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput,
     FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 const PROVENANCE: &str = include_str!("../../../docs/architecture/closure-source-provenance-v1.md");
 const REDACTION: &str = include_str!("../../../docs/architecture/closure-redaction-policy-v1.md");
@@ -379,7 +397,7 @@ fn basis(record: &str, pointer: &str) -> DecisionBasis {
 /// candidate authority is implemented.
 #[track_caller]
 fn assert_candidate_is_authorised(store: &Store, candidate: &str, what: &str) {
-    let outcome = admissibility(&basis(candidate, "/body"), store);
+    let outcome = relations(&basis(candidate, "/body"), store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "{what}: the candidate does not carry §9.2 authority, so this witness would go green \
@@ -528,7 +546,7 @@ fn r1_assessed_fields_outside_the_required_universe_are_refused() {
         &review("synthetic-external-reviewer"),
         &assessment(&assessed, "RETAIN", None),
     );
-    refuses(&admissibility(&basis(&d, "/body"), &store), "R1");
+    refuses(&relations(&basis(&d, "/body"), &store), "R1");
 }
 
 /// R2 — BOUNDARY, and it already holds. A present-only field that IS present and
@@ -572,7 +590,7 @@ fn r2_a_present_field_left_unassessed_under_complete_coverage_is_refused() {
         Some(json!([{"field": "/name", "findingId": "rule-aws-key"}])),
     );
     let d = store.retain_under(&record, &a);
-    refuses(&admissibility(&basis(&d, "/head_sha"), &store), "R2");
+    refuses(&relations(&basis(&d, "/head_sha"), &store), "R2");
 }
 
 /// R3 — BOUNDARY. A present-only field absent upstream, and therefore
@@ -607,7 +625,7 @@ fn r3_a_present_only_field_absent_upstream_stays_representable() {
     let d = store.retain_under(&record, &a);
     assert!(
         matches!(
-            admissibility(&basis(&d, "/head_sha"), &store),
+            relations(&basis(&d, "/head_sha"), &store),
             Admissible::Yes { .. }
         ),
         "R3: a present-only field that was never there is not a coverage hole"
@@ -624,7 +642,7 @@ fn r3_a_present_only_field_absent_upstream_stays_representable() {
 fn r4_an_incomplete_snapshot_does_not_evidence_an_absence_claim() {
     let mut store = Store::default();
     let s = store.put(&snapshot("INCOMPLETE", &[], &[]));
-    refuses(&admissibility(&absence_basis(&s), &store), "R4");
+    refuses(&relations(&absence_basis(&s), &store), "R4");
 }
 
 /// R5 — §13's rule: `NotProduced` is legal only when the named matcher, applied
@@ -644,7 +662,7 @@ fn r5_an_absence_claim_its_own_candidates_contradict_is_refused() {
     );
     assert_candidate_is_authorised(&store, &candidate, "R5");
     let s = store.put(&snapshot("COMPLETE", &[&candidate], &[]));
-    refuses(&admissibility(&absence_basis(&s), &store), "R5");
+    refuses(&relations(&absence_basis(&s), &store), "R5");
 }
 
 /// R6 — §13: `allReturnedSnapshotDigests` is the complete candidate set, each
@@ -655,7 +673,7 @@ fn r6_an_absence_claim_whose_candidates_do_not_resolve_is_refused() {
     let mut store = Store::default();
     let never_retained = format!("sha256:{}", "c".repeat(64));
     let s = store.put(&snapshot("COMPLETE", &[&never_retained], &[]));
-    refuses(&admissibility(&absence_basis(&s), &store), "R6");
+    refuses(&relations(&absence_basis(&s), &store), "R6");
 }
 
 /// R7 — the two consumers must not disagree about the same artifact.
@@ -684,7 +702,7 @@ fn r7_the_scan_path_and_the_absence_path_agree_about_one_artifact() {
         0,
         &store,
     );
-    let as_absence = admissibility(&absence_basis(&s), &store);
+    let as_absence = relations(&absence_basis(&s), &store);
 
     let scan_refused = matches!(as_scan, ScanVerdict::CannotCheck { .. });
     let absence_refused = matches!(as_absence, Admissible::CannotCheck { .. });
@@ -799,7 +817,7 @@ fn r10_a_binding_with_no_retained_bytes_authorises_nothing() {
                 == Some("closure-retention-binding")),
         "fixture: no binding object is retained in this store"
     );
-    refuses(&admissibility(&basis(&rd, "/body"), &store), "R10");
+    refuses(&relations(&basis(&rd, "/body"), &store), "R10");
 }
 
 /// R11 — §9.5 makes the binding an exact key set, for the reason §9.4 gives one
@@ -817,7 +835,7 @@ fn r11_a_binding_carrying_an_unknown_member_is_refused() {
     });
     store.put(&binding);
     store.bind_raw(&rd, binding);
-    refuses(&admissibility(&basis(&rd, "/body"), &store), "R11");
+    refuses(&relations(&basis(&rd, "/body"), &store), "R11");
 }
 
 /// R12 — and its `schemaVersion` and `sourceKind` are values admissibility turns
@@ -839,6 +857,6 @@ fn r12_a_binding_of_an_unregistered_kind_or_version_is_refused() {
         });
         store.put(&binding);
         store.bind_raw(&rd, binding);
-        refuses(&admissibility(&basis(&rd, "/body"), &store), label);
+        refuses(&relations(&basis(&rd, "/body"), &store), label);
     }
 }

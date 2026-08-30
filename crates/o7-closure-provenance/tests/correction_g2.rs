@@ -305,14 +305,11 @@ fn carries_finding(review: &str, comment: &str) -> DerivedFact {
 
 /// THE ENTRY POINT UNDER TEST, behind one adapter line.
 ///
-/// At RED nothing consumes a profile, so this drops it. GREEN forwards it to
-/// whatever signature the fix lands on. The witnesses below are written against
-/// this helper and do not change between the two commits — which is the point:
-/// evidence that is rewritten by the change it was supposed to judge has judged
-/// nothing.
+/// At RED nothing consumed a profile, so this dropped it; GREEN forwards it.
+/// Not one witness below changed between the two commits — which is the point:
+/// evidence rewritten by the change it was supposed to judge has judged nothing.
 fn decide(profile: DecisionProfile, basis: &DecisionBasis, store: &Store) -> Admissible {
-    let _ = profile;
-    admissibility(basis, store)
+    admissibility(profile, basis, store)
 }
 
 /// Refused, AND refused because the named §17 requirement was not in the basis.
@@ -543,6 +540,137 @@ fn g2j_a_complete_check_basis_over_reduced_records_still_admits() {
         ),
         "G2-J",
     );
+}
+
+/// G2-M — an input the store cannot produce is a RETENTION failure, and must not
+/// also be reported as an incomplete basis.
+///
+/// The basis names both of a check decision's requirements. One of them resolves
+/// to nothing, so its surface is unknown and there is no way to say which
+/// requirement it was meant to satisfy. Reporting incompleteness here would
+/// misdescribe lost bytes as a wrongly built adapter — the same misdiagnosis
+/// class G1-F refuses — and would send the reader to fix code when the remedy is
+/// to retain the record.
+///
+/// The decision is still refused. That is the safety argument for the skip: the
+/// completeness pass only ever ADDS refusals and is skipped only when one is
+/// already recorded, so it can change which reasons are listed and can never
+/// admit a decision.
+#[test]
+fn g2m_an_unresolved_input_is_not_reported_as_an_incomplete_basis() {
+    let mut store = Store::default();
+    let c = store.retain(&actions_check(), &CHECK_REQ);
+    let outcome = decide(
+        DecisionProfile::Check,
+        &basis(
+            vec![
+                reads(&c, "/headSha"),
+                reads(
+                    "sha256:00000000000000000000000000000000000000000000000000000000000000ff",
+                    "/conclusion",
+                ),
+            ],
+            vec![],
+        ),
+        &store,
+    );
+    // Two asserts rather than a let-else: `clippy::panic` is denied tree-wide
+    // and a witness does not spend a restriction-lint allowance to save a line.
+    let why: &[Unresolved] = match &outcome {
+        Admissible::CannotCheck { why } => why,
+        Admissible::Yes { .. } => &[],
+    };
+    assert!(
+        matches!(outcome, Admissible::CannotCheck { .. }),
+        "G2-M: admitted. An input nobody retained is not evidence"
+    );
+    assert!(
+        why.iter()
+            .any(|u| matches!(u, Unresolved::NoSuchRecord { .. })),
+        "G2-M: refused, but not for the record nobody retained: got {why:?}"
+    );
+    assert!(
+        !why.iter()
+            .any(|u| matches!(u, Unresolved::BasisIncompleteForProfile { .. })),
+        "G2-M: also reported as an incomplete basis. The basis NAMED the conclusion input; the \
+         store could not produce it. Calling that incompleteness blames the adapter for a \
+         retention failure and sends the reader to the wrong repair: got {why:?}"
+    );
+}
+
+const PROVENANCE: &str = include_str!("../../../docs/architecture/closure-source-provenance-v1.md");
+
+/// §17's minimum-basis table, parsed out of the contract.
+///
+/// Returns `(row name, [requirement, ..])` for all four rows.
+fn contract_minimum_basis() -> Vec<(String, Vec<String>)> {
+    let at = PROVENANCE
+        .find("Minimum decision basis per observation:")
+        .expect("§17 no longer states the minimum decision basis");
+    let rest = &PROVENANCE[at..];
+    let open = rest
+        .find("```text")
+        .expect("no fenced block follows §17's table");
+    let body = &rest[at + open - at + "```text".len()..];
+    let close = body.find("```").expect("unterminated fenced block in §17");
+    body[..close]
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let (row, requirements) = line
+                .split_once(char::is_whitespace)
+                .expect("every §17 row is a name followed by its requirements");
+            (
+                row.to_owned(),
+                requirements
+                    .split(',')
+                    .map(|r| r.trim().to_owned())
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// G2-L — the table in `lib.rs` is §17's, or the build fails.
+///
+/// Two transcriptions of one rule is one rule too many, and this one decides
+/// what a decision must carry to be made at all. The expectation is the
+/// markdown, parsed: correcting §17 without the table fails here, and "fixing"
+/// the table to match drifted code fails here too. Neither is reachable by
+/// editing one file.
+///
+/// The check is over §17's own WORDING because that wording is what a refusal
+/// quotes back — a reader who sees `missing: "observed conclusion"` must be able
+/// to find that phrase in the contract, not a paraphrase of it.
+#[test]
+fn g2l_the_requirement_table_is_the_contracts() {
+    let contract = contract_minimum_basis();
+    let rows: Vec<&str> = contract.iter().map(|(r, _)| r.as_str()).collect();
+    assert_eq!(
+        rows,
+        vec!["check", "review", "subject", "falsification"],
+        "§17's table changed shape. Every row below is read positionally, so a \
+         reordering or a new row must be looked at rather than absorbed"
+    );
+
+    for (profile, row) in [
+        (DecisionProfile::Check, "check"),
+        (DecisionProfile::Review, "review"),
+    ] {
+        let (_, expected) = contract
+            .iter()
+            .find(|(r, _)| r == row)
+            .expect("the row exists; the assertion above holds that");
+        let declared: Vec<&str> = profile.requires().iter().map(|r| r.name).collect();
+        assert_eq!(
+            &declared,
+            &expected.iter().map(String::as_str).collect::<Vec<_>>(),
+            "the {row} profile requires {declared:?}, and §17 says {expected:?}. The contract \
+             is the authority: a requirement this crate adds is one it invented, and one it \
+             drops is a decision that can be made without evidence §17 says it needs"
+        );
+    }
 }
 
 /// G2-K — SCOPE, not behaviour. §17 tabulates four minimum bases and only two of

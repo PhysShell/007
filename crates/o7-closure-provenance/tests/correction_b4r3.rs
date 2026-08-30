@@ -69,10 +69,28 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DecisionInput, RetainedEvidence, Unresolved,
+    relations_checked, Admissible, DecisionBasis, DecisionInput, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 const MATCHER_ID: &str = "review-by-expected-author-login";
 const MATCHER_VERSION: &str = "1";
@@ -277,7 +295,7 @@ fn f1a_an_unbound_matcher_implementation_cannot_qualify_a_replay() {
     let mut store = Store::default();
     let s = store.put(&snapshot(1, OBSERVATION));
     refuses_because(
-        &admissibility(&absence_basis(&s), &store),
+        &relations(&absence_basis(&s), &store),
         "F1-A",
         "the matcher implementation axis",
         |u| {
@@ -298,7 +316,7 @@ fn f1a_an_unbound_matcher_implementation_cannot_qualify_a_replay() {
 fn f1b_a_bound_matcher_implementation_still_qualifies() {
     let mut store = Store::default();
     let s = store.put(&snapshot(2, OBSERVATION));
-    admits(&admissibility(&absence_basis(&s), &store), "F1-B");
+    admits(&relations(&absence_basis(&s), &store), "F1-B");
 }
 
 // ---- F2. The query is not bound to the decision's observation.
@@ -315,7 +333,7 @@ fn f2a_a_snapshot_for_another_observation_does_not_prove_this_absence() {
     let mut store = Store::default();
     let s = store.put(&snapshot(2, ANOTHER_OBSERVATION));
     refuses_because(
-        &admissibility(&absence_basis(&s), &store),
+        &relations(&absence_basis(&s), &store),
         "F2-A",
         "the observation the decision is about",
         |u| {
@@ -331,7 +349,7 @@ fn f2a_a_snapshot_for_another_observation_does_not_prove_this_absence() {
 fn f2b_a_snapshot_for_this_observation_still_proves_the_absence() {
     let mut store = Store::default();
     let s = store.put(&snapshot(2, OBSERVATION));
-    admits(&admissibility(&absence_basis(&s), &store), "F2-B");
+    admits(&relations(&absence_basis(&s), &store), "F2-B");
 }
 
 // ---- F3. The authorising assessment may be from another policy.
@@ -410,7 +428,7 @@ fn f3a_an_assessment_from_another_policy_does_not_authorise_this_record() {
     let mut store = Store::default();
     let d = store.retain_under(&reduced("1"), &block_body(FOREIGN_POLICY));
     refuses_because(
-        &admissibility(&reads(&d, "/id"), &store),
+        &relations(&reads(&d, "/id"), &store),
         "F3-A",
         "the redaction policy version of the authorising assessment",
         |u| {
@@ -425,5 +443,5 @@ fn f3a_an_assessment_from_another_policy_does_not_authorise_this_record() {
 fn f3b_an_assessment_from_this_policy_still_authorises() {
     let mut store = Store::default();
     let d = store.retain_under(&reduced("1"), &block_body("1"));
-    admits(&admissibility(&reads(&d, "/id"), &store), "F3-B");
+    admits(&relations(&reads(&d, "/id"), &store), "F3-B");
 }

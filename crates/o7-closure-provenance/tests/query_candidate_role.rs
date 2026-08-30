@@ -37,10 +37,28 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, RetainedEvidence, Unresolved,
+    relations_checked, Admissible, DecisionBasis, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 const MATCHER_ID: &str = "review-by-expected-author-login";
 const MATCHER_VERSION: &str = "1";
@@ -220,7 +238,7 @@ fn a_reduced_source_record_is_not_a_query_candidate() {
     // The candidate really does carry authority: §13, not §9.2, is what refuses it.
     assert!(
         matches!(
-            admissibility(
+            relations(
                 &DecisionBasis {
                     observation_id: "review/external".to_owned(),
                     inputs: vec![o7_closure_provenance::DecisionInput {
@@ -240,7 +258,7 @@ fn a_reduced_source_record_is_not_a_query_candidate() {
     );
 
     refusal_naming_the_role(
-        &admissibility(&absence_basis(&s), &store),
+        &relations(&absence_basis(&s), &store),
         "a reduced source record cited as a candidate",
     );
 }
@@ -257,7 +275,7 @@ fn a_query_snapshot_is_not_a_query_candidate() {
     let outer = store.put(&snapshot(&[&inner]));
 
     refusal_naming_the_role(
-        &admissibility(&absence_basis(&outer), &store),
+        &relations(&absence_basis(&outer), &store),
         "a query snapshot cited as another's candidate",
     );
 }

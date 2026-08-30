@@ -97,11 +97,29 @@ use o7_closure_canonical::digest;
 use o7_closure_matcher::SOURCE_SCHEMAS;
 use o7_closure_provenance::artifact::LOCATOR_SHAPES;
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DerivedFact, RetainedEvidence, Unresolved,
+    relations_checked, Admissible, DecisionBasis, DerivedFact, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 const REVIEW_ID: &str = "9000000901";
 const COMMENT_ID: &str = "9000000202";
@@ -358,7 +376,7 @@ fn g1a_an_issue_comment_is_not_a_submitted_review() {
     );
     let c = store.retain_under(&complete_comment(), &retain_all(&COMMENT_REQ));
     refuses_for_slot(
-        &admissibility(&carries_finding(&r, &c), &store),
+        &relations(&carries_finding(&r, &c), &store),
         "G1-A",
         0,
         "github-submitted-review",
@@ -379,7 +397,7 @@ fn g1b_a_check_run_is_not_a_submitted_review() {
     );
     let c = store.retain_under(&complete_comment(), &retain_all(&COMMENT_REQ));
     refuses_for_slot(
-        &admissibility(&carries_finding(&r, &c), &store),
+        &relations(&carries_finding(&r, &c), &store),
         "G1-B",
         0,
         "github-submitted-review",
@@ -401,7 +419,7 @@ fn g1c_a_reduced_issue_comment_is_not_a_submitted_review() {
     );
     let c = store.retain_under(&complete_comment(), &retain_all(&COMMENT_REQ));
     refuses_for_slot(
-        &admissibility(&carries_finding(&r, &c), &store),
+        &relations(&carries_finding(&r, &c), &store),
         "G1-C",
         0,
         "github-submitted-review",
@@ -416,7 +434,7 @@ fn g1d_the_right_complete_pair_still_admits() {
     let mut store = Store::default();
     let r = store.retain_under(&complete_review(), &retain_all(&REVIEW_REQ));
     let c = store.retain_under(&complete_comment(), &retain_all(&COMMENT_REQ));
-    admits(&admissibility(&carries_finding(&r, &c), &store), "G1-D");
+    admits(&relations(&carries_finding(&r, &c), &store), "G1-D");
 }
 
 /// G1-E — BOUNDARY, and the one that costs a wrong fix its escape. The same
@@ -435,7 +453,7 @@ fn g1e_the_right_reduced_pair_still_admits() {
         &reduced("github-review-comment", &COMMENT_REQ, COMMENT_ID),
         &block_body(&COMMENT_REQ),
     );
-    admits(&admissibility(&carries_finding(&r, &c), &store), "G1-E");
+    admits(&relations(&carries_finding(&r, &c), &store), "G1-E");
 }
 
 /// G1-F — SLOT 1, which is refused today for a reason that is not true.
@@ -462,7 +480,7 @@ fn g1f_slot_one_is_refused_for_the_slot_and_not_for_a_redaction() {
         &reduced("github-issue-comment", &ISSUE_REQ, COMMENT_ID),
         &block_body(&ISSUE_REQ),
     );
-    let outcome = admissibility(&carries_finding(&r, &c), &store);
+    let outcome = relations(&carries_finding(&r, &c), &store);
     refuses_for_slot(
         &outcome,
         "G1-F",

@@ -33,10 +33,28 @@ use o7_closure_matcher::{Member, ValueKind, SOURCE_SCHEMAS};
 use o7_closure_provenance::derivations::REGISTRY;
 use o7_closure_provenance::redaction::REQUIRED_FIELDS;
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DerivedFact, RetainedEvidence, Unresolved,
+    relations_checked, Admissible, DecisionBasis, DerivedFact, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 // ---- 1. The declaration names fields the contracts actually define.
 
@@ -358,7 +376,7 @@ fn a_fact_citing_the_wrong_number_of_sources_is_an_arity_mismatch() {
         &block_secret(&REVIEW_REQ, &["/body"]),
     );
 
-    let outcome = admissibility(&basis(vec![r]), &store);
+    let outcome = relations(&basis(vec![r]), &store);
     assert!(
         why(&outcome).iter().any(|u| matches!(
             u,
@@ -408,7 +426,7 @@ fn a_blocked_input_is_reported_as_evidence_loss_and_names_the_field() {
         &block_secret(&COMMENT_REQ, &["/body"]),
     );
 
-    let refusals = why(&admissibility(&basis(vec![r.clone(), c]), &store));
+    let refusals = why(&relations(&basis(vec![r.clone(), c]), &store));
     assert!(
         refusals.iter().any(|u| matches!(
             u,
@@ -461,7 +479,7 @@ fn inputs_that_survived_but_cannot_be_used_are_not_a_negative_result() {
         &block_secret(&COMMENT_REQ, &["/body"]),
     );
 
-    let refusals = why(&admissibility(&basis(vec![r, c]), &store));
+    let refusals = why(&relations(&basis(vec![r, c]), &store));
     assert!(
         refusals
             .iter()

@@ -64,10 +64,28 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DerivedFact, RetainedEvidence,
+    relations_checked, Admissible, DecisionBasis, DerivedFact, RetainedEvidence,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 const REVIEW_REQ: [&str; 9] = [
     "/author_association",
@@ -248,7 +266,7 @@ fn d1_a_derivation_over_complete_projections_reproduces() {
         &complete_comment(),
         &assessment(&COMMENT_REQ, "RETAIN", None),
     );
-    let outcome = admissibility(&carries_finding(&r, &c), &store);
+    let outcome = relations(&carries_finding(&r, &c), &store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "D1: got {outcome:?}"
@@ -281,7 +299,7 @@ fn d2_the_same_derivation_reproduces_over_reduced_records() {
         ),
         &block_secret(&COMMENT_REQ, &["/body"]),
     );
-    let outcome = admissibility(&carries_finding(&r, &c), &store);
+    let outcome = relations(&carries_finding(&r, &c), &store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "D2: every input this derivation reads survived redaction, so §8 keeps the fact \
@@ -316,7 +334,7 @@ fn d3_a_derivation_over_a_blocked_input_is_cannot_check() {
         ),
         &block_secret(&COMMENT_REQ, &["/body"]),
     );
-    let outcome = admissibility(&carries_finding(&r, &c), &store);
+    let outcome = relations(&carries_finding(&r, &c), &store);
     assert!(
         matches!(outcome, Admissible::CannotCheck { .. }),
         "D3: /id was blocked, so nothing establishes the relation: got {outcome:?}"
@@ -354,7 +372,7 @@ fn d4_a_locator_value_does_not_revive_a_blocked_derivation_input() {
         ),
         &block_secret(&COMMENT_REQ, &["/body"]),
     );
-    let outcome = admissibility(&carries_finding(&r, &c), &store);
+    let outcome = relations(&carries_finding(&r, &c), &store);
     assert!(
         matches!(outcome, Admissible::CannotCheck { .. }),
         "D4: the field gate must not be bypassed by an alias: got {outcome:?}"

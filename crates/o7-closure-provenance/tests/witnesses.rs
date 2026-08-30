@@ -39,11 +39,29 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DecisionInput, DeclaredBinding, DerivedFact,
+    relations_checked, Admissible, DecisionBasis, DecisionInput, DeclaredBinding, DerivedFact,
     RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 /// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
 ///
@@ -437,7 +455,7 @@ fn a_fully_resolvable_decision_is_admissible() {
         "1f2e3d4c5b6a798807162534435261708f9e0d1c",
     ));
 
-    let outcome = admissibility(
+    let outcome = relations(
         &basis("review/external", vec![reads(&d, "/commitId")]),
         &store,
     );
@@ -484,7 +502,7 @@ fn b1_the_value_read_comes_from_the_record_the_basis_named() {
     // kind, in a role only a query snapshot can fill.
     b.expected_query_digest = Some(store.put(&query_snapshot()));
 
-    let outcome = admissibility(&b, &store);
+    let outcome = relations(&b, &store);
     assert_eq!(
         admitted(&outcome),
         [json!("1111111111111111111111111111111111111111")],
@@ -512,7 +530,7 @@ fn b2_bytes_returned_under_a_key_that_does_not_name_them_are_refused() {
         &review("9000000999", "2222222222222222222222222222222222222222"),
     );
 
-    let outcome = admissibility(
+    let outcome = relations(
         &basis("review/external", vec![reads(&d1, "/commitId")]),
         &store,
     );
@@ -539,7 +557,7 @@ fn b3_an_unresolvable_input_is_cannot_check_not_a_shorter_input_list() {
     ));
     let absent = format!("sha256:{}", "b".repeat(64));
 
-    let outcome = admissibility(
+    let outcome = relations(
         &basis(
             "review/external",
             vec![reads(&present, "/commitId"), reads(&absent, "/commitId")],
@@ -574,7 +592,7 @@ fn b4_a_blocked_field_this_decision_does_not_read_is_survivable() {
     // the pointer that reads it is `/commit_id` where the same decision over a
     // complete §8 projection reads `/commitId`. The basis pointer's space follows
     // the record kind, which `read_pointer` already dispatches on.
-    let outcome = admissibility(
+    let outcome = relations(
         &basis("review/external", vec![reads(&d, "/commit_id")]),
         &store,
     );
@@ -595,7 +613,7 @@ fn b5_a_blocked_field_this_decision_reads_is_cannot_check() {
         "1f2e3d4c5b6a798807162534435261708f9e0d1c",
     ));
 
-    let outcome = admissibility(&basis("review/external", vec![reads(&d, "/body")]), &store);
+    let outcome = relations(&basis("review/external", vec![reads(&d, "/body")]), &store);
     let why = cannot_check(&outcome);
     assert!(
         matches!(why, [Unresolved::PointerBlocked { pointer, .. }] if pointer == "/body"),
@@ -629,7 +647,7 @@ fn b5b_a_locator_value_does_not_satisfy_a_decision_pointer() {
     );
     let d = store.retain(&record);
 
-    let outcome = admissibility(&basis("review/external", vec![reads(&d, "/id")]), &store);
+    let outcome = relations(&basis("review/external", vec![reads(&d, "/id")]), &store);
     let why = cannot_check(&outcome);
     assert!(
         matches!(why, [Unresolved::PointerBlocked { pointer, .. }] if pointer == "/id"),
@@ -663,7 +681,7 @@ fn b6_a_derived_fact_that_its_named_sources_do_not_imply_is_refused() {
         derived_from: vec![r.clone(), c.clone()],
     }];
 
-    let outcome = admissibility(&b, &store);
+    let outcome = relations(&b, &store);
     let why = cannot_check(&outcome);
     assert!(
         why.iter().any(|u| matches!(
@@ -702,7 +720,7 @@ fn b7_a_true_fact_with_the_wrong_named_sources_is_refused() {
         derived_from: vec![r.clone(), unrelated.clone()],
     }];
 
-    let outcome = admissibility(&b, &store);
+    let outcome = relations(&b, &store);
     let why = cannot_check(&outcome);
     assert!(
         why.iter()
@@ -731,7 +749,7 @@ fn b7b_a_correctly_derived_fact_is_admitted() {
         derived_from: vec![r.clone(), owning.clone()],
     }];
 
-    admitted(&admissibility(&b, &store));
+    admitted(&relations(&b, &store));
 }
 
 /// A derivation this crate cannot re-execute is refused, not trusted.
@@ -754,7 +772,7 @@ fn b7c_an_unregistered_derivation_is_refused() {
         derived_from: vec![r.clone()],
     }];
 
-    let outcome = admissibility(&b, &store);
+    let outcome = relations(&b, &store);
     let why = cannot_check(&outcome);
     assert!(
         why.iter()
@@ -778,7 +796,7 @@ fn b10a_a_record_with_no_retention_binding_is_inadmissible() {
     ));
     store.unbind(&d);
 
-    let outcome = admissibility(
+    let outcome = relations(
         &basis("review/external", vec![reads(&d, "/commitId")]),
         &store,
     );
@@ -814,7 +832,7 @@ fn b10b_a_declared_binding_that_contradicts_the_retained_one_is_refused() {
         assessment_digest: asserted.clone(),
     }];
 
-    let outcome = admissibility(&b, &store);
+    let outcome = relations(&b, &store);
     let why = cannot_check(&outcome);
     assert!(
         why.iter().any(|u| matches!(

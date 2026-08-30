@@ -66,12 +66,30 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    admissibility, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
+    relations_checked, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
     FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, ScanCompleteness,
     ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 /// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
 ///
@@ -315,7 +333,7 @@ fn a_fully_evidenced_decision_is_admissible() {
     let mut store = Store::default();
     let d = store.retain(&review("R1", "1111111111111111111111111111111111111111"));
     assert_eq!(
-        admitted(&admissibility(&basis(&d, "/commitId"), &store)),
+        admitted(&relations(&basis(&d, "/commitId"), &store)),
         [json!("1111111111111111111111111111111111111111")]
     );
 }
@@ -331,7 +349,7 @@ fn s1_a_binding_naming_another_record_is_refused() {
     // The store answers a request about A with a binding that names B.
     store.bind(&a, &b, &assessment);
 
-    let outcome = admissibility(&basis(&a, "/commitId"), &store);
+    let outcome = relations(&basis(&a, "/commitId"), &store);
     let why = refused(&outcome);
     assert!(
         why.iter().any(|u| matches!(
@@ -352,7 +370,7 @@ fn s2_an_assessment_that_is_not_retained_authorises_nothing() {
     let phantom = format!("sha256:{}", "f".repeat(64));
     store.bind(&d, &d, &phantom);
 
-    let outcome = admissibility(&basis(&d, "/commitId"), &store);
+    let outcome = relations(&basis(&d, "/commitId"), &store);
     let why = refused(&outcome);
     assert!(
         why.iter().any(|u| matches!(
@@ -374,7 +392,7 @@ fn s3_assessment_bytes_that_are_not_the_ones_the_digest_names_are_refused() {
         .insert(wrong_key.clone(), conforming_assessment());
     store.bind(&d, &d, &wrong_key);
 
-    let outcome = admissibility(&basis(&d, "/commitId"), &store);
+    let outcome = relations(&basis(&d, "/commitId"), &store);
     let why = refused(&outcome);
     assert!(
         why.iter()
@@ -391,7 +409,7 @@ fn s4_an_object_that_is_not_a_retention_assessment_is_refused() {
     let not_an_assessment = store.put(&review("DECOY", "cccc"));
     store.bind(&d, &d, &not_an_assessment);
 
-    let outcome = admissibility(&basis(&d, "/commitId"), &store);
+    let outcome = relations(&basis(&d, "/commitId"), &store);
     let why = refused(&outcome);
     // WrongKindForRole and not MalformedArtifact, and the distinction is one the
     // single door made available: this decoy is a perfectly well-formed §8.3

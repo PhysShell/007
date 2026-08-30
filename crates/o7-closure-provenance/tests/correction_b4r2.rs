@@ -106,11 +106,29 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    admissibility, scan_verdict, Admissible, DecisionBasis, DecisionInput,
+    relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput,
     FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+/// This file's witnesses ask about ONE relation each, over a basis built to
+/// isolate it. That is not a §17 decision basis and was never meant to be, so
+/// they ask `relation_refusals` — "did anything this basis NAMED fail?" —
+/// rather than `admissibility`, which additionally requires §17's minimum for
+/// the decision being made. Shaped back into `Admissible` so the assertions
+/// below read as they always have.
+///
+/// The distinction is not cosmetic. Before `admissibility` took a profile,
+/// these witnesses' `admits` assertions claimed that a basis carrying one
+/// pointer was an admissible DECISION. That was only ever true because nothing
+/// checked completeness. `correction_g2.rs` carries the decision-level claim.
+fn relations<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+    match relations_checked(basis, store) {
+        Ok(values) => Admissible::Yes { values },
+        Err(why) => Admissible::CannotCheck { why },
+    }
+}
 
 const MATCHER_ID: &str = "review-by-expected-author-login";
 const MATCHER_VERSION: &str = "1";
@@ -292,7 +310,7 @@ fn scan_of(snapshot_digest: &str) -> FalsificationSurfaceScan {
 /// candidate-shaped optimism should make it so.
 fn is_authorised(store: &Store, record_digest: &str) -> bool {
     matches!(
-        admissibility(&reads(record_digest, "/body"), store),
+        relations(&reads(record_digest, "/body"), store),
         Admissible::Yes { .. }
     )
 }
@@ -327,7 +345,7 @@ fn q1_a_candidate_with_no_retention_binding_cannot_evidence_an_absence() {
         !is_authorised(&store, &candidate),
         "fixture: this candidate must have no §9.2 authority, or Q1 is about nothing"
     );
-    refuses(&admissibility(&absence_basis(&s), &store), "Q1");
+    refuses(&relations(&absence_basis(&s), &store), "Q1");
 }
 
 // ---- Q2. And the authority chain is checked, not merely present.
@@ -369,7 +387,7 @@ fn q2_a_candidate_whose_binding_does_not_hold_up_is_refused() {
             !is_authorised(&store, &candidate),
             "fixture ({label}): this candidate must fail §9.2, or the witness is about nothing"
         );
-        refuses(&admissibility(&absence_basis(&s), &store), label);
+        refuses(&relations(&absence_basis(&s), &store), label);
     }
 }
 
@@ -392,7 +410,7 @@ fn q3_an_authorised_non_matching_candidate_still_supports_an_absence() {
         is_authorised(&store, &candidate),
         "fixture: this candidate must carry §9.2 authority, or Q3 proves nothing"
     );
-    let outcome = admissibility(&absence_basis(&s), &store);
+    let outcome = relations(&absence_basis(&s), &store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "Q3: a properly retained non-match is exactly what an absence claim rests on: \

@@ -121,7 +121,92 @@ impl DecisionProfile {
             Self::Review => "review",
         }
     }
+
+    /// What §17's minimum decision basis requires for this profile.
+    #[must_use]
+    pub const fn requires(self) -> &'static [BasisRequirement] {
+        match self {
+            Self::Check => CHECK_BASIS,
+            Self::Review => REVIEW_BASIS,
+        }
+    }
 }
+
+/// One entry of §17's minimum decision basis.
+#[derive(Debug, Clone, Copy)]
+pub struct BasisRequirement {
+    /// §17's own wording for this requirement, carried into refusals so a reader
+    /// can find the row in the contract instead of in this crate.
+    pub name: &'static str,
+    pub needs: Needs,
+}
+
+/// What satisfying a [`BasisRequirement`] takes.
+#[derive(Debug, Clone, Copy)]
+pub enum Needs {
+    /// A field observed on a surface.
+    ///
+    /// THE SURFACE IS PART OF THE REQUIREMENT, not decoration. §8.1's
+    /// `github-pull-request-head` carries a `headSha` too, and it is the pull
+    /// request's rather than the check's; a rule that matched pointer names
+    /// alone would count it and report a check decision as fully evidenced.
+    ///
+    /// Two spellings for the same reason `DerivationInput` has two: a complete
+    /// §8 projection is keyed canonically and a §7 reduced record in §5.3's
+    /// decoded space. Requiring the canonical name alone would refuse every
+    /// reduced record and call it completeness, against redaction §8's
+    /// requirement that a decision whose inputs survived the gate stay makeable.
+    Observed {
+        surface: &'static str,
+        canonical: &'static str,
+        decoded: &'static str,
+    },
+    /// A derived fact, by derivation id.
+    ///
+    /// The id only. Whether the named version exists, is bound to its
+    /// implementation, and actually recomputes the claim is `check_derived`'s
+    /// question, and answering it twice in two places is how two answers start
+    /// disagreeing.
+    Derived { derivation: &'static str },
+}
+
+/// §17: `check` — observed head_sha, observed conclusion.
+const CHECK_BASIS: &[BasisRequirement] = &[
+    BasisRequirement {
+        name: "observed head_sha",
+        needs: Needs::Observed {
+            surface: "github-actions-check",
+            canonical: "/headSha",
+            decoded: "/head_sha",
+        },
+    },
+    BasisRequirement {
+        name: "observed conclusion",
+        needs: Needs::Observed {
+            surface: "github-actions-check",
+            canonical: "/conclusion",
+            decoded: "/conclusion",
+        },
+    },
+];
+
+/// §17: `review` — observed commit_id, derived carries_finding.
+const REVIEW_BASIS: &[BasisRequirement] = &[
+    BasisRequirement {
+        name: "observed commit_id",
+        needs: Needs::Observed {
+            surface: "github-submitted-review",
+            canonical: "/commitId",
+            decoded: "/commit_id",
+        },
+    },
+    BasisRequirement {
+        name: "derived carries_finding",
+        needs: Needs::Derived {
+            derivation: "review-carries-finding",
+        },
+    },
+];
 
 /// What the classifier consumed for one observation, frozen before evaluation.
 ///
@@ -1288,9 +1373,112 @@ fn place_segments(target: &mut Value, segments: &[String], value: Value) -> Opti
 /// the first refusal and re-runs would otherwise discover the second only on the
 /// next attempt, which is how a chain of custody gets repaired one link at a
 /// time without anybody seeing its length.
-pub fn admissibility<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> Admissible {
+pub fn admissibility<E: RetainedEvidence>(
+    profile: DecisionProfile,
+    basis: &DecisionBasis,
+    store: &E,
+) -> Admissible {
+    let checked = check_basis(basis, store);
+    let mut why = checked.why;
+
+    // §17'S MINIMUM DECISION BASIS, and it is a question about the BASIS rather
+    // than about any artifact in it.
+    //
+    // Every refusal `check_basis` produces answers "this did not hold". This one
+    // answers "nothing was presented to be held to", which is the failure the
+    // whole crate exists to refuse and which this function performed on itself:
+    // an empty basis produced an empty `why` and came back `Yes`. Each input
+    // never named resolved vacuously; each derived fact never claimed recomputed
+    // vacuously.
+    //
+    // WHY IT IS SKIPPED WHEN AN INPUT DID NOT RESOLVE. A requirement is
+    // satisfied by an input that OBSERVED the field, and an input whose bytes
+    // the store could not produce observed nothing — so its surface is unknown
+    // and there is no way to tell which requirement it was meant to satisfy.
+    // Reporting incompleteness there would misdescribe a retention failure as an
+    // adapter one, the misdiagnosis class G1-F exists to refuse: the basis DID
+    // name the input, and the remedy is to retain the bytes, not to fix the
+    // adapter.
+    //
+    // This cannot become an escape. The pass only ever ADDS refusals, and it is
+    // skipped only when `why` is already non-empty for the unresolved input — so
+    // the verdict is `CannotCheck` either way. Skipping it can change which
+    // reasons are listed; it can never admit a decision.
+    if !checked.some_input_did_not_resolve {
+        for requirement in profile.requires() {
+            let satisfied = match requirement.needs {
+                Needs::Observed {
+                    surface,
+                    canonical,
+                    decoded,
+                } => checked.observed.iter().any(|(found, pointer)| {
+                    *found == surface && (*pointer == canonical || *pointer == decoded)
+                }),
+                Needs::Derived { derivation } => {
+                    basis.derived.iter().any(|f| f.derivation == derivation)
+                }
+            };
+            if !satisfied {
+                why.push(Unresolved::BasisIncompleteForProfile {
+                    profile: profile.name(),
+                    missing: requirement.name,
+                });
+            }
+        }
+    }
+
+    if why.is_empty() {
+        Admissible::Yes {
+            values: checked.values,
+        }
+    } else {
+        Admissible::CannotCheck { why }
+    }
+}
+
+/// The values a basis's named inputs resolve to, or every artifact- and
+/// relation-validity refusal it produces.
+///
+/// **NOT A VERDICT, and the return type says so.** A `Result` carrying the
+/// values read or the refusals found, never an [`Admissible`]. `Ok` means
+/// "nothing this basis NAMED failed", which is a far weaker statement than
+/// "this decision is evidenced": §17's minimum decision basis is
+/// [`admissibility`]'s question and nothing else asks it. A consumer deciding
+/// an observation calls [`admissibility`].
+///
+/// Public because a witness about ONE relation should not have to assemble a
+/// complete §17 basis to ask about that relation — every fixture would then
+/// carry machinery unrelated to its claim, and a failure in that machinery would
+/// read as a failure of the relation under test.
+pub fn relations_checked<E: RetainedEvidence>(
+    basis: &DecisionBasis,
+    store: &E,
+) -> Result<Vec<Value>, Vec<Unresolved>> {
+    let checked = check_basis(basis, store);
+    if checked.why.is_empty() {
+        Ok(checked.values)
+    } else {
+        Err(checked.why)
+    }
+}
+
+/// What one pass over a basis found, before §17 completeness is considered.
+struct CheckedBasis<'a> {
+    why: Vec<Unresolved>,
+    values: Vec<Value>,
+    /// What each input turned out to OBSERVE — the surface it was read from and
+    /// the pointer it was read by. Recorded during the walk because a surface is
+    /// only knowable after resolution, and resolving twice is two chances to
+    /// disagree about one artifact.
+    observed: Vec<(&'static str, &'a str)>,
+    some_input_did_not_resolve: bool,
+}
+
+fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> CheckedBasis<'a> {
     let mut why = Vec::new();
     let mut values = Vec::new();
+    let mut observed: Vec<(&'static str, &'a str)> = Vec::new();
+    let mut some_input_did_not_resolve = false;
 
     for input in &basis.inputs {
         let Some(record) = resolve_artifact(
@@ -1300,8 +1488,10 @@ pub fn admissibility<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> A
             &basis.bindings,
             &mut why,
         ) else {
+            some_input_did_not_resolve = true;
             continue;
         };
+        observed.push((record.kind().surface(), input.pointer.as_str()));
         match read_pointer(&record, &input.pointer) {
             Ok(value) => values.push(value),
             Err(e) => why.push(e),
@@ -1342,10 +1532,11 @@ pub fn admissibility<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> A
         }
     }
 
-    if why.is_empty() {
-        Admissible::Yes { values }
-    } else {
-        Admissible::CannotCheck { why }
+    CheckedBasis {
+        why,
+        values,
+        observed,
+        some_input_did_not_resolve,
     }
 }
 
