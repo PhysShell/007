@@ -106,8 +106,9 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput,
-    FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict,
+    admissibility, relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput,
+    DecisionProfile, FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness,
+    ScanVerdict,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -410,7 +411,10 @@ fn q3_an_authorised_non_matching_candidate_still_supports_an_absence() {
         is_authorised(&store, &candidate),
         "fixture: this candidate must carry §9.2 authority, or Q3 proves nothing"
     );
-    let outcome = relations(&absence_basis(&s), &store);
+    // DECISION-LEVEL: the claim is that an absence RESTS on this candidate, so
+    // it asks the decision entry point rather than the relation one. Q1 and Q2
+    // stay on `relations` — each isolates one authority failure.
+    let outcome = admissibility(DecisionProfile::Absence, &absence_basis(&s), &store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "Q3: a properly retained non-match is exactly what an absence claim rests on: \

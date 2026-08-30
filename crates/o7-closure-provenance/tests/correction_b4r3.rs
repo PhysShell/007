@@ -69,7 +69,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    relations_checked, Admissible, DecisionBasis, DecisionInput, RetainedEvidence, Unresolved,
+    admissibility, relations_checked, Admissible, DecisionBasis, DecisionInput, DecisionProfile,
+    RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -349,7 +350,15 @@ fn f2a_a_snapshot_for_another_observation_does_not_prove_this_absence() {
 fn f2b_a_snapshot_for_this_observation_still_proves_the_absence() {
     let mut store = Store::default();
     let s = store.put(&snapshot(2, OBSERVATION));
-    admits(&relations(&absence_basis(&s), &store), "F2-B");
+    // DECISION-LEVEL, so it asks the decision entry point. This witness's
+    // claimed property is that the absence IS established — not that one
+    // relation held — and after §17 gained its `absence` row that claim has a
+    // profile to be judged under. Its sibling F2-A stays on `relations`: a
+    // refusal isolating one relation is a different question.
+    admits(
+        &admissibility(DecisionProfile::Absence, &absence_basis(&s), &store),
+        "F2-B",
+    );
 }
 
 // ---- F3. The authorising assessment may be from another policy.

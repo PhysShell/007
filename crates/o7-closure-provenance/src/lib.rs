@@ -178,6 +178,21 @@ pub enum Needs {
     /// question, and answering it twice in two places is how two answers start
     /// disagreeing.
     Derived { derivation: &'static str },
+    /// The basis names the query snapshot an absence claim rests on.
+    ///
+    /// PRESENCE ONLY, and the narrowness is the design. Whether that snapshot
+    /// is COMPLETE, whether its matcher is bound to its implementation, whether
+    /// replay reproduces the recorded selection, whether its
+    /// `requiredObservationId` is this decision's, and whether its matched set
+    /// is empty are §13 and §14 questions, imposed a few lines below by
+    /// `qualify_query` and `supports_absence`. Restating any of them here would
+    /// be a second copy of a frozen rule, and two copies of one rule is how the
+    /// two answers begin to differ.
+    ///
+    /// The division: §13/§14 say what the snapshot must BE, this says what the
+    /// basis must PROVIDE before those questions have a subject at all. A basis
+    /// naming no snapshot does not fail the §13 checks — it never reaches them.
+    ExpectedQuerySnapshot,
 }
 
 /// §17: `check` — observed head_sha, observed conclusion.
@@ -202,11 +217,12 @@ const CHECK_BASIS: &[BasisRequirement] = &[
 
 /// §17: `absence` — expected query snapshot digest.
 ///
-/// EMPTY AT THIS COMMIT, AND THAT IS THE DEFECT RATHER THAN AN OVERSIGHT. §17
-/// now carries the row; nothing here requires it yet, so an absence decision
-/// naming no query snapshot is admissible. `tests/correction_absence.rs` A1 is
-/// the witness, and it fails.
-const ABSENCE_BASIS: &[BasisRequirement] = &[];
+/// ONE REQUIREMENT, deliberately. See [`Needs::ExpectedQuerySnapshot`] for why
+/// the §13/§14 obligations are not repeated here.
+const ABSENCE_BASIS: &[BasisRequirement] = &[BasisRequirement {
+    name: "expected query snapshot digest",
+    needs: Needs::ExpectedQuerySnapshot,
+}];
 
 /// §17: `review` — observed commit_id, derived carries_finding.
 const REVIEW_BASIS: &[BasisRequirement] = &[
@@ -1435,6 +1451,7 @@ pub fn admissibility<E: RetainedEvidence>(
                 Needs::Derived { derivation } => {
                     basis.derived.iter().any(|f| f.derivation == derivation)
                 }
+                Needs::ExpectedQuerySnapshot => basis.expected_query_digest.is_some(),
             };
             if !satisfied {
                 why.push(Unresolved::BasisIncompleteForProfile {
