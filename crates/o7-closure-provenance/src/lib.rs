@@ -392,7 +392,7 @@ impl ConsumedAs {
         match self {
             Self::GatedSource => matches!(
                 kind,
-                ArtifactKind::CompleteProjection(_) | ArtifactKind::ReducedSourceRecord
+                ArtifactKind::CompleteProjection(_) | ArtifactKind::ReducedSourceRecord(_)
             ),
             Self::ExpectedQuerySnapshot | Self::ScanEvidence => {
                 matches!(kind, ArtifactKind::QuerySnapshot)
@@ -939,7 +939,7 @@ fn qualify_query<E: RetainedEvidence>(
 /// id stays readable through the locator — the field gate bypassed by an alias.
 fn read_pointer(record: &ValidatedArtifact, pointer: &str) -> Result<Value, Unresolved> {
     let digest_of = record.digest();
-    if record.kind() != ArtifactKind::ReducedSourceRecord {
+    if !matches!(record.kind(), ArtifactKind::ReducedSourceRecord(_)) {
         return record
             .pointer(pointer)
             .cloned()
@@ -1039,7 +1039,8 @@ fn check_derived<E: RetainedEvidence>(
     }
 
     let mut sources = Vec::with_capacity(entry.arity());
-    for (inputs, source_digest) in entry.sources.iter().zip(&fact.derived_from) {
+    for (slot, (source, source_digest)) in entry.sources.iter().zip(&fact.derived_from).enumerate()
+    {
         // Every cited source goes through the same resolution the decision's own
         // inputs do. A derived fact resting on bytes nobody was permitted to keep
         // is not better evidenced than a decision resting on them.
@@ -1053,7 +1054,43 @@ fn check_derived<E: RetainedEvidence>(
             return;
         };
 
-        match derivation_source_view(&record, inputs) {
+        // THE SLOT'S SURFACE, BEFORE THE RULE READS A FIELD OUT OF IT.
+        //
+        // `ConsumedAs::GatedSource` above answers a different question, and the
+        // difference is the artifact/relation split this crate is built on: the
+        // door asks whether this KIND of object is the sort a decision may read
+        // a gated pointer out of, which is true of every complete projection and
+        // every reduced record. Whether it is the SURFACE THIS SLOT TAKES is a
+        // relation between one derivation and one citation, and relation checks
+        // belong at the consumption site — the same place observation binding
+        // and §9.5 policy-version equality landed, for the same reason.
+        //
+        // Reading `surface()` rather than a member: a reduced record's
+        // `/sourceKind` is `github-reduced-source-record` for all five surfaces,
+        // so a check written against `sourceKind` alone would refuse every
+        // reduced record in every slot and read as a repair. Redaction §8
+        // requires the opposite — a fact whose inputs survived the gate stays
+        // usable — and `tests/correction_g1.rs` G1-E is where that is enforced.
+        //
+        // Before the view is built, not after. A rule that read the wrong
+        // surface has recomputed a DIFFERENT FACT and reported it under this
+        // one's name; and the refusal a wrong-surface citation used to produce
+        // was `PointerBlocked`, which says the redaction gate removed something.
+        // It had not. Nothing was blocked, and an operator following that
+        // refusal audits a policy that is working correctly.
+        let found = record.kind().surface();
+        if found != source.kind {
+            into.push(Unresolved::DerivationSlotKindMismatch {
+                derivation: fact.derivation.clone(),
+                version: fact.version.clone(),
+                slot,
+                expected: source.kind,
+                found: found.to_owned(),
+            });
+            return;
+        }
+
+        match derivation_source_view(&record, source.inputs) {
             Ok(view) => sources.push(view),
             Err(ViewError::Input(why)) => {
                 into.push(why);
@@ -1137,7 +1174,7 @@ fn derivation_source_view(
     let mut view = Value::Object(Map::new());
     for input in inputs {
         let pointer = match record.kind() {
-            ArtifactKind::ReducedSourceRecord => input.decoded,
+            ArtifactKind::ReducedSourceRecord(_) => input.decoded,
             _ => input.canonical,
         };
         let value = read_pointer(record, pointer).map_err(ViewError::Input)?;

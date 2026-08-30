@@ -58,11 +58,56 @@ fn member_at<'a>(members: &'a [Member], pointer: &str) -> Option<&'a Member> {
     }
 }
 
+/// A slot's declared kind is a surface both contracts define.
+///
+/// The `kind` field is the expected side of the G1 slot check, and an expected
+/// value nothing audits is a typo waiting to admit everything: a slot declaring
+/// `"github-submited-review"` matches no artifact and refuses every citation,
+/// which reads as a strict rule rather than as a broken one.
+///
+/// Checked against BOTH tables because the field is matched against
+/// `/sourceKind` on one path and `/locatorKind` on the other.
 #[test]
-fn every_declared_canonical_input_is_a_member_of_some_projection() {
+fn every_declared_slot_kind_is_a_surface_both_contracts_define() {
     for entry in REGISTRY {
-        for (position, inputs) in entry.sources.iter().enumerate() {
-            for input in *inputs {
+        for (position, source) in entry.sources.iter().enumerate() {
+            assert!(
+                SOURCE_SCHEMAS.iter().any(|s| s.source_kind == source.kind),
+                "{}/{} slot {position}: {:?} is not an §8 sourceKind. A slot expecting a \
+                 surface that does not exist refuses every citation and looks strict doing it",
+                entry.id,
+                entry.version,
+                source.kind,
+            );
+            assert!(
+                REQUIRED_FIELDS
+                    .iter()
+                    .any(|r| r.locator_kind == source.kind),
+                "{}/{} slot {position}: {:?} is not a §5.3 locatorKind. The slot check compares \
+                 one name against /locatorKind for a reduced record, so a kind absent from that \
+                 table refuses every reduced record in this slot — buying G1 back by forbidding \
+                 the representation redaction §8 requires to stay usable",
+                entry.id,
+                entry.version,
+                source.kind,
+            );
+        }
+    }
+}
+
+/// Every canonical input is a member of THE SLOT'S OWN projection.
+///
+/// Was "a member of SOME projection", which is the weakest form of the same
+/// question and a proxy of exactly the kind G1 is about. It admits a slot
+/// declaring `kind: "github-submitted-review"` alongside
+/// `canonical: "/pullRequestReviewId"` — a field no submitted review carries —
+/// because some OTHER projection defines that name. The slot now names its
+/// surface, so the audit can ask the question it always meant.
+#[test]
+fn every_declared_canonical_input_is_a_member_of_its_slots_projection() {
+    for entry in REGISTRY {
+        for (position, source) in entry.sources.iter().enumerate() {
+            for input in source.inputs {
                 assert!(
                     input.canonical.starts_with('/'),
                     "{}/{} source {position}: {:?} is not a pointer, so no view can be built \
@@ -71,15 +116,19 @@ fn every_declared_canonical_input_is_a_member_of_some_projection() {
                     entry.version,
                     input.canonical
                 );
+                let schema = SOURCE_SCHEMAS
+                    .iter()
+                    .find(|s| s.source_kind == source.kind)
+                    .expect("the slot kind is an §8 sourceKind; the audit above holds that");
                 assert!(
-                    SOURCE_SCHEMAS
-                        .iter()
-                        .any(|schema| member_at(schema.members, input.canonical).is_some()),
-                    "{}/{} source {position}: {:?} is not a member of any §8 projection. A \
-                     canonical name no projection defines cannot be read out of one, and the \
-                     declaration would be describing a field that does not exist",
+                    member_at(schema.members, input.canonical).is_some(),
+                    "{}/{} slot {position} takes a {}, and {:?} is not a member of that \
+                     projection. The rule would read this field out of the surface the slot \
+                     admits and find nothing there — every citation refused as evidence loss, \
+                     for a field the surface was never going to carry",
                     entry.id,
                     entry.version,
+                    source.kind,
                     input.canonical
                 );
             }
@@ -87,21 +136,28 @@ fn every_declared_canonical_input_is_a_member_of_some_projection() {
     }
 }
 
+/// And every decoded input is a §5.3 required field of THE SLOT'S OWN locator
+/// kind — the reduced-representation half of the same tightening.
 #[test]
-fn every_declared_decoded_input_is_a_required_field_of_some_locator_kind() {
+fn every_declared_decoded_input_is_a_required_field_of_its_slots_locator_kind() {
     for entry in REGISTRY {
-        for (position, inputs) in entry.sources.iter().enumerate() {
-            for input in *inputs {
+        for (position, source) in entry.sources.iter().enumerate() {
+            for input in source.inputs {
+                let required = REQUIRED_FIELDS
+                    .iter()
+                    .find(|r| r.locator_kind == source.kind)
+                    .expect("the slot kind is a §5.3 locatorKind; the audit above holds that");
                 assert!(
-                    REQUIRED_FIELDS.iter().any(|r| {
-                        r.always.contains(&input.decoded) || r.present_only.contains(&input.decoded)
-                    }),
-                    "{}/{} source {position}: {:?} is not a §5.3 required field of any locator \
-                     kind. §7.1 builds `retainedFields` out of that set and nothing else, so a \
-                     reduced record can never carry this name and the reduced half of the \
-                     declaration is dead",
+                    required.always.contains(&input.decoded)
+                        || required.present_only.contains(&input.decoded),
+                    "{}/{} slot {position} takes a {}, and {:?} is not in that kind's §5.3 \
+                     required set. §7.1 builds `retainedFields` out of that set and nothing \
+                     else, so a reduced record of the surface this slot admits can never carry \
+                     the name — and the reduced half of the declaration is dead on the only \
+                     records it applies to",
                     entry.id,
                     entry.version,
+                    source.kind,
                     input.decoded
                 );
             }
@@ -121,8 +177,8 @@ fn every_declared_decoded_input_is_a_required_field_of_some_locator_kind() {
 #[test]
 fn no_declared_input_uses_the_canonical_name_in_the_decoded_half() {
     for entry in REGISTRY {
-        for inputs in entry.sources {
-            for input in *inputs {
+        for source in entry.sources {
+            for input in source.inputs {
                 if input.canonical == input.decoded {
                     continue;
                 }

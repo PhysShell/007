@@ -219,7 +219,15 @@ pub enum ArtifactKind {
     /// One of the five §8 complete projections. All are gated: §5.3 gives every
     /// one of them a required field set, `github-pull-request-head` included.
     CompleteProjection(&'static str),
-    ReducedSourceRecord,
+    /// A §7 reduced source record, carrying the §7.3 `locatorKind` it was
+    /// reduced FROM.
+    ///
+    /// The payload is not decoration. Without it this variant erases the one
+    /// thing that distinguishes an issue comment from a submitted review once
+    /// both have been through the gate, and every consumer asking "which
+    /// surface is this?" had to answer from a field it happened to be able to
+    /// read. That erasure is what made G1 reachable.
+    ReducedSourceRecord(&'static str),
     QuerySnapshot,
     HeadReadEvent,
     RetentionAssessment,
@@ -230,7 +238,7 @@ impl ArtifactKind {
     #[must_use]
     pub const fn gate(self) -> Gate {
         match self {
-            Self::CompleteProjection(_) | Self::ReducedSourceRecord => Gate::Gated,
+            Self::CompleteProjection(_) | Self::ReducedSourceRecord(_) => Gate::Gated,
             // §5.3 places `github-query-snapshot` outside the gate in as many
             // words. The event and the assessment are control artifacts: making
             // a permission depend on a permission is a recursion with no base
@@ -246,11 +254,30 @@ impl ArtifactKind {
     pub fn name(self) -> &'static str {
         match self {
             Self::CompleteProjection(kind) => kind,
-            Self::ReducedSourceRecord => "github-reduced-source-record",
+            Self::ReducedSourceRecord(_) => "github-reduced-source-record",
             Self::QuerySnapshot => "github-query-snapshot",
             Self::HeadReadEvent => "github-head-read-event",
             Self::RetentionAssessment => "closure-retention-assessment",
             Self::RetentionBinding => "closure-retention-binding",
+        }
+    }
+
+    /// The SURFACE this artifact is evidence about, in the one vocabulary §8
+    /// `sourceKind` and §7.3 `locatorKind` share.
+    ///
+    /// Distinct from [`Self::name`], which answers what the object IS. For a
+    /// reduced record the two differ and the difference is the whole point:
+    /// every reduced record is a `github-reduced-source-record`, and the surface
+    /// it was reduced from is in its `locatorKind`. A consumer that needs "which
+    /// surface" and reads `name()` gets one answer for five different things.
+    ///
+    /// For every other kind the two coincide, because the object and the surface
+    /// are the same thing.
+    #[must_use]
+    pub fn surface(self) -> &'static str {
+        match self {
+            Self::ReducedSourceRecord(locator_kind) => locator_kind,
+            other => other.name(),
         }
     }
 }
@@ -454,8 +481,8 @@ fn check_closed_form(declared: &str, value: &Value) -> Result<ArtifactKind, Stri
             // carry schemaVersion 1. Registered value, not merely an integer.
             check_registered_version(value, &[1], declared)?;
             check_shape(value, REDUCED_RECORD, "")?;
-            check_reduced_locator(value)?;
-            Ok(ArtifactKind::ReducedSourceRecord)
+            let locator_kind = check_reduced_locator(value)?;
+            Ok(ArtifactKind::ReducedSourceRecord(locator_kind))
         }
         "github-head-read-event" => {
             // §8.1 gives the event two shapes, chosen by its own acquisition
@@ -540,7 +567,7 @@ fn check_registered_version(
 
 /// §7.3: the locator's shape follows `locatorKind`, and §9.5 lists it among the
 /// nested objects that are exact key sets.
-fn check_reduced_locator(record: &Value) -> Result<(), String> {
+fn check_reduced_locator(record: &Value) -> Result<&'static str, String> {
     let locator_kind = record
         .pointer("/locatorKind")
         .and_then(Value::as_str)
@@ -555,5 +582,10 @@ fn check_reduced_locator(record: &Value) -> Result<(), String> {
     let locator = record
         .pointer("/locator")
         .ok_or_else(|| "/locator is REQUIRED and absent".to_owned())?;
-    check_shape(locator, shape.members, "/locator")
+    check_shape(locator, shape.members, "/locator")?;
+    // The `'static` name from §7.3's own table, never the string out of the
+    // artifact. `ArtifactKind` is what the rest of the crate reasons over, so a
+    // surface name in it must come from the contract side of the comparison
+    // that admitted the record.
+    Ok(shape.locator_kind)
 }

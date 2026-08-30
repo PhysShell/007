@@ -66,15 +66,53 @@ pub struct DerivationInput {
     pub decoded: &'static str,
 }
 
+/// One source slot of a derivation: the SURFACE it takes, and the fields it
+/// reads out of that surface.
+///
+/// WHY THE KIND IS HERE AND NOT INFERRED. A slot was declared by field names
+/// alone, and `check_derived` read those names out of whatever artifact was
+/// cited. That makes the guard check a proxy — "the field is readable here" —
+/// while the property anyone relies on is "this is the surface the rule is
+/// about". The two came apart in both directions: `/stableId` is carried by
+/// four of the five §8 projections, so an issue comment or a check run filled
+/// `review-carries-finding`'s review slot and the fact was recomputed and
+/// admitted; and `/pullRequestReviewId` is carried by exactly one, so the
+/// comment slot happened to be bounded by a coincidence in a five-row table
+/// rather than by a rule. `tests/correction_g1.rs` holds both directions.
+///
+/// THE EXPECTATION COMES FROM THE RULE, NEVER FROM THE ARTIFACT. This is the
+/// registry — the contract side — and the artifact supplies only what it is.
+/// A slot that asked the cited artifact what kind it ought to be would be
+/// self-certification with extra steps, which is the shape this crate exists to
+/// refuse.
+///
+/// ONE NAME FOR TWO MEMBERS. The kind is matched against `/sourceKind` for a
+/// complete §8 projection and against `/locatorKind` for a §7 reduced record,
+/// via [`o7_closure_provenance_artifact_surface`]. That is one field only
+/// because §8's source kinds and §7.3's locator kinds are the same vocabulary —
+/// an invariant `tests/correction_g1.rs` executes rather than assumes, because
+/// if they ever drift this single field silently becomes a proxy for two
+/// different properties and the defect above returns inside its own fix.
+///
+/// [`o7_closure_provenance_artifact_surface`]: crate::artifact::ArtifactKind::surface
+#[derive(Debug, Clone, Copy)]
+pub struct DerivationSource {
+    /// The §8 `sourceKind` / §7.3 `locatorKind` this slot takes.
+    pub kind: &'static str,
+    /// The fields the rule reads out of it, under both spellings.
+    pub inputs: &'static [DerivationInput],
+}
+
 /// One registered derivation.
 #[derive(Debug, Clone, Copy)]
 pub struct DerivationEntry {
     pub id: &'static str,
     pub version: &'static str,
-    /// The fields the derivation reads out of each source it consumes, in
-    /// order. Its length is the arity — declared once, so a rule cannot take a
-    /// number of sources different from the number it names inputs for.
-    pub sources: &'static [&'static [DerivationInput]],
+    /// The sources the derivation consumes, in order: what surface each slot
+    /// takes and what the rule reads out of it. Its length is the arity —
+    /// declared once, so a rule cannot take a number of sources different from
+    /// the number it declares slots for.
+    pub sources: &'static [DerivationSource],
     /// The exact bytes of the file defining `derive`, embedded at compile time.
     pub implementation_source: &'static str,
     /// SHA-256 of [`Self::implementation_source`], the identity of
@@ -95,17 +133,23 @@ pub const REGISTRY: &[DerivationEntry] = &[DerivationEntry {
     id: "review-carries-finding",
     version: "1",
     sources: &[
-        // 0 — the submitted review. §8.3 `stableId`; §5.3 `/id`.
-        &[DerivationInput {
-            canonical: "/stableId",
-            decoded: "/id",
-        }],
+        // 0 — the submitted review. §8.2 `stableId`; §5.3 `/id`.
+        DerivationSource {
+            kind: "github-submitted-review",
+            inputs: &[DerivationInput {
+                canonical: "/stableId",
+                decoded: "/id",
+            }],
+        },
         // 1 — the review comment. §8.4 `pullRequestReviewId`;
         // §5.3 `/pull_request_review_id`.
-        &[DerivationInput {
-            canonical: "/pullRequestReviewId",
-            decoded: "/pull_request_review_id",
-        }],
+        DerivationSource {
+            kind: "github-review-comment",
+            inputs: &[DerivationInput {
+                canonical: "/pullRequestReviewId",
+                decoded: "/pull_request_review_id",
+            }],
+        },
     ],
     implementation_source: include_str!("derivations/carries_finding_v1.rs"),
     implementation_digest:
