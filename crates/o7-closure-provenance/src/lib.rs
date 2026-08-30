@@ -84,6 +84,45 @@ pub struct DeclaredBinding {
     pub assessment_digest: String,
 }
 
+/// Which of §17's minimum decision bases a caller is asking this basis to be.
+///
+/// SUPPLIED BY THE CALLER, NEVER READ OFF THE BASIS, and that is the whole
+/// design. `DecisionBasis` already carries `observation_id`, and selecting the
+/// requirements from it would let the object under examination nominate the
+/// standard it is examined against — an adapter saying "I am a check, so here
+/// is what I owe", which is self-certification with a table in front of it.
+/// §17.1's first consequence says the same thing about the subject and for the
+/// same reason: the expectation arrives from outside the artifacts being
+/// checked.
+///
+/// `observation_id` is still compared against a query snapshot's
+/// `requiredObservationId`. That is a relation between two artifacts, not a
+/// selection of the rule, and the difference is the point.
+///
+/// §17 tabulates four rows. Two of them describe a `DecisionBasis` and are
+/// here; `subject` and `falsification` describe the arguments of `staleness`
+/// and `scan_verdict`, which take no basis at all and so cannot be profiles of
+/// one. `tests/correction_g2.rs` records that split rather than leaving the two
+/// missing rows to be read as an oversight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionProfile {
+    /// §17: `check` — observed head_sha, observed conclusion.
+    Check,
+    /// §17: `review` — observed commit_id, derived carries_finding.
+    Review,
+}
+
+impl DecisionProfile {
+    /// §17's own name for this row, used in refusals so the reader can find it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Check => "check",
+            Self::Review => "review",
+        }
+    }
+}
+
 /// What the classifier consumed for one observation, frozen before evaluation.
 ///
 /// Provenance V1 §17: the snapshot answers *what GitHub returned*, and this
@@ -256,6 +295,20 @@ pub enum Unresolved {
         derivation: String,
         expected: usize,
         cited: usize,
+    },
+    /// The basis does not carry something §17's minimum decision basis requires
+    /// for the profile the CALLER asked for.
+    ///
+    /// A defect in the BASIS, and the one refusal here that is about evidence
+    /// that was never offered rather than evidence that failed a check. Every
+    /// other `Unresolved` answers "this did not hold"; this one answers
+    /// "nothing was presented, and an empty answer is not a passed check".
+    ///
+    /// `missing` is §17's own wording for the requirement, so a reader can find
+    /// the row in the contract rather than in this crate.
+    BasisIncompleteForProfile {
+        profile: &'static str,
+        missing: &'static str,
     },
     /// A derived fact fills a derivation's source slot with an artifact of a
     /// kind that slot does not take.
