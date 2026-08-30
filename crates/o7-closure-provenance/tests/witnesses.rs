@@ -357,7 +357,13 @@ fn reduced_review_blocking(stable_id: &str, commit_id: &str, blocked: &[&str]) -
 /// retention binding and none is demanded of it.
 fn query_snapshot() -> Value {
     json!({
-        "schemaVersion": 1,
+        // schemaVersion 2 since GREEN-B4R.3: §13.1 adds
+        // `matcher.implementationDigest` at that version, and a replay-dependent
+        // role now REQUIRES a bound implementation. A version-1 snapshot is
+        // still a conforming artifact — `correction_b4r3.rs`'s F1-A is the
+        // witness that it passes the door and is refused the ROLE — but it can
+        // no longer stand as a positive control for qualification.
+        "schemaVersion": 2,
         "sourceKind": "github-query-snapshot",
         "surface": "pull-request-submitted-reviews",
         "requiredObservationId": "review/external",
@@ -372,6 +378,7 @@ fn query_snapshot() -> Value {
         "matcher": {
             "id": "review-by-expected-author-login",
             "version": "1",
+            "implementationDigest": bound_implementation_digest(),
             "parameters": {"expectedAuthorLogin": "synthetic-external-reviewer"},
         },
         "allReturnedSnapshotDigests": [],
@@ -817,4 +824,15 @@ fn b10b_a_declared_binding_that_contradicts_the_retained_one_is_refused() {
         )),
         "got {why:?}"
     );
+}
+
+/// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
+/// registry that binds it rather than copied as a literal that can go stale.
+fn bound_implementation_digest() -> String {
+    let entry = o7_closure_matcher::resolve("review-by-expected-author-login", "1")
+        .expect("the matcher is registered");
+    o7_closure_matcher::verify_implementation(entry)
+        .expect("the registry is bound to its own implementation")
+        .as_str()
+        .to_owned()
 }

@@ -353,10 +353,22 @@ fn block_secret_assessment() -> Value {
 
 fn query_snapshot() -> Value {
     json!({
-        "schemaVersion": 1,
+        // schemaVersion 2 since GREEN-B4R.3: §13.1 adds
+        // `matcher.implementationDigest` at that version, and a replay-dependent
+        // role now REQUIRES a bound implementation. A version-1 snapshot is
+        // still a conforming artifact — `correction_b4r3.rs`'s F1-A is the
+        // witness that it passes the door and is refused the ROLE — but it can
+        // no longer stand as a positive control for qualification.
+        "schemaVersion": 2,
         "sourceKind": "github-query-snapshot",
         "surface": "pull-request-review-comments",
-        "requiredObservationId": "falsification/scan",
+        // "review/external" since GREEN-B4R.3, and this fixture was never
+        // coherent: it declared a query FOR "falsification/scan" while the basis
+        // consuming it as absence evidence is about "review/external". Nothing
+        // compared the two, so nothing noticed. §13's requiredObservationId is
+        // the observation a snapshot answers, and an enumeration of another
+        // question establishes nothing about this one.
+        "requiredObservationId": "review/external",
         "binding": {"repository": "PhysShell/007", "pullRequest": "9001"},
         "pagination": {
             "perPage": 100,
@@ -368,6 +380,7 @@ fn query_snapshot() -> Value {
         "matcher": {
             "id": "review-by-expected-author-login",
             "version": "1",
+            "implementationDigest": bound_implementation_digest(),
             "parameters": {"expectedAuthorLogin": "synthetic-external-reviewer"},
         },
         "allReturnedSnapshotDigests": [],
@@ -944,4 +957,15 @@ fn the_adversarial_surface_has_not_silently_shrunk() {
          eleven probes and a collapse to below a hundred means a specimen, a family or a \
          kind was dropped"
     );
+}
+
+/// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
+/// registry that binds it rather than copied as a literal that can go stale.
+fn bound_implementation_digest() -> String {
+    let entry = o7_closure_matcher::resolve("review-by-expected-author-login", "1")
+        .expect("the matcher is registered");
+    o7_closure_matcher::verify_implementation(entry)
+        .expect("the registry is bound to its own implementation")
+        .as_str()
+        .to_owned()
 }

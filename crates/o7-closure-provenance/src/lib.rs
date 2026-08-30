@@ -40,7 +40,7 @@
 use crate::artifact::{ArtifactKind, Gate, ValidatedArtifact};
 use crate::derivations::DerivationInput;
 use o7_closure_canonical::digest;
-use o7_closure_matcher::verify_matched;
+use o7_closure_matcher::{verify_matched, ImplementationCheck};
 use serde_json::{Map, Value};
 
 pub mod artifact;
@@ -644,6 +644,15 @@ struct QualifiedQuery {
     /// read back out of the artifact: the recomputation is the fact, and the
     /// claim is what it was checked against.
     matched: Vec<String>,
+    /// §13's `requiredObservationId` — the observation this snapshot is a query
+    /// FOR.
+    ///
+    /// Carried here rather than compared inside `qualify_query`, because
+    /// qualification cannot know it: the observation a decision is about is the
+    /// DECISION'S, and the artifact does not get to supply the identity it is
+    /// checked against. That is the same direction the expected query digest
+    /// travels, one relation further in.
+    observation: String,
 }
 
 impl QualifiedQuery {
@@ -653,7 +662,24 @@ impl QualifiedQuery {
     /// A qualified query whose matched set is non-empty is perfectly good
     /// evidence — of the opposite claim. The role is where that distinction
     /// lives, which is why it is not folded into qualification.
-    fn supports_absence(&self) -> Result<(), String> {
+    fn supports_absence(&self, expected_observation: &str) -> Result<(), String> {
+        // THE SUBJECT RELATION, and it is checked before the state. A snapshot of
+        // another observation with an empty matched set is perfectly good
+        // evidence — about a question nobody asked. §17.1 lists the subject
+        // alongside role and state precisely so that "the artifact is complete
+        // and its claim reproduces" cannot stand in for "it is about this".
+        //
+        // Exact equality, not a prefix or a surface match: `review/external` and
+        // `review/external-2` are different observations, and a reader who has
+        // to know which comparison was meant has been handed a procedure.
+        if self.observation != expected_observation {
+            return Err(format!(
+                "the decision is about observation {expected_observation:?} and its query \
+                 snapshot {} is a query for {:?}; a complete enumeration of another \
+                 observation establishes nothing about this one",
+                self.digest, self.observation
+            ));
+        }
         if self.matched.is_empty() {
             return Ok(());
         }
@@ -806,6 +832,42 @@ fn qualify_query<E: RetainedEvidence>(
     //    registered matcher produces now.
     let verdict = verify_matched(recorded.recorded_matcher(), &candidates)
         .map_err(|e| format!("the query snapshot does not replay: {e}"))?;
+
+    // THE IMPLEMENTATION AXIS, and reading it is the whole point.
+    //
+    // `verify_matched` answers two questions and this used to consume one.
+    // `ImplementationCheck::CannotCheck` is a *silent* outcome — replay returns
+    // it happily — so a schemaVersion-1 snapshot, which §13.1 gives no
+    // `matcher.implementationDigest`, produced a qualified query while nothing
+    // established that the code which just ran is the code the artifact named.
+    // That is the reading `ImplementationCheck`'s own must_use message forbids:
+    // an unread implementation check is an unchecked axis reported as a passed
+    // one.
+    //
+    // VERSION 1 IS STILL A CONFORMING ARTIFACT. §13 registers it and the door
+    // admits it. What it cannot do is fill a REPLAY-DEPENDENT ROLE, which is the
+    // contract's own distinction and not a schema change made here.
+    //
+    // Found by external review of GREEN-B4R.2, and the way it survived is worth
+    // recording: RED-B4R.1 hardened the FIXTURES to version 2 so they reach
+    // `Bound`, and the guard it added asserts that the FIXTURES are bound.
+    // Nothing asserted that this function requires it. A guard that checks the
+    // opposite side of the boundary it names removes the only route by which a
+    // test could have caught the gap.
+    if !matches!(
+        verdict.replay.implementation,
+        ImplementationCheck::Bound { .. }
+    ) {
+        return Err(format!(
+            "replay of query snapshot {} reached {:?} on the implementation axis; §13.1 \
+             binds a matcher version to the bytes that implement it, and a selection \
+             replayed by code nobody established to be that implementation is a \
+             recomputation of an unknown rule",
+            snapshot.digest(),
+            verdict.replay.implementation
+        ));
+    }
+
     if !verdict.reproduced {
         return Err(format!(
             "the query snapshot claims {:?} matched and its own candidate set produces {:?}",
@@ -814,9 +876,18 @@ fn qualify_query<E: RetainedEvidence>(
         ));
     }
 
+    let observation = snapshot
+        .str_at("/requiredObservationId")
+        .ok_or_else(|| {
+            "the query snapshot carries no /requiredObservationId, which §13 makes REQUIRED"
+                .to_owned()
+        })?
+        .to_owned();
+
     Ok(QualifiedQuery {
         digest: snapshot.digest().to_owned(),
         matched: verdict.replay.matched,
+        observation,
     })
 }
 
@@ -1109,7 +1180,7 @@ pub fn admissibility<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> A
             // qualification the scan path consumes, so the two cannot come to
             // disagree about one artifact.
             let qualified = qualify_query(&snapshot, store, &basis.bindings)
-                .and_then(|q| q.supports_absence().map(|()| q));
+                .and_then(|q| q.supports_absence(&basis.observation_id).map(|()| q));
             if let Err(reason) = qualified {
                 why.push(Unresolved::QueryDoesNotSupportRole {
                     digest: expected.clone(),

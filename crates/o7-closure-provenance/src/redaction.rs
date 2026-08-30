@@ -649,6 +649,30 @@ pub(crate) fn check_authorises(
     // reading CANNOT_ASSESS bound to an assessment reading BLOCK_SECRET, every
     // structural check passing, and the retained bytes disagreeing with what was
     // actually done.
+    // §9.5: THE POLICY VERSION IS PART OF THE AUTHORISATION, not decoration.
+    //
+    // "every one of them that carries `redactionPolicyVersion` carries the same
+    // value as the assessment that authorised it." Without this an assessment
+    // made under one policy authorises a record claiming another, and every
+    // other relation holds while it happens: the binding is retained and names
+    // this record, the outcomes agree, the partition computes. The retained
+    // trail then says a gate ran and does not say WHICH gate — which is the
+    // difference between provenance and a receipt.
+    //
+    // Checked for the reduced record and not for a complete projection because
+    // §8's projections carry no `redactionPolicyVersion`; there is no second
+    // value to disagree. Scoped to what the artifacts actually hold rather than
+    // asserted over a member that does not exist.
+    let record_policy = member_str_at(record, "redactionPolicyVersion")?;
+    let assessment_policy = member_str_at(assessment, "redactionPolicyVersion")?;
+    if record_policy != assessment_policy {
+        return Err(format!(
+            "§9.5: the record's /redactionPolicyVersion is {record_policy:?} and its \
+             authorising assessment was made under {assessment_policy:?}; a version field \
+             unrelated to its neighbours is decoration on bytes about to be hashed"
+        ));
+    }
+
     let record_outcome = member_str_at(record, "outcome")?;
     if record_outcome != outcome {
         return Err(format!(
