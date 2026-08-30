@@ -1082,6 +1082,7 @@ dependencies = [
  "o7-closure-classifier",
  "o7-closure-matcher",
  "serde_json",
+ "syn 2.0.118",
 ]
 
 [[package]]

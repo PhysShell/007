@@ -16,11 +16,11 @@
 //! documenting it as more than that is the E2 defect of the previous round.
 
 // Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
-// `panic!` and `expect` sites below are this test's own parse failures. A
+// `panic!` sites below are this test's own parse failures. A
 // contract section this parser cannot read must fail loudly — silently yielding
 // an empty expected set would make every assertion below vacuously true, which
 // is the failure-to-empty-set-to-green demon the whole crate is about.
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(clippy::panic)]
 
 use o7_closure_provenance::artifact::{
     locator_shape, HEAD_READ_EVENT_AVAILABLE, HEAD_READ_EVENT_FAILED, LOCATOR_SHAPES,

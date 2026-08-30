@@ -35,7 +35,7 @@
 // a JSON literal written in this file. Nothing here runs against production
 // input, and a malformed literal must fail loudly rather than be skipped — a
 // skipped witness is the vacuous green this file exists to prevent.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{

@@ -62,9 +62,9 @@
 //! removing the feature.
 
 // Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
-// `expect` and `panic` sites below are this file's own handling of JSON literals
+// `expect` sites below are this file's own handling of JSON literals
 // written in it, unreachable unless a specimen a few lines above is malformed.
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used)]
 
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};

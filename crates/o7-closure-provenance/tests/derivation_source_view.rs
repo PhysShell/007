@@ -26,7 +26,7 @@
 // precedent in `tests/derivation_binding.rs`: every panic path below is this
 // test's own assertion failing, or its own parse of a JSON literal written in
 // this file. Nothing here runs against production input.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{Member, ValueKind, SOURCE_SCHEMAS};

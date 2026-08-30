@@ -62,7 +62,7 @@
 // own handling of JSON literals written in this file. There are 20 such sites and
 // each is unreachable unless a literal a few lines above it is malformed, which
 // must fail loudly rather than be skipped.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
@@ -622,43 +622,175 @@ fn s7c_a_properly_evidenced_complete_scan_still_means_what_it_meant() {
 // ---- E1. An allowance that suppresses nothing, justified by a false invariant.
 
 /// Every restriction-lint allowance in this crate must actually suppress
-/// something.
+/// something — checked PER LINT, over EVERY file, against REAL call sites.
 ///
 /// Stated as the RULE rather than as the one file that violated it. AGENTS.md
 /// rule 4 requires a new allowance to state the invariant that makes it sound;
-/// an allowance over a file with no `unwrap`, `expect` or `panic` site states an
-/// invariant about code that does not exist. A false comment beside a provenance
-/// boundary is worse than no comment: the next reader believes a check was
-/// considered.
+/// an allowance over a file with no matching site states an invariant about code
+/// that does not exist. A false comment beside a provenance boundary is worse
+/// than no comment: the next reader believes a check was considered.
+///
+/// THIS TEST WAS ITSELF THE DEFECT IT NAMES, and external review found it. Three
+/// separate ways, each of which let it report green over the property it claims:
+///
+/// ```text
+/// denominator   it skipped any file not containing the literal text
+///               "allow(clippy::unwrap_used", so 7 of 12 files carrying a
+///               restriction-lint allowance were never examined at all
+///
+/// per lint      the site test was a disjunction — .unwrap() OR .expect( OR
+///               panic! — so an `expect` site justified an `unwrap_used`
+///               allowance
+///
+/// self-feeding  it searched for the TEXT ".unwrap()" while filtering only
+///               comment lines, so the string literals inside its own filter
+///               expression counted as this file's unwrap site. The guard
+///               manufactured the proxy it then measured
+/// ```
+///
+/// All three are one shape, and it is the shape of the round that found it:
+/// a guard checks proxy P, reports property Q, and P is not Q.
+///
+/// WHY AN AST AND NOT ANOTHER SUBSTRING SEARCH. The two questions here are
+/// exactly the two a parser answers and a text search cannot: which lints an
+/// `#[allow]` names, and whether a call site is real code rather than a comment
+/// or a string literal. `syn` is a dev-dependency for this test alone.
 #[test]
 fn e1_every_restriction_lint_allowance_suppresses_something() {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut checked = 0;
-    for entry in walk(&dir.join("src"))
+    let mut files_with_allowances = 0;
+
+    for path in walk(&dir.join("src"))
         .into_iter()
         .chain(walk(&dir.join("tests")))
     {
-        let source = std::fs::read_to_string(&entry).expect("reading a source file");
-        if !source.contains("allow(clippy::unwrap_used") {
+        let source = std::fs::read_to_string(&path).expect("reading a source file");
+        let parsed = syn::parse_file(&source)
+            .unwrap_or_else(|e| panic!("{path:?} is not parseable Rust, which E1 requires: {e}"));
+
+        let mut audit = Audit::default();
+        syn::visit::Visit::visit_file(&mut audit, &parsed);
+
+        if audit.allowed.is_empty() {
             continue;
         }
-        checked += 1;
-        let sites = source
-            .lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .filter(|l| l.contains(".unwrap()") || l.contains(".expect(") || l.contains("panic!"))
-            .count();
-        assert!(
-            sites > 0,
-            "{entry:?} allows unwrap_used/expect_used/panic and contains no such site. The \
-             allowance suppresses nothing, and its justification comment describes paths that \
-             do not exist"
-        );
+        files_with_allowances += 1;
+
+        for lint in &audit.allowed {
+            assert!(
+                lint.has_site(&audit),
+                "{path:?} allows {} and contains no {} site. The allowance suppresses \
+                 nothing, and its justification comment describes paths that do not exist",
+                lint.name(),
+                lint.site()
+            );
+        }
     }
+
     assert!(
-        checked >= 2,
-        "expected several allowance sites, saw {checked}"
+        files_with_allowances >= 12,
+        "E1 examined only {files_with_allowances} files carrying a restriction-lint \
+         allowance. Its denominator once came from one lint's spelling and silently \
+         excluded most of the crate; a shrinking denominator is how this check reported \
+         green over files it never opened"
     );
+}
+
+/// The three restriction lints this crate ever allows, each paired with the call
+/// site that would justify allowing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Restriction {
+    UnwrapUsed,
+    ExpectUsed,
+    Panic,
+}
+
+impl Restriction {
+    fn parse(path: &syn::Path) -> Option<Self> {
+        let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+        let (tool, lint) = match segments.as_slice() {
+            [tool, lint] => (tool.as_str(), lint.as_str()),
+            _ => return None,
+        };
+        if tool != "clippy" {
+            return None;
+        }
+        match lint {
+            "unwrap_used" => Some(Self::UnwrapUsed),
+            "expect_used" => Some(Self::ExpectUsed),
+            "panic" => Some(Self::Panic),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::UnwrapUsed => "clippy::unwrap_used",
+            Self::ExpectUsed => "clippy::expect_used",
+            Self::Panic => "clippy::panic",
+        }
+    }
+
+    fn site(self) -> &'static str {
+        match self {
+            Self::UnwrapUsed => "`.unwrap()`",
+            Self::ExpectUsed => "`.expect(..)`",
+            Self::Panic => "`panic!`",
+        }
+    }
+
+    fn has_site(self, audit: &Audit) -> bool {
+        match self {
+            Self::UnwrapUsed => audit.unwrap_sites > 0,
+            Self::ExpectUsed => audit.expect_sites > 0,
+            Self::Panic => audit.panic_sites > 0,
+        }
+    }
+}
+
+/// What one file allows, and what it actually contains.
+///
+/// Both halves come from the parsed syntax tree. A `.unwrap()` inside a string
+/// literal or a comment is not an expression and never reaches `visit_expr`,
+/// which is the whole reason this is not a text search.
+#[derive(Default)]
+struct Audit {
+    allowed: Vec<Restriction>,
+    unwrap_sites: usize,
+    expect_sites: usize,
+    panic_sites: usize,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for Audit {
+    fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
+        if attr.path().is_ident("allow") {
+            let _ = attr.parse_nested_meta(|meta| {
+                if let Some(lint) = Restriction::parse(&meta.path) {
+                    if !self.allowed.contains(&lint) {
+                        self.allowed.push(lint);
+                    }
+                }
+                Ok(())
+            });
+        }
+        syn::visit::visit_attribute(self, attr);
+    }
+
+    fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        match call.method.to_string().as_str() {
+            "unwrap" => self.unwrap_sites += 1,
+            "expect" => self.expect_sites += 1,
+            _ => {}
+        }
+        syn::visit::visit_expr_method_call(self, call);
+    }
+
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        if mac.path.is_ident("panic") {
+            self.panic_sites += 1;
+        }
+        syn::visit::visit_macro(self, mac);
+    }
 }
 
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

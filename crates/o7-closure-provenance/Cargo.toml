@@ -9,6 +9,15 @@ publish = false
 name = "o7_closure_provenance"
 path = "src/lib.rs"
 
+[dev-dependencies]
+# Parsing Rust with `contains()` is how E1 came to accept a `.unwrap()` that was
+# a string literal inside its own filter expression. `syn` is used ONLY by
+# `tests/correction_b2.rs`'s allowance audit, and only to answer two questions an
+# AST answers exactly and a substring search cannot: which lints an `#[allow]`
+# actually names, and whether a call site is real code rather than a comment or
+# a literal. Already in the workspace lock via `async-trait`; no new source.
+syn = { version = "2", features = ["full", "visit", "parsing"] }
+
 [dependencies]
 o7-closure-canonical = { path = "../o7-closure-canonical" }
 o7-closure-classifier = { path = "../o7-closure-classifier" }

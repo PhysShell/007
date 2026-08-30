@@ -448,14 +448,36 @@ fn mutants(specimen: &Value, family: Family, nested: Option<&str>) -> Vec<(Strin
         }
         Family::WrongMemberType => {
             for (key, value) in object {
-                if key == "sourceKind" || !value.is_string() {
+                // `sourceKind` has a family of its own; mutating it here would
+                // produce an artifact of a different KIND rather than one of this
+                // kind with a wrong member.
+                if key == "sourceKind" {
                     continue;
                 }
+                // THE MUTATION MUST ACTUALLY CHANGE THE TYPE, and this used to
+                // read `|| !value.is_string()`. That skipped every object, array
+                // and bool member — so no mutant ever carried
+                // `"retainedFields": 1234`, `"pagination": 1234`,
+                // `"coverageComplete": 1234` or `"user": 1234`, and a family
+                // named WrongMemberType meant
+                // "wrong type for string members except sourceKind".
+                //
+                // The exclusion had a real reason and the wrong shape: replacing
+                // a NUMBER with `1234` is a no-op, so the fix is to pick a
+                // replacement of a different type per member rather than to skip
+                // the members a single constant cannot mutate. Found by external
+                // review, in the file that exists to assert this surface is
+                // closed.
+                let (label, wrong) = if value.is_number() {
+                    ("a string", json!("not-a-number"))
+                } else {
+                    ("a number", json!(1234))
+                };
                 let mut m = specimen.clone();
                 m.as_object_mut()
                     .expect("object")
-                    .insert(key.clone(), json!(1234));
-                out.push((format!("/{key} is a number"), m));
+                    .insert(key.clone(), wrong);
+                out.push((format!("/{key} is {label}"), m));
             }
         }
         Family::WrongSchemaVersion => {
@@ -908,7 +930,37 @@ fn b2_retention_semantics_are_not_computed_for_an_artifact_that_may_not_exist() 
 /// contract gains a member.
 #[test]
 fn the_adversarial_surface_has_not_silently_shrunk() {
-    let cases: Vec<(&str, Value, Option<&str>)> = vec![
+    let cases = adversarial_cases();
+
+    let mut total = 0usize;
+    for (kind, specimen, nested) in &cases {
+        let mut per_kind = 0usize;
+        for family in ALL_FAMILIES {
+            per_kind += mutants(specimen, family, *nested).len();
+        }
+        assert!(
+            per_kind >= 6,
+            "{kind}: the family generates only {per_kind} mutants, which is fewer than one \
+             per adversarial class"
+        );
+        total += per_kind;
+    }
+    assert!(
+        total >= 100,
+        "the whole adversarial surface generates {total} mutants; RED-B4 measured 122 across \
+         eleven probes and a collapse to below a hundred means a specimen, a family or a \
+         kind was dropped"
+    );
+}
+
+/// The kinds and specimens the adversarial families range over.
+///
+/// ONE list, read by both the surface guard and the per-member denominator
+/// below. A second copy is a second denominator, and a denominator that can
+/// disagree with itself is how a family comes to generate nothing for a whole
+/// CLASS of member while every count stays comfortable.
+fn adversarial_cases() -> Vec<(&'static str, Value, Option<&'static str>)> {
+    vec![
         ("github-pull-request-head", pull_request_head(), None),
         ("github-actions-check", actions_check(), None),
         ("github-submitted-review", submitted_review(), Some("/user")),
@@ -936,27 +988,79 @@ fn the_adversarial_surface_has_not_silently_shrunk() {
             ),
             None,
         ),
-    ];
+    ]
+}
 
-    let mut total = 0usize;
-    for (kind, specimen, nested) in &cases {
-        let mut per_kind = 0usize;
-        for family in ALL_FAMILIES {
-            per_kind += mutants(specimen, family, *nested).len();
-        }
-        assert!(
-            per_kind >= 6,
-            "{kind}: the family generates only {per_kind} mutants, which is fewer than one \
-             per adversarial class"
+/// EVERY eligible member of every specimen gets exactly one mutant, and that
+/// mutant genuinely changes the member's JSON type.
+///
+/// THE COUNT WAS A PROXY AND THIS IS THE PROPERTY.
+/// `the_adversarial_surface_has_not_silently_shrunk` asserts totals — at least
+/// six mutants per kind, at least a hundred overall — and a total cannot see a
+/// family that skips a CLASS of member. `WrongMemberType` excluded every
+/// non-string value, so no mutant ever carried `"retainedFields": 1234` or
+/// `"pagination": 1234`, and both thresholds stayed satisfied while a large part
+/// of the surface did not exist. Found by external review, in the file whose
+/// purpose is to assert that this surface is closed.
+///
+/// Per member rather than in aggregate is the difference between "the generator
+/// produced a lot" and "the generator produced one for each thing it covers".
+#[test]
+fn every_eligible_member_gets_exactly_one_wrong_type_mutant() {
+    for (kind, specimen, _) in adversarial_cases() {
+        let object = specimen.as_object().expect("a specimen is an object");
+        let eligible: Vec<&String> = object
+            .keys()
+            .filter(|k| k.as_str() != "sourceKind")
+            .collect();
+
+        let generated = mutants(&specimen, Family::WrongMemberType, None);
+        assert_eq!(
+            generated.len(),
+            eligible.len(),
+            "{kind}: WrongMemberType generated {} mutant(s) for {} eligible member(s). A \
+             family that names a class and covers part of it is a family whose green result \
+             is about the part",
+            generated.len(),
+            eligible.len()
         );
-        total += per_kind;
+
+        for member in eligible {
+            let mut alone = generated.iter().filter(|(_, mutant)| {
+                let mutated = mutant.as_object().expect("a mutant is an object");
+                mutated.iter().all(|(k, v)| {
+                    if k == member {
+                        json_type(v) != json_type(&object[k])
+                    } else {
+                        v == &object[k]
+                    }
+                })
+            });
+            assert!(
+                alone.next().is_some(),
+                "{kind}: no mutant changes the TYPE of /{member} while leaving every other \
+                 member alone. Replacing a number with another number is not a type \
+                 mutation, and skipping the member is not one either"
+            );
+            assert!(
+                alone.next().is_none(),
+                "{kind}: more than one mutant changes /{member} alone; a duplicate inflates \
+                 the surface count without widening the surface"
+            );
+        }
     }
-    assert!(
-        total >= 100,
-        "the whole adversarial surface generates {total} mutants; RED-B4 measured 122 across \
-         eleven probes and a collapse to below a hundred means a specimen, a family or a \
-         kind was dropped"
-    );
+}
+
+/// The JSON type of a value, named by its variant.
+fn json_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }
 
 /// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
