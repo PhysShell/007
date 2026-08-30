@@ -1380,7 +1380,6 @@ it as open — necessary conditions presented as sufficient ones.
 | Which residual blocks which slice? | §23, and §21's order is read off it |
 | What remains OWED? | §23 |
 | Where does an expected digest come from? | §17 — the decision basis; never the store that holds the bytes |
-| May a retained-evidence interface return a digest? | §17 — no; the absence of the method is the mechanism |
 | Is a resolver trusted to return the right bytes? | §17 — no; the digest is recomputed and a mismatch refused |
 | Is naming a derived fact's inputs sufficient? | §18 — no; it is recomputed from them and disagreement refused |
 | What does a derivation that cannot read its inputs return? | §18 — no answer; never `false` |
@@ -1389,6 +1388,10 @@ it as open — necessary conditions presented as sufficient ones.
 | May a store return an artifact containing a digest? | §17 — yes; that is what an evidence chain is |
 | When may a reference inside a store-returned value be consumed? | §17 — subject relation, resolution, re-digest, shape, all four |
 | Is a resolved scan snapshot sufficient evidence for a scan? | §16, §17 — no; it must also answer THAT scan's query |
+| Does a replayed selection need a bound matcher implementation? | §13.1 — yes; `CANNOT_CHECK` on that axis is not a pass |
+| Must an absence claim's query be about the decision's observation? | §13, §17.1 — yes; `requiredObservationId` equals the basis's, exactly |
+| Must a reduced record and its authorising assessment share a policy version? | redaction §9.5 — yes; a version unrelated to its neighbours is decoration |
+| When is a derivation's implementation binding checked? | §18 — before the rule runs, not only in a registry test |
 | What does a successful head read carry? | §8.1 — a reference to a retained event, never a bare SHA |
 | Does an API-surface test establish the authority law? | §17 — no; it establishes only that the surface did not change unnoticed |
 | Is a correctly resolved artifact ready to be consumed? | §17 — no; its own fields must establish the relation it is consumed under |
@@ -1402,7 +1405,7 @@ it as open — necessary conditions presented as sufficient ones.
 | Is `schemaVersion` typed or checked? | §17.2 — checked against the registered versions of that kind |
 | What refuses a malformed reduced record? | §17.2 — a malformed-artifact refusal, never a blocked pointer |
 | Does the subject read need retention authority? | §5.3, §9.2 — yes; it is a gated kind, and the classification is what applies it |
-| Does `github-head-read-event` carry `schemaVersion` and `sourceKind`? | §7, §8.1 — yes, by §7's universal rule; §8.1 lists only the members that distinguish its two shapes |
+| Does `github-head-read-event` carry `schemaVersion` and `sourceKind`? | §8.1 — yes, listed outright in both the AVAILABLE and the FAILED block |
 
 ## 23. Residuals — OWED, not decided here
 
@@ -1948,12 +1951,21 @@ forms that crate has no reason to define were added, and each is parity-checked
 against its own contract. Runtime completeness bought with a fresh copy of a
 normative schema would trade one provenance defect for another.
 
-**Two contract readings were made explicit rather than assumed.** §8.1's
-`HeadReadEvent` blocks name `role`, `acquisition`, `observedAt` and the member
-that distinguishes the two shapes, and do not repeat `schemaVersion` and
-`sourceKind`; those are required anyway by §7's universal rule, which is the
-reading §9 states outright for the assessment. And §8.1's "MUST BE ABSENT" for a
-failed read's `snapshotDigest` is enforced by the closed key set rather than by a
+**One contract reading was made explicit, and one was retired by amending the
+document instead.** §8.1's `HeadReadEvent` blocks used to name `role`,
+`acquisition`, `observedAt` and the member distinguishing the two shapes, and not
+to repeat `schemaVersion` and `sourceKind`; a consumer supplied those two on §7's
+universal authority, and the parity test supplied them alongside the parsed
+members. That was a reading, recorded as one so it could be revisited.
+
+It was revisited. §8.1 now lists both members outright in both blocks and
+declares `sourceKind: github-head-read-event`, so nothing is added on the
+consumer's side and `contract_parity.rs` is a plain transcription check again.
+The reading is gone because the document says it, not because anybody stopped
+relying on it.
+
+And §8.1's "MUST BE ABSENT" for a failed read's `snapshotDigest` is enforced by
+the closed key set rather than by a
 second rule saying so. Both are asserted by the parity test, so a later revision
 of §8.1 that contradicts either fails the build instead of outliving it.
 
