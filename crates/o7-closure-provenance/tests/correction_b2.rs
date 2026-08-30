@@ -67,18 +67,32 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     admissibility, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
-    FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, RetentionBinding,
-    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
+    FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, ScanCompleteness,
+    ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+/// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
+///
+/// RED-B4R reshaped `binding_for` to hand over BYTES rather than a decoded
+/// struct, so a store can now express a binding that is absent, substituted or
+/// malformed — none of which the old two-string return could represent.
+fn binding_bytes(record_digest: &str, assessment_digest: &str) -> Value {
+    json!({
+        "schemaVersion": 1,
+        "sourceKind": "closure-retention-binding",
+        "recordDigest": record_digest,
+        "assessmentDigest": assessment_digest,
+    })
+}
 
 // ---- A store that can misbehave in each of the ways the law forbids.
 
 #[derive(Default)]
 struct Store {
     records: BTreeMap<String, Value>,
-    bindings: BTreeMap<String, RetentionBinding>,
+    bindings: BTreeMap<String, Value>,
 }
 
 impl Store {
@@ -109,13 +123,8 @@ impl Store {
     /// Bind `subject` (what the store will answer for) to a binding naming
     /// `names` — normally the same, deliberately different in S1.
     fn bind(&mut self, subject: &str, names: &str, assessment_digest: &str) {
-        self.bindings.insert(
-            subject.to_owned(),
-            RetentionBinding {
-                record_digest: names.to_owned(),
-                assessment_digest: assessment_digest.to_owned(),
-            },
-        );
+        self.bindings
+            .insert(subject.to_owned(), binding_bytes(names, assessment_digest));
     }
 }
 
@@ -123,7 +132,7 @@ impl RetainedEvidence for Store {
     fn resolve(&self, d: &str) -> Option<Value> {
         self.records.get(d).cloned()
     }
-    fn binding_for(&self, record_digest: &str) -> Option<RetentionBinding> {
+    fn binding_for(&self, record_digest: &str) -> Option<Value> {
         self.bindings.get(record_digest).cloned()
     }
 }
@@ -701,10 +710,18 @@ fn e2_retained_evidence_api_surface_is_exact_and_reviewed() {
         signatures,
         vec![
             "fn resolve(&self, digest: &str) -> Option<Value>".to_owned(),
-            "fn binding_for(&self, record_digest: &str) -> Option<RetentionBinding>".to_owned(),
+            "fn binding_for(&self, record_digest: &str) -> Option<Value>".to_owned(),
         ],
         "the RetainedEvidence surface changed. That is not forbidden — it is required to be \
          deliberate. Update this list and state, in the trait's own documentation, why the \
-         new method cannot become an authority merely by returning a value"
+         new method cannot become an authority merely by returning a value.\n\n\
+         CHANGED IN RED-B4R, and the old signature is no longer sacred: evidence proved it \
+         modelled the contract incorrectly. `binding_for` returned a decoded \
+         `RetentionBinding` of two strings, which let a store synthesize authority with no \
+         retained bytes behind it (CX-5/CR-1). §9.2 and §9.5 define the binding as a \
+         separately canonicalized, retained object, so the store now hands over BYTES that \
+         go through the same artifact door as everything else. Deliberately NOT a bare \
+         digest: a store answering with the digest to check itself against is the store \
+         choosing its own expectation, and hexadecimal does not make a claim independent."
     );
 }

@@ -98,12 +98,14 @@ pub struct DecisionBasis {
     pub bindings: Vec<DeclaredBinding>,
 }
 
-/// A `closure-retention-binding` as the store holds it — the authority on which
-/// assessment permitted a record to be kept.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RetentionBinding {
-    pub record_digest: String,
-    pub assessment_digest: String,
+/// What `authorised` currently reads out of the bytes a store hands over.
+///
+/// Named a CLAIM and not a binding on purpose: nothing has established that
+/// these two strings came from a conforming, retained
+/// `closure-retention-binding`. RED-B4R exists to make that gap fail loudly.
+struct RetentionBindingClaim {
+    record_digest: String,
+    assessment_digest: String,
 }
 
 /// Retained evidence, addressed by digest.
@@ -121,8 +123,24 @@ pub trait RetainedEvidence {
     /// the substitution this check exists for.
     fn resolve(&self, digest: &str) -> Option<Value>;
 
-    /// The retention binding authorising `record_digest`.
-    fn binding_for(&self, record_digest: &str) -> Option<RetentionBinding>;
+    /// The canonical bytes of the `closure-retention-binding` authorising
+    /// `record_digest`.
+    ///
+    /// A `Value` and not a decoded struct, and not a bare digest either.
+    ///
+    /// Redaction §9.2 and §9.5 define the binding as a separately canonicalized,
+    /// retained object with an exact four-member shape. Returning a pre-decoded
+    /// `RetentionBinding { record_digest, assessment_digest }` let a store
+    /// synthesize authority out of two strings with no retained bytes behind
+    /// them at all — the escape CX-5/CR-1 recorded. Returning a bare digest
+    /// would be worse in a subtler way: a store answering "here is the digest
+    /// you should check this against" is the store choosing its own expectation,
+    /// which is the very confusion §17's authority path exists to prevent.
+    /// Hexadecimal does not make a claim independent.
+    ///
+    /// So the store hands over BYTES, and they go through the same artifact
+    /// door as everything else.
+    fn binding_for(&self, record_digest: &str) -> Option<Value>;
 }
 
 /// Why a decision could not be evaluated from retained evidence.
@@ -392,16 +410,38 @@ fn authorised<E: RetainedEvidence>(
 ) -> bool {
     let requested = record.digest();
 
-    let Some(binding) = store.binding_for(requested) else {
+    let Some(binding_bytes) = store.binding_for(requested) else {
         into.push(Unresolved::NoRetentionBinding {
             record_digest: requested.to_owned(),
         });
         return false;
     };
 
-    // A binding is a claim about a particular record, and the store answering a
-    // request about A with a binding naming B is a well-formed pointer at the
-    // wrong subject — worse than a missing one, because it resolves.
+    // RED-B4R: THE BINDING IS NOT YET VALIDATED AS AN ARTIFACT.
+    //
+    // These two members are read straight out of whatever the store handed over
+    // — no digest, no closed §9.5 form, no registered schemaVersion or
+    // sourceKind, no resolution of retained bytes. That is CX-5/CR-1 preserved
+    // deliberately so `correction_b4r.rs` fails on it. The reshape above makes
+    // the escape EXPRESSIBLE; closing it is GREEN's work and is not authorised.
+    let binding = RetentionBindingClaim {
+        record_digest: binding_bytes
+            .pointer("/recordDigest")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        assessment_digest: binding_bytes
+            .pointer("/assessmentDigest")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    };
+
+    // THE SUBJECT RELATION, restored. A binding is a claim about a particular
+    // record, and the store answering a request about A with a binding naming B
+    // is a well-formed pointer at the wrong subject — worse than a missing one,
+    // because it resolves. This check predates RED-B4R and is unchanged; the
+    // reshape above must not quietly cost an existing refusal.
     if binding.record_digest != requested {
         into.push(Unresolved::BindingSubjectMismatch {
             requested: requested.to_owned(),

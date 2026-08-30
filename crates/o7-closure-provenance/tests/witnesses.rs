@@ -40,10 +40,24 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     admissibility, Admissible, DecisionBasis, DecisionInput, DeclaredBinding, DerivedFact,
-    RetainedEvidence, RetentionBinding, Unresolved,
+    RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+/// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
+///
+/// RED-B4R reshaped `binding_for` to hand over BYTES rather than a decoded
+/// struct, so a store can now express a binding that is absent, substituted or
+/// malformed — none of which the old two-string return could represent.
+fn binding_bytes(record_digest: &str, assessment_digest: &str) -> Value {
+    json!({
+        "schemaVersion": 1,
+        "sourceKind": "closure-retention-binding",
+        "recordDigest": record_digest,
+        "assessmentDigest": assessment_digest,
+    })
+}
 
 // ---- A store, and only the operations a store is allowed to have.
 
@@ -57,7 +71,7 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 struct Store {
     records: BTreeMap<String, Value>,
-    bindings: BTreeMap<String, RetentionBinding>,
+    bindings: BTreeMap<String, Value>,
     /// Digests whose stored bytes are deliberately not the ones the key names.
     substituted: BTreeMap<String, Value>,
 }
@@ -81,13 +95,8 @@ impl Store {
 
         let d = digest(object).expect("digest").as_str().to_owned();
         self.records.insert(d.clone(), object.clone());
-        self.bindings.insert(
-            d.clone(),
-            RetentionBinding {
-                record_digest: d.clone(),
-                assessment_digest,
-            },
-        );
+        self.bindings
+            .insert(d.clone(), binding_bytes(&d, &assessment_digest));
         d
     }
 
@@ -124,10 +133,7 @@ impl Store {
         self.records.insert(other_digest.clone(), other);
         self.bindings.insert(
             record_digest.to_owned(),
-            RetentionBinding {
-                record_digest: record_digest.to_owned(),
-                assessment_digest: other_digest.clone(),
-            },
+            binding_bytes(record_digest, &other_digest),
         );
         other_digest
     }
@@ -144,7 +150,7 @@ impl RetainedEvidence for Store {
             .or_else(|| self.records.get(d))
             .cloned()
     }
-    fn binding_for(&self, record_digest: &str) -> Option<RetentionBinding> {
+    fn binding_for(&self, record_digest: &str) -> Option<Value> {
         self.bindings.get(record_digest).cloned()
     }
 }

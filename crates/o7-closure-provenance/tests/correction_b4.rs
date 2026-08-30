@@ -117,18 +117,32 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     admissibility, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
-    FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, RetentionBinding,
-    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
+    FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, ScanCompleteness,
+    ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+/// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
+///
+/// RED-B4R reshaped `binding_for` to hand over BYTES rather than a decoded
+/// struct, so a store can now express a binding that is absent, substituted or
+/// malformed — none of which the old two-string return could represent.
+fn binding_bytes(record_digest: &str, assessment_digest: &str) -> Value {
+    json!({
+        "schemaVersion": 1,
+        "sourceKind": "closure-retention-binding",
+        "recordDigest": record_digest,
+        "assessmentDigest": assessment_digest,
+    })
+}
 
 // ---- Store.
 
 #[derive(Default)]
 struct Store {
     records: BTreeMap<String, Value>,
-    bindings: BTreeMap<String, RetentionBinding>,
+    bindings: BTreeMap<String, Value>,
 }
 
 impl Store {
@@ -144,10 +158,7 @@ impl Store {
         let record_digest = self.put(record);
         self.bindings.insert(
             record_digest.clone(),
-            RetentionBinding {
-                record_digest: record_digest.clone(),
-                assessment_digest,
-            },
+            binding_bytes(&record_digest, &assessment_digest),
         );
         record_digest
     }
@@ -157,7 +168,7 @@ impl RetainedEvidence for Store {
     fn resolve(&self, d: &str) -> Option<Value> {
         self.records.get(d).cloned()
     }
-    fn binding_for(&self, record_digest: &str) -> Option<RetentionBinding> {
+    fn binding_for(&self, record_digest: &str) -> Option<Value> {
         self.bindings.get(record_digest).cloned()
     }
 }

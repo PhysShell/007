@@ -14,10 +14,24 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     scan_verdict, staleness, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
-    RetentionBinding, ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead,
+    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+/// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
+///
+/// RED-B4R reshaped `binding_for` to hand over BYTES rather than a decoded
+/// struct, so a store can now express a binding that is absent, substituted or
+/// malformed — none of which the old two-string return could represent.
+fn binding_bytes(record_digest: &str, assessment_digest: &str) -> Value {
+    json!({
+        "schemaVersion": 1,
+        "sourceKind": "closure-retention-binding",
+        "recordDigest": record_digest,
+        "assessmentDigest": assessment_digest,
+    })
+}
 
 /// The minimum store these verdicts now need. B8 and B9 are about completeness
 /// ordering and missing reads; the evidence-binding escapes they do NOT cover are
@@ -25,7 +39,7 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 struct Store {
     records: BTreeMap<String, Value>,
-    bindings: BTreeMap<String, RetentionBinding>,
+    bindings: BTreeMap<String, Value>,
 }
 impl Store {
     fn put(&mut self, object: &Value) -> String {
@@ -62,13 +76,8 @@ impl Store {
             "observedAt": "2026-08-05T09:03:00Z",
         }));
         let d = self.put(object);
-        self.bindings.insert(
-            d.clone(),
-            RetentionBinding {
-                record_digest: d.clone(),
-                assessment_digest: assessment,
-            },
-        );
+        self.bindings
+            .insert(d.clone(), binding_bytes(&d.clone(), &assessment));
         d
     }
 }
@@ -76,7 +85,7 @@ impl RetainedEvidence for Store {
     fn resolve(&self, d: &str) -> Option<Value> {
         self.records.get(d).cloned()
     }
-    fn binding_for(&self, record_digest: &str) -> Option<RetentionBinding> {
+    fn binding_for(&self, record_digest: &str) -> Option<Value> {
         self.bindings.get(record_digest).cloned()
     }
 }
