@@ -363,6 +363,30 @@ fn basis(record: &str, pointer: &str) -> DecisionBasis {
     }
 }
 
+/// A candidate belonging to a relation-specific witness carries §9.2 authority.
+///
+/// THE SECOND FIXTURE GUARD IN THIS ROUND, and it exists because the first one's
+/// lesson generalised. R5 and R8 originally built their candidates with `put`
+/// rather than `retain_under`, so neither had a `RetentionBinding` — and
+/// `qualify_query` did not check candidate authority, so nobody noticed. The
+/// correct fix for that (RED-B4R.2's Q1) would have turned both witnesses green
+/// for candidate authority rather than for the replay disagreement and the
+/// zero-versus-non-empty contradiction they actually name.
+///
+/// The oracle is deliberately NOT `qualify_query`: it asks the one consumer
+/// whose §9.2 chain GREEN-B4R already closed — reading a pointer out of the
+/// record as a gated source — so it means the same thing before and after
+/// candidate authority is implemented.
+#[track_caller]
+fn assert_candidate_is_authorised(store: &Store, candidate: &str, what: &str) {
+    let outcome = admissibility(&basis(candidate, "/body"), store);
+    assert!(
+        matches!(outcome, Admissible::Yes { .. }),
+        "{what}: the candidate does not carry §9.2 authority, so this witness would go green \
+         on candidate authority rather than on the relation it names: got {outcome:?}"
+    );
+}
+
 #[track_caller]
 fn refuses(outcome: &Admissible, what: &str) {
     assert!(
@@ -611,7 +635,14 @@ fn r4_an_incomplete_snapshot_does_not_evidence_an_absence_claim() {
 #[test]
 fn r5_an_absence_claim_its_own_candidates_contradict_is_refused() {
     let mut store = Store::default();
-    let candidate = store.put(&review("synthetic-external-reviewer"));
+    // HARDENED in RED-B4R.2. `put` left this candidate with no RetentionBinding,
+    // so closing the candidate-authority escape would have turned R5 green for
+    // that and not for the contradiction it names.
+    let candidate = store.retain_under(
+        &review("synthetic-external-reviewer"),
+        &assessment(&REVIEW_REQ, "RETAIN", None),
+    );
+    assert_candidate_is_authorised(&store, &candidate, "R5");
     let s = store.put(&snapshot("COMPLETE", &[&candidate], &[]));
     refuses(&admissibility(&absence_basis(&s), &store), "R5");
 }
@@ -677,7 +708,12 @@ fn r7_the_scan_path_and_the_absence_path_agree_about_one_artifact() {
 #[test]
 fn r8_zero_claims_over_a_non_empty_matched_set_is_refused() {
     let mut store = Store::default();
-    let candidate = store.put(&review("synthetic-external-reviewer"));
+    // HARDENED in RED-B4R.2, for the same reason as R5.
+    let candidate = store.retain_under(
+        &review("synthetic-external-reviewer"),
+        &assessment(&REVIEW_REQ, "RETAIN", None),
+    );
+    assert_candidate_is_authorised(&store, &candidate, "R8");
     let s = store.put(&snapshot("COMPLETE", &[&candidate], &[&candidate]));
     let verdict = scan_verdict(
         &FalsificationSurfaceScan {
