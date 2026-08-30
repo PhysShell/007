@@ -598,6 +598,29 @@ the digest stops identifying content.
 - `assessedFields` means **successfully assessed**: the detector produced a
   result for that field. A field it started and abandoned is not assessed, and
   listing it would convert a crash into coverage.
+- **`observedAt` is an RFC 3339 `date-time` in UTC: a literal `Z` designator, no
+  fractional seconds, no numeric offset.** One instant, one spelling.
+
+  Earlier revisions declared the member and stopped there, and an implementation
+  read that as "a string". The two readings are not close: `observedAt` is the
+  only statement a retained assessment makes about WHEN the detector looked, and
+  a value nothing constrains supports no ordering, no freshness question, and no
+  comparison with any other event in the record set. A field that answers no
+  question is not a weaker version of one that does — it is a field whose
+  presence reads as evidence that the time was recorded.
+
+  The single spelling is the same argument §8 of provenance V1 settles for
+  `null` versus absent, and it is settled here for the same reason rather than
+  as a style preference. These objects are addressed by the digest of their
+  canonical form, so `2026-08-05T09:03:00Z`, `2026-08-05T09:03:00.000Z` and
+  `2026-08-05T11:03:00+02:00` are three digests for one fact. Admitting all
+  three means a store can hold three assessments that are the same assessment,
+  and a consumer comparing digests to ask "is this the object that authorised
+  the record?" gets three different answers to one question.
+
+  A conforming value therefore matches exactly `YYYY-MM-DDThh:mm:ssZ`, and the
+  date and time it names must exist. This is a **value domain**, checked where
+  the member is declared, and not a per-field exception in a consumer.
 - `findings` carry `field` and `findingId`. Every field a finding names MUST be
   in the §5.3 required set **and** in `assessedFields`, and it then appears in
   `blockedFields` per §7.1.

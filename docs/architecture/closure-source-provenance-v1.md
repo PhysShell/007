@@ -293,6 +293,24 @@ check whose denominator comes from the side that made the mistake. The two
 members above were being required by implementations on §7's authority and are
 now stated, so a reader does not have to derive them.
 
+**`observedAt` on either shape is an RFC 3339 `date-time` in UTC: a literal `Z`
+designator, no fractional seconds, no numeric offset.** The same value domain
+redaction policy V1 §9 freezes for the assessment's `observedAt`, and stated in
+both places because both are declarations of the member rather than one
+declaration and one reference.
+
+It matters more here than there. §8.1's whole purpose is to bracket an
+evaluation between two reads, and `observedAt` is what says which read came
+first. A value nothing constrains cannot order two events, so an implementation
+that accepts any string has an event pair whose bracket is decorative. The
+single spelling carries the same digest-identity argument §8 settles for `null`
+versus absent: two spellings of one instant are two digests for one fact, and a
+`HEAD_BEFORE` event that exists twice under two digests is two claims about one
+read.
+
+A conforming value matches exactly `YYYY-MM-DDThh:mm:ssZ`, and the date and time
+it names must exist.
+
 Requiring `snapshotDigest` on every event, as an earlier revision did, forces the
 adapter to invent one for a read that produced nothing — and the only digests
 available to invent are a stale one or a fabricated one. Both make a failed read
