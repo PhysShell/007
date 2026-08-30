@@ -1837,7 +1837,50 @@ pub fn staleness<E: RetainedEvidence>(
         }
     }
 
-    // A resolved disagreement is decisive even if the other end did not resolve.
+    // §8.1'S ORDER, AND IT IS THE CONTRACT'S RATHER THAN THIS FUNCTION'S.
+    //
+    //     any required read unresolved      ->  CannotCheck
+    //     else any resolved SHA != expected ->  Stale
+    //     else                              ->  NotStale
+    //
+    // WHAT USED TO BE HERE, recorded because deleting it silently would repeat
+    // the mistake. The disagreement scan ran FIRST, under the comment "a
+    // resolved disagreement is decisive even if the other end did not resolve",
+    // so a failed HEAD_AFTER beside a disagreeing HEAD_BEFORE returned `Stale`.
+    // §8.1 says that case is CANNOT_CHECK, and says it in as many words:
+    //
+    //     HEAD_AFTER failed  ->  CANNOT_CHECK
+    //                        ->  never a silent absence of STALE
+    //
+    // The comment is what makes it worth this many lines. It was not an
+    // oversight — somebody found the contract's answer unsatisfying and wrote a
+    // better-sounding rule into the code without amending the document, which is
+    // invisible to any review looking for MISSING checks. The check was there,
+    // commented and confident, implementing a law nobody agreed to.
+    //
+    // WHY THE CONTRACT IS RIGHT, since the old argument is superficially good. A
+    // HEAD_BEFORE disagreeing with `expected_sha` does not establish that the
+    // head moved DURING the evaluation. It establishes that the caller's
+    // expectation and the pre-read disagree, which has at least three causes:
+    // the head moved before the bracket opened, the expectation was stale
+    // already, or the subject was never at that SHA. `Stale` names exactly one
+    // of them, and the bracket is what distinguishes it. With one end missing
+    // there is no bracket, and returning the one verdict the evidence cannot
+    // distinguish is the confident answer this crate exists to refuse.
+    //
+    // `unresolved` is the test, not the `HeadRead::Failed` variant: a read that
+    // declared itself successful and named an event nobody retained also
+    // produced no SHA, and the question is whether a SHA was produced.
+    if !unresolved.is_empty() {
+        return Staleness::CannotCheck {
+            why: format!(
+                "{}; nothing witnesses that the head did not move, and an unread head is not \
+                 an unchanged one",
+                unresolved.join("; ")
+            ),
+        };
+    }
+
     for sha in &observed {
         if sha != expected_sha {
             return Staleness::Stale {
@@ -1846,17 +1889,7 @@ pub fn staleness<E: RetainedEvidence>(
         }
     }
 
-    if unresolved.is_empty() {
-        Staleness::NotStale
-    } else {
-        Staleness::CannotCheck {
-            why: format!(
-                "{}; nothing witnesses that the head did not move, and an unread head is not \
-                 an unchanged one",
-                unresolved.join("; ")
-            ),
-        }
-    }
+    Staleness::NotStale
 }
 
 /// One head read, followed from its event to the head projection that carries
