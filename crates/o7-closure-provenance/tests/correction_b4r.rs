@@ -107,6 +107,10 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
+use o7_closure_matcher::{
+    check_recorded_implementation, resolve as resolve_matcher, verify_implementation,
+    ImplementationCheck, RecordedQuerySnapshot,
+};
 use o7_closure_provenance::{
     admissibility, scan_verdict, Admissible, DecisionBasis, DecisionInput,
     FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict,
@@ -211,9 +215,44 @@ fn review(login: &str) -> Value {
     })
 }
 
+const MATCHER_ID: &str = "review-by-expected-author-login";
+const MATCHER_VERSION: &str = "1";
+
+/// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
+/// registry that binds it.
+///
+/// NOT a literal copied into this file. A hand-copied digest that has gone stale
+/// makes every snapshot below malformed, and a preregistered witness that fails
+/// because its fixture is malformed is a witness that proves nothing about the
+/// property it names.
+fn bound_implementation_digest() -> String {
+    let entry = resolve_matcher(MATCHER_ID, MATCHER_VERSION).expect("the matcher is registered");
+    verify_implementation(entry)
+        .expect("the registry is bound to its own implementation")
+        .as_str()
+        .to_owned()
+}
+
+/// A §13 query snapshot at `schemaVersion` 2, carrying the implementation digest
+/// §13.1 requires at that version.
+///
+/// WHY VERSION 2 AND NOT 1, and this is a fixture correction rather than a
+/// change of denominator. Every witness below is about what a consumer does with
+/// a snapshot whose *relations* do not support the decision — an INCOMPLETE
+/// enumeration, a candidate set that contradicts the claim, a matched set the
+/// caller reported as zero. A version-1 snapshot carries no
+/// `matcher.implementationDigest`, so replay reaches
+/// `ImplementationCheck::CannotCheck` and the consumer has an earlier, unrelated
+/// reason to refuse. The witnesses would then be red for a reason that is not
+/// the property, and a GREEN round could close them by leaving the property
+/// untouched.
+///
+/// So the snapshots here are made as strong as §13 allows: everything an
+/// implementation binding can establish IS established, and the only thing left
+/// wrong is the relation each witness is about.
 fn snapshot(enumeration: &str, all: &[&str], matched: &[&str]) -> Value {
     let mut s = json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "sourceKind": "github-query-snapshot",
         "surface": "pull-request-submitted-reviews",
         "requiredObservationId": "review/external",
@@ -226,8 +265,9 @@ fn snapshot(enumeration: &str, all: &[&str], matched: &[&str]) -> Value {
         },
         "enumeration": enumeration,
         "matcher": {
-            "id": "review-by-expected-author-login",
-            "version": "1",
+            "id": MATCHER_ID,
+            "version": MATCHER_VERSION,
+            "implementationDigest": bound_implementation_digest(),
             "parameters": {"expectedAuthorLogin": "synthetic-external-reviewer"},
         },
         "allReturnedSnapshotDigests": all,
@@ -239,6 +279,65 @@ fn snapshot(enumeration: &str, all: &[&str], matched: &[&str]) -> Value {
             .insert("incompleteReason".to_owned(), json!("page 2 fetch 502"));
     }
     s
+}
+
+/// Every query snapshot this file builds reaches `ImplementationCheck::Bound`.
+///
+/// The guard on the paragraph above, and it is executed rather than asserted in
+/// prose: `CannotCheck` is a *silent* pass-through — replay returns it happily —
+/// so a fixture that quietly lost its `implementationDigest` would still run,
+/// still refuse, and still look like a preregistered witness turning red.
+///
+/// It refuses the other direction too: a digest present and WRONG fails here
+/// with a drift error, which is the same defect wearing the opposite sign.
+///
+/// The snapshot goes through `from_canonical` first, so this checks the artifact
+/// these witnesses actually build rather than a matcher block assembled beside
+/// it. Candidates are not involved — the implementation binding is a property of
+/// the matcher block, and requiring the full candidate set would make the guard
+/// depend on the very lists each witness deliberately varies.
+#[track_caller]
+fn assert_implementation_is_bound(snapshot: &Value, what: &str) {
+    let d = digest(snapshot).expect("digest").as_str().to_owned();
+    let recorded = RecordedQuerySnapshot::from_canonical(snapshot, &d)
+        .unwrap_or_else(|e| panic!("{what}: the fixture is not a conforming §13 snapshot: {e}"));
+    let matcher = recorded.recorded_matcher();
+    let entry = resolve_matcher(matcher.id(), matcher.version())
+        .unwrap_or_else(|e| panic!("{what}: the fixture names an unregistered matcher: {e}"));
+    let status = check_recorded_implementation(entry, matcher.implementation())
+        .unwrap_or_else(|e| panic!("{what}: the fixture's implementation binding is wrong: {e}"));
+    assert!(
+        matches!(status, ImplementationCheck::Bound { .. }),
+        "{what}: the fixture reaches {status:?}, so a consumer could refuse it for a reason \
+         that is not the relation this witness is about"
+    );
+}
+
+/// Every shape the witnesses below ask the helper for, checked once.
+///
+/// A per-witness assertion would cover only the snapshots some witness happened
+/// to build; this covers the helper, which is where the defect was.
+#[test]
+fn every_query_fixture_carries_a_bound_implementation() {
+    let candidate = format!("sha256:{}", "a".repeat(64));
+    let fixtures = [
+        (
+            "INCOMPLETE, no candidates",
+            snapshot("INCOMPLETE", &[], &[]),
+        ),
+        ("COMPLETE, no candidates", snapshot("COMPLETE", &[], &[])),
+        (
+            "COMPLETE, a candidate and an empty matched set",
+            snapshot("COMPLETE", &[&candidate], &[]),
+        ),
+        (
+            "COMPLETE, a matched candidate",
+            snapshot("COMPLETE", &[&candidate], &[&candidate]),
+        ),
+    ];
+    for (what, fixture) in &fixtures {
+        assert_implementation_is_bound(fixture, what);
+    }
 }
 
 fn absence_basis(expected: &str) -> DecisionBasis {
