@@ -156,10 +156,13 @@ impl Store {
     fn retain_under(&mut self, record: &Value, assessment: &Value) -> String {
         let assessment_digest = self.put(assessment);
         let record_digest = self.put(record);
-        self.bindings.insert(
-            record_digest.clone(),
-            binding_bytes(&record_digest, &assessment_digest),
-        );
+        let binding = binding_bytes(&record_digest, &assessment_digest);
+        // RETAINED, not merely handed over. §9.2 makes the binding a separately
+        // retained object, and GREEN-B4R resolves it under its own digest before
+        // reading a member out of it — so a store that only produces the bytes
+        // at call time is producing a claim nobody kept.
+        self.put(&binding);
+        self.bindings.insert(record_digest.clone(), binding);
         record_digest
     }
 }

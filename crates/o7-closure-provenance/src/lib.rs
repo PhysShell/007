@@ -39,6 +39,8 @@
 // which is the observable form of the choke point.
 use crate::artifact::{ArtifactKind, Gate, ValidatedArtifact};
 use crate::derivations::DerivationInput;
+use o7_closure_canonical::digest;
+use o7_closure_matcher::{verify_matched, Candidate};
 use serde_json::{Map, Value};
 
 pub mod artifact;
@@ -99,16 +101,6 @@ pub struct DecisionBasis {
     pub bindings: Vec<DeclaredBinding>,
 }
 
-/// What `authorised` currently reads out of the bytes a store hands over.
-///
-/// Named a CLAIM and not a binding on purpose: nothing has established that
-/// these two strings came from a conforming, retained
-/// `closure-retention-binding`. RED-B4R exists to make that gap fail loudly.
-struct RetentionBindingClaim {
-    record_digest: String,
-    assessment_digest: String,
-}
-
 /// Retained evidence, addressed by digest.
 ///
 /// Deliberately minimal, and deliberately unable to volunteer a digest. Every
@@ -160,6 +152,18 @@ pub enum Unresolved {
     /// policy §9.2: bytes somebody kept, not evidence somebody was permitted to
     /// keep.
     NoRetentionBinding { record_digest: String },
+    /// The store produced binding bytes that are not retained under their own
+    /// digest.
+    ///
+    /// §9.2 makes the binding a **separately retained object**. Bytes a store
+    /// can manufacture at call time are a claim about a permission, not the
+    /// permission — and named separately from `NoSuchRecord` for the reason
+    /// `NoSuchAssessment` is: a bare digest in a refusal does not tell a reader
+    /// which link of the chain went missing.
+    NoSuchRetentionBinding {
+        record_digest: String,
+        binding_digest: String,
+    },
     /// The basis asserts an assessment the store's binding does not.
     BindingMismatch {
         record_digest: String,
@@ -188,17 +192,19 @@ pub enum Unresolved {
     // spellings of two universal facts would be the last trace of the design this
     // round removes: the assessment as the one artifact with a validation path of
     // its own.
-    /// A head read claims to have happened and its event is not retained.
-    NoSuchHeadReadEvent { event_digest: String },
-    /// The retained head-read event or its snapshot is not what its digest names,
-    /// or does not conform to §8.1.
-    MalformedHeadRead { event_digest: String, why: String },
-    /// A scan claims evidence that is not retained, is not what its digest names,
-    /// or does not answer the query the scan says it does.
-    UnevidencedScan {
-        snapshot_digest: String,
-        why: String,
-    },
+    // `NoSuchHeadReadEvent`, `MalformedHeadRead` and `UnevidencedScan` were here,
+    // and all three are REMOVED as unconstructible. They named head-read and
+    // scan facts, and both of those paths report through
+    // `Staleness::CannotCheck { why }` and `ScanVerdict::CannotCheck { why }` —
+    // not through this enum at all. They have had no construction site since
+    // GREEN-B4 moved those paths behind the door; this round noticed because it
+    // was checking that each of its own new refusals has one.
+    //
+    // A refusal nobody can produce is not a refusal. It is a promise, in public
+    // API, that this crate can tell a reader a fact it has no way to tell them —
+    // the same reason GREEN-B4 removed `AssessmentDigestMismatch` and
+    // `MalformedAssessment`. Pre-existing rather than introduced here, and
+    // recorded as such.
     /// The artifact is not a conforming closed form of its declared kind.
     ///
     /// Clause 1 of the round's law with the emphasis three review rounds showed
@@ -272,6 +278,18 @@ pub enum Unresolved {
     DerivationCannotRecompute { derivation: String, version: String },
     /// A derived fact names a derivation this crate cannot re-execute.
     UnknownDerivation { derivation: String, version: String },
+    /// A conforming §13 query snapshot whose state or whose own recorded claim
+    /// does not support the decision consuming it.
+    ///
+    /// Deliberately not a `MalformedArtifact`: §13 says an INCOMPLETE snapshot
+    /// is well-formed, and reporting it as malformed would tell a reader to go
+    /// looking for a producer bug that is not there. The artifact is fine; it is
+    /// the wrong evidence for this question.
+    QueryDoesNotSupportRole {
+        digest: String,
+        role: &'static str,
+        why: String,
+    },
 }
 
 /// The outcome of binding one decision basis to retained evidence.
@@ -315,6 +333,8 @@ enum ConsumedAs {
     SubjectHead,
     /// The §9 assessment a gated record's binding names.
     RetentionAssessment,
+    /// The §9.2 binding that names that assessment.
+    RetentionBinding,
 }
 
 impl ConsumedAs {
@@ -326,6 +346,7 @@ impl ConsumedAs {
             Self::HeadReadEvent => "a head-read event",
             Self::SubjectHead => "a subject head projection",
             Self::RetentionAssessment => "an authorising retention assessment",
+            Self::RetentionBinding => "a retention binding",
         }
     }
 
@@ -344,6 +365,7 @@ impl ConsumedAs {
                 kind == ArtifactKind::CompleteProjection("github-pull-request-head")
             }
             Self::RetentionAssessment => matches!(kind, ArtifactKind::RetentionAssessment),
+            Self::RetentionBinding => matches!(kind, ArtifactKind::RetentionBinding),
         }
     }
 }
@@ -451,38 +473,72 @@ fn authorised<E: RetainedEvidence>(
         return false;
     };
 
-    // RED-B4R: THE BINDING IS NOT YET VALIDATED AS AN ARTIFACT.
+    // §9.2'S CHAIN, AND THE ORDER IS THE CLAIM.
     //
-    // These two members are read straight out of whatever the store handed over
-    // — no digest, no closed §9.5 form, no registered schemaVersion or
-    // sourceKind, no resolution of retained bytes. That is CX-5/CR-1 preserved
-    // deliberately so `correction_b4r.rs` fails on it. The reshape above makes
-    // the escape EXPRESSIBLE; closing it is GREEN's work and is not authorised.
-    let binding = RetentionBindingClaim {
-        record_digest: binding_bytes
-            .pointer("/recordDigest")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        assessment_digest: binding_bytes
-            .pointer("/assessmentDigest")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
+    //     binding_for(record)  ->  bytes            a claim, and only a claim
+    //     digest(bytes)        ->  D                what makes it addressable
+    //     resolve(D)           ->  retained bytes   REQUIRED
+    //     validate(D, retained)                     the door
+    //     /recordDigest == record                   the subject relation
+    //
+    // Digesting the handed-over bytes and handing that digest back to the
+    // validator would be a tautology: any bytes are the bytes of their own
+    // digest. What makes this a check is `resolve(D)` — §9.2 says the binding is
+    // a SEPARATELY RETAINED object, so a store that can produce the bytes but
+    // cannot produce them under their own digest has produced a claim nobody
+    // kept. Before this round these two members were read straight out of the
+    // handed-over bytes: no digest, no closed §9.5 form, no registered version,
+    // no retention.
+    let Ok(binding_digest) = digest(&binding_bytes) else {
+        into.push(Unresolved::NoRetentionBinding {
+            record_digest: requested.to_owned(),
+        });
+        return false;
     };
+    let binding_digest = binding_digest.as_str().to_owned();
 
-    // THE SUBJECT RELATION, restored. A binding is a claim about a particular
-    // record, and the store answering a request about A with a binding naming B
-    // is a well-formed pointer at the wrong subject — worse than a missing one,
-    // because it resolves. This check predates RED-B4R and is unchanged; the
-    // reshape above must not quietly cost an existing refusal.
-    if binding.record_digest != requested {
-        into.push(Unresolved::BindingSubjectMismatch {
-            requested: requested.to_owned(),
-            binding_names: binding.record_digest.clone(),
+    // Absence reported as absence, and named. `NoSuchRecord` would say the same
+    // thing about the store and not say which artifact it was about — the
+    // distinction `NoSuchAssessment` already draws one link further down the
+    // chain.
+    if store.resolve(&binding_digest).is_none() {
+        into.push(Unresolved::NoSuchRetentionBinding {
+            record_digest: requested.to_owned(),
+            binding_digest,
         });
         return false;
     }
+
+    // Then the SAME door every other artifact comes through. §9.5's exact key
+    // set, its registered `schemaVersion` and `sourceKind`, and the role, are
+    // all checked there rather than by a path of this function's own. The
+    // binding is ungated, so this does not recurse into another binding lookup.
+    let Some(binding) = resolve_artifact(
+        store,
+        &binding_digest,
+        ConsumedAs::RetentionBinding,
+        declared,
+        into,
+    ) else {
+        return false;
+    };
+
+    // THE SUBJECT RELATION. A binding is a claim about a particular record, and
+    // the store answering a request about A with a binding naming B is a
+    // well-formed pointer at the wrong subject — worse than a missing one,
+    // because it resolves.
+    let names = binding.str_at("/recordDigest").unwrap_or_default();
+    if names != requested {
+        into.push(Unresolved::BindingSubjectMismatch {
+            requested: requested.to_owned(),
+            binding_names: names.to_owned(),
+        });
+        return false;
+    }
+    let assessment_digest = binding
+        .str_at("/assessmentDigest")
+        .unwrap_or_default()
+        .to_owned();
 
     // §9.2 requires the assessment's canonical bytes RETAINED and reachable: a
     // binding naming an assessment nobody kept authorises nothing, and reading
@@ -491,10 +547,10 @@ fn authorised<E: RetainedEvidence>(
     // this function reported NoSuchAssessment for a malformed one too, which
     // named the wrong fact about the store at the exact boundary where which
     // fact it is matters most.
-    if store.resolve(&binding.assessment_digest).is_none() {
+    if store.resolve(&assessment_digest).is_none() {
         into.push(Unresolved::NoSuchAssessment {
             record_digest: requested.to_owned(),
-            assessment_digest: binding.assessment_digest.clone(),
+            assessment_digest: assessment_digest.clone(),
         });
         return false;
     }
@@ -505,7 +561,7 @@ fn authorised<E: RetainedEvidence>(
     // path of its own.
     let Some(assessment) = resolve_artifact(
         store,
-        &binding.assessment_digest,
+        &assessment_digest,
         ConsumedAs::RetentionAssessment,
         declared,
         into,
@@ -516,7 +572,7 @@ fn authorised<E: RetainedEvidence>(
     if let Err(reason) = redaction::check_authorises(record, &assessment) {
         into.push(Unresolved::AssessmentDoesNotAuthorise {
             record_digest: requested.to_owned(),
-            assessment_digest: binding.assessment_digest.clone(),
+            assessment_digest: assessment_digest.clone(),
             why: reason,
         });
         return false;
@@ -526,17 +582,193 @@ fn authorised<E: RetainedEvidence>(
     // names another assessment is asserting a permission that was never granted,
     // and it resolves perfectly well if nobody compares the two.
     for asserted in declared.iter().filter(|b| b.record_digest == requested) {
-        if asserted.assessment_digest != binding.assessment_digest {
+        if asserted.assessment_digest != assessment_digest {
             into.push(Unresolved::BindingMismatch {
                 record_digest: requested.to_owned(),
                 declared: asserted.assessment_digest.clone(),
-                retained: binding.assessment_digest.clone(),
+                retained: assessment_digest.clone(),
             });
             return false;
         }
     }
 
     true
+}
+
+/// A query snapshot that has been QUALIFIED: not merely a conforming §13
+/// artifact, but one whose state and whose own recorded claim survive
+/// examination.
+///
+/// ```text
+/// ValidatedArtifact              the artifact is what it says it is
+///        |
+///        v  qualify_query
+///        v    §13  enumeration is COMPLETE
+///        v    §13  every declared candidate is retained and conforming
+///        v    §13  the matched subsequence RECOMPUTES to the claim
+///        |
+///  QualifiedQuery                 evidence about a query
+///        |
+///        +-- supports_absence        §13  the absence role
+///        +-- supports_claim_count    §16  the scan role
+/// ```
+///
+/// ONE CONSTRUCTION, TWO ROLES, AND THAT IS THE POINT. Before this the absence
+/// path resolved the snapshot through the structural door and stopped, while the
+/// scan path separately remembered to look at `/enumeration`. The same artifact
+/// was therefore refused as scan evidence and admitted as absence evidence — not
+/// because the two decisions need different things, but because one consumer
+/// remembered a clause and the other did not. A clause one path remembers is a
+/// procedure; this is the property.
+///
+/// The private field and the absent constructor are what make the two role
+/// predicates unreachable without qualification. A `ValidatedArtifact` alone can
+/// no longer produce `Admissible::Yes` over an absence claim or
+/// `ScanVerdict::ZeroClaimsMeaningful`.
+struct QualifiedQuery {
+    digest: String,
+    /// The matched subsequence as REPLAY produced it, having been checked
+    /// against the snapshot's own `matchedSnapshotDigests`. Carried rather than
+    /// read back out of the artifact: the recomputation is the fact, and the
+    /// claim is what it was checked against.
+    matched: Vec<String>,
+}
+
+impl QualifiedQuery {
+    /// §13: `NotProduced` is legal only when the named matcher, applied to the
+    /// retained candidate set, yields an EMPTY matched subsequence.
+    ///
+    /// A qualified query whose matched set is non-empty is perfectly good
+    /// evidence — of the opposite claim. The role is where that distinction
+    /// lives, which is why it is not folded into qualification.
+    fn supports_absence(&self) -> Result<(), String> {
+        if self.matched.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "the absence claim's own query snapshot {} matched {} candidate(s) {:?}; §13 \
+             permits NotProduced only over an empty matched subsequence, and evidence that \
+             contradicts a claim is not support for it",
+            self.digest,
+            self.matched.len(),
+            self.matched
+        ))
+    }
+
+    /// §16 and CX-4: a claim count supplied by the caller must agree with the
+    /// evidence the scan cites.
+    ///
+    /// ONLY THE NON-NEGOTIABLE HALF is asserted. The contract does not say that
+    /// one matched source yields exactly one falsification fact, so `claims`
+    /// larger or smaller than `matched.len()` is not by itself a contradiction.
+    /// What a loose `usize` may NOT do is independently turn retained, non-empty
+    /// evidence into zero — `0` is the value that means *this surface falsifies
+    /// nothing*, and it is the one value the evidence can refute on its own.
+    fn supports_claim_count(&self, claims: usize) -> Result<(), String> {
+        if claims > 0 || self.matched.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "the scan reports 0 claims and its evidence {} records {} matched candidate(s) \
+             {:?}; zero is the one count the evidence can refute by itself, and a caller's \
+             integer does not turn a retained match into an empty surface",
+            self.digest,
+            self.matched.len(),
+            self.matched
+        ))
+    }
+}
+
+/// The ONE place a query snapshot becomes evidence.
+///
+/// Everything before this is [`resolve_artifact`]'s: retained, re-digested, a
+/// conforming §13 object at a registered `schemaVersion`. This adds the three
+/// things §13 requires before such an object can support any decision at all.
+fn qualify_query<E: RetainedEvidence>(
+    snapshot: &ValidatedArtifact,
+    store: &E,
+) -> Result<QualifiedQuery, String> {
+    // 1. THE STATE. §13 puts the enumeration in the artifact and closes the
+    //    vocabulary to two, precisely because a reader that accepts an
+    //    unrecognised state has to decide what it means and every available
+    //    default is wrong: COMPLETE manufactures authority nobody claimed,
+    //    INCOMPLETE silently discards evidence.
+    match snapshot.str_at("/enumeration") {
+        Some("COMPLETE") => {}
+        Some(other @ "INCOMPLETE") => {
+            return Err(format!(
+                "the query snapshot records enumeration {other}; the artifact is the \
+                 authority on its own enumeration state, and a partial enumeration cannot \
+                 establish what was not there"
+            ))
+        }
+        Some(other) => {
+            return Err(format!(
+                "the query snapshot records enumeration {other:?}, which is not one of §13's \
+                 two states; refusing it is the only reading that does not invent a fact"
+            ))
+        }
+        None => {
+            return Err(
+                "the query snapshot carries no /enumeration, which §13 makes REQUIRED".to_owned(),
+            )
+        }
+    }
+
+    // 2. THE REPLAY RECORD, bound to the digest THIS artifact was validated
+    //    under. `recorded_query` returns `None` for any other kind, so the role
+    //    check upstream is not the only thing standing between a submitted
+    //    review and this function.
+    let recorded = snapshot
+        .recorded_query()
+        .ok_or_else(|| "not a query snapshot".to_owned())?
+        .map_err(|e| format!("the query snapshot does not bind to its own digest: {e}"))?;
+
+    // 3. THE CANDIDATE SET. §13 makes `allReturnedSnapshotDigests` the COMPLETE
+    //    candidate set, each retained. A candidate nobody kept cannot be
+    //    replayed against, so a claim resting on it is unreplayable rather than
+    //    merely unverified — and replaying over the subset that happened to load
+    //    is "partial success is not success" with the failure hidden inside a
+    //    shorter list.
+    let mut candidates = Vec::new();
+    for declared in recorded.recorded_matcher().all_returned_snapshot_digests() {
+        let Some(bytes) = store.resolve(declared) else {
+            return Err(format!(
+                "the query snapshot declares candidate {declared} and nothing is retained \
+                 under it; §13 requires the complete candidate set, so replay over the rest \
+                 would be a shorter list reported as a complete one"
+            ));
+        };
+        // The door, on the candidate itself, before the matcher sees it. Replay
+        // re-digests and shape-checks each candidate too — this is not that
+        // check repeated but the same law applied on this side of the boundary.
+        artifact::validate(declared, &bytes).map_err(|e| {
+            format!("the query snapshot's candidate {declared} did not pass validation: {e:?}")
+        })?;
+        candidates.push(Candidate {
+            declared_digest: declared.clone(),
+            snapshot: bytes,
+        });
+    }
+
+    // 4. THE CLAIM AGAINST THE EVIDENCE. `verify_matched` takes the claim from
+    //    the artifact rather than from this caller, so what it compares is the
+    //    snapshot's own `matchedSnapshotDigests` against the subsequence the
+    //    registered matcher produces now.
+    let verdict = verify_matched(recorded.recorded_matcher(), &candidates)
+        .map_err(|e| format!("the query snapshot does not replay: {e}"))?;
+    if !verdict.reproduced {
+        return Err(format!(
+            "the query snapshot claims {:?} matched and its own candidate set produces {:?}",
+            recorded.recorded_matcher().matched_snapshot_digests(),
+            verdict.replay.matched
+        ));
+    }
+
+    Ok(QualifiedQuery {
+        digest: snapshot.digest().to_owned(),
+        matched: verdict.replay.matched,
+    })
 }
 
 /// Read one pointer out of a VALIDATED record, honouring the per-field retention
@@ -814,16 +1046,28 @@ pub fn admissibility<E: RetainedEvidence>(basis: &DecisionBasis, store: &E) -> A
     // authority path this slice exists to establish, and reversing it would make
     // the store the author of its own expectation.
     if let Some(expected) = &basis.expected_query_digest {
-        if resolve_artifact(
+        if let Some(snapshot) = resolve_artifact(
             store,
             expected,
             ConsumedAs::ExpectedQuerySnapshot,
             &basis.bindings,
             &mut why,
-        )
-        .is_none()
-        {
-            // resolve_record has already recorded why.
+        ) {
+            // AND THEN THE ROLE. Structural validity was never the question here:
+            // §13 makes an INCOMPLETE snapshot a well-formed record that simply
+            // cannot evidence an absence, and a snapshot whose own candidates
+            // contradict its claim is well-formed too. This is the same
+            // qualification the scan path consumes, so the two cannot come to
+            // disagree about one artifact.
+            let qualified =
+                qualify_query(&snapshot, store).and_then(|q| q.supports_absence().map(|()| q));
+            if let Err(reason) = qualified {
+                why.push(Unresolved::QueryDoesNotSupportRole {
+                    digest: expected.clone(),
+                    role: ConsumedAs::ExpectedQuerySnapshot.name(),
+                    why: reason,
+                });
+            }
         }
     }
 
@@ -930,7 +1174,17 @@ pub fn scan_verdict<E: RetainedEvidence>(
         ScanCompleteness::Complete => {}
     }
 
-    if let Err(why) = check_scan_evidence(scan, store) {
+    // The evidence is qualified BEFORE the count is looked at, and the count is
+    // then checked against it. Reading the count first was the original defect:
+    // zero is the same number whether the surface was empty or the request died.
+    // Reading it after qualification but not against the evidence was the next
+    // one — CX-4 — where a caller's `usize` turned a snapshot recording a match
+    // into a fact about an empty surface.
+    let qualified = match check_scan_evidence(scan, store) {
+        Ok(qualified) => qualified,
+        Err(why) => return ScanVerdict::CannotCheck { why },
+    };
+    if let Err(why) = qualified.supports_claim_count(claims) {
         return ScanVerdict::CannotCheck { why };
     }
 
@@ -952,7 +1206,7 @@ pub fn scan_verdict<E: RetainedEvidence>(
 fn check_scan_evidence<E: RetainedEvidence>(
     scan: &FalsificationSurfaceScan,
     store: &E,
-) -> Result<(), String> {
+) -> Result<QualifiedQuery, String> {
     let mut why = Vec::new();
     let Some(snapshot) = resolve_artifact(
         store,
@@ -979,38 +1233,6 @@ fn check_scan_evidence<E: RetainedEvidence>(
             evidenced_surface.unwrap_or("<absent>")
         ));
     }
-    // THE STATE. `ScanCompleteness::Complete` is the CALLER's account of how far
-    // it got; §13 puts the enumeration in the snapshot and says the rule turns on
-    // that value. Without this a scan declares itself complete, names a real
-    // snapshot of exactly the right surface and pull request, resolves it,
-    // re-digests it — and the snapshot itself records that the enumeration was
-    // cut short. Zero claims then comes back as a fact about the surface.
-    //
-    // §13 also closes the vocabulary to two, precisely because a reader that
-    // accepts an unrecognised state has to decide what it means and every
-    // available default is wrong: COMPLETE manufactures authority the adapter
-    // never claimed, INCOMPLETE silently discards evidence.
-    match snapshot.pointer("/enumeration").and_then(Value::as_str) {
-        Some("COMPLETE") => {}
-        Some(other @ "INCOMPLETE") => {
-            return Err(format!(
-                "the {} scan says it completed and its own evidence records enumeration                  {other}; the artifact is the authority on its enumeration state",
-                scan.surface
-            ))
-        }
-        Some(other) => {
-            return Err(format!(
-                "the scan's evidence records enumeration {other:?}, which is not one of §13's                  two states; refusing it is the only reading that does not invent a fact"
-            ))
-        }
-        None => {
-            return Err(
-                "the scan's evidence carries no /enumeration, which §13 makes REQUIRED"
-                    .to_owned(),
-            )
-        }
-    }
-
     let repository = snapshot
         .pointer("/binding/repository")
         .and_then(Value::as_str);
@@ -1030,7 +1252,14 @@ fn check_scan_evidence<E: RetainedEvidence>(
         ));
     }
 
-    Ok(())
+    // THE STATE AND THE CLAIM, through the SAME qualification the absence path
+    // consumes. `ScanCompleteness::Complete` is the CALLER's account of how far
+    // it got; §13 puts the enumeration in the artifact and says the rule turns
+    // on that value. Everything above this line is the scan's own relation —
+    // surface and binding — because those are facts about a query the absence
+    // path does not have; everything §13 says about the artifact itself is not
+    // repeated here.
+    qualify_query(&snapshot, store)
 }
 
 // ---- Subject read — provenance V1 §8.1.

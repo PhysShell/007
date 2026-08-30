@@ -43,7 +43,10 @@
 //! project exists to refuse.
 
 use o7_closure_canonical::digest;
-use o7_closure_matcher::{check_shape, Member, ValueKind, QUERY_SNAPSHOT_SCHEMAS, SOURCE_SCHEMAS};
+use o7_closure_matcher::{
+    check_shape, MatchError, Member, RecordedQuerySnapshot, ValueKind, QUERY_SNAPSHOT_SCHEMAS,
+    SOURCE_SCHEMAS,
+};
 use serde_json::Value;
 
 // ---- Shapes Slice A does not define.
@@ -137,6 +140,34 @@ pub const REDUCED_RECORD: &[Member] = &[
     req("blockedFields", ValueKind::TextArray),
 ];
 
+/// §9.2/§9.5's `RetentionBinding`, and it is a RETAINED OBJECT rather than a
+/// pair of strings a store can produce on demand.
+///
+/// §9.2 says "binding is a **separate retained object**" and §9.5 gives it an
+/// exact four-member key set. Before this it was neither: `authorised` read
+/// `/recordDigest` and `/assessmentDigest` straight out of whatever bytes the
+/// store handed over, so a store could manufacture authority at call time — and
+/// the kind's own name appeared in this crate exactly once, in a doc comment.
+/// That is the shape of defect D1 exists to catch: a kind the contract declares
+/// in full, absent from the implementation's own idea of what kinds there are,
+/// and therefore invisible to every mutation over that idea.
+///
+/// THE NAME IS DELIBERATELY NOT SPELLED IN THIS COMMENT. D1 scans this file's
+/// source text, so prose naming a kind satisfies it exactly as an implementation
+/// of that kind does — which would let a later round delete the dispatch arm and
+/// keep a green witness on the strength of a paragraph. Found by mutating this
+/// file rather than by reading it: every occurrence of the name below is
+/// load-bearing, and removing them turns D1 red.
+pub const RETENTION_BINDING: &[Member] = &[
+    req("schemaVersion", ValueKind::Integer),
+    req(
+        "sourceKind",
+        ValueKind::OneOf(&["closure-retention-binding"]),
+    ),
+    req("recordDigest", ValueKind::Text),
+    req("assessmentDigest", ValueKind::Text),
+];
+
 /// §8.1's `HeadReadEvent`, `acquisition = AVAILABLE`.
 ///
 /// §8.1's block names `role`, `acquisition`, `snapshotDigest` and `observedAt`
@@ -192,6 +223,7 @@ pub enum ArtifactKind {
     QuerySnapshot,
     HeadReadEvent,
     RetentionAssessment,
+    RetentionBinding,
 }
 
 impl ArtifactKind {
@@ -203,7 +235,10 @@ impl ArtifactKind {
             // words. The event and the assessment are control artifacts: making
             // a permission depend on a permission is a recursion with no base
             // case that would outlive the evidence it protects.
-            Self::QuerySnapshot | Self::HeadReadEvent | Self::RetentionAssessment => Gate::Ungated,
+            Self::QuerySnapshot
+            | Self::HeadReadEvent
+            | Self::RetentionAssessment
+            | Self::RetentionBinding => Gate::Ungated,
         }
     }
 
@@ -215,6 +250,7 @@ impl ArtifactKind {
             Self::QuerySnapshot => "github-query-snapshot",
             Self::HeadReadEvent => "github-head-read-event",
             Self::RetentionAssessment => "closure-retention-assessment",
+            Self::RetentionBinding => "closure-retention-binding",
         }
     }
 }
@@ -259,6 +295,27 @@ impl ValidatedArtifact {
     #[must_use]
     pub fn str_at(&self, pointer: &str) -> Option<&str> {
         self.value.pointer(pointer).and_then(Value::as_str)
+    }
+
+    /// This snapshot as §13 replay's own bound record, for a query snapshot and
+    /// nothing else.
+    ///
+    /// A TYPED ACCESSOR RATHER THAN A RAW ESCAPE. Replay needs the whole object,
+    /// not a pointer out of it, and the removed `as_value()` is what that used
+    /// to mean. The difference is that this hands the bytes to another
+    /// validating constructor — `from_canonical` re-digests them against the
+    /// digest THIS artifact was validated under, then checks §13's closed shape
+    /// itself — instead of to a predicate that will read whatever it finds. The
+    /// kind check is what makes that true: on any other artifact there is no
+    /// value to return.
+    pub(crate) fn recorded_query(&self) -> Option<Result<RecordedQuerySnapshot, MatchError>> {
+        if self.kind != ArtifactKind::QuerySnapshot {
+            return None;
+        }
+        Some(RecordedQuerySnapshot::from_canonical(
+            &self.value,
+            &self.digest,
+        ))
     }
 
     // `as_value()` WAS HERE, and it is REMOVED.
@@ -406,6 +463,16 @@ fn check_closed_form(declared: &str, value: &Value) -> Result<ArtifactKind, Stri
             check_registered_version(value, &[1], declared)?;
             crate::redaction::check_assessment(value)?;
             Ok(ArtifactKind::RetentionAssessment)
+        }
+        "closure-retention-binding" => {
+            // §9.5: the three independently retained redaction objects each
+            // carry schemaVersion 1. Ungated for the same reason as the
+            // assessment — a permission that needs a permission is a recursion
+            // with no base case — and closed for the reason §9.4 gives one level
+            // up: an open schema is where the refused content goes.
+            check_registered_version(value, &[1], declared)?;
+            check_shape(value, RETENTION_BINDING, "")?;
+            Ok(ArtifactKind::RetentionBinding)
         }
         other => Err(format!(
             "{other:?} is not a kind this crate can read. An object declaring an \

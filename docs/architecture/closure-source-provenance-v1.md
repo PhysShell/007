@@ -259,22 +259,39 @@ it does not join this one because it happened to be in the same JSON response.
 **Two head reads are two acquisition events, not two pointers.** Retaining one
 snapshot and referring to it twice does not record that two reads were performed.
 V1 requires a durable event per read, and the event is **tagged by its
-acquisition status** — a read that did not happen has no bytes to point at:
+acquisition status** — a read that did not happen has no bytes to point at.
+
+The event is `sourceKind: github-head-read-event`, and it is a retained object in
+its own right, so §7 domain-separates it by its own content like any other:
 
 ```text
 HeadReadEvent, acquisition = AVAILABLE
+  schemaVersion
+  sourceKind      github-head-read-event
   role            HEAD_BEFORE | HEAD_AFTER
   acquisition     AVAILABLE
   snapshotDigest  REQUIRED
   observedAt
 
 HeadReadEvent, acquisition = FAILED
+  schemaVersion
+  sourceKind      github-head-read-event
   role            HEAD_BEFORE | HEAD_AFTER
   acquisition     FAILED
   reason          REQUIRED
   observedAt
   snapshotDigest  MUST BE ABSENT
 ```
+
+**Why the declaration is written here rather than inferred.** Earlier revisions
+of this section described the event's two shapes without ever naming its
+`sourceKind`, and an implementation that needed one supplied it — so the name a
+consumer dispatched on existed because somebody wrote it down in a crate, not
+because this document defined it. That is the same defect as a contract-declared
+kind an implementation forgets, pointing the other way: neither is caught by any
+check whose denominator comes from the side that made the mistake. The two
+members above were being required by implementations on §7's authority and are
+now stated, so a reader does not have to derive them.
 
 Requiring `snapshotDigest` on every event, as an earlier revision did, forces the
 adapter to invent one for a read that produced nothing — and the only digests
@@ -1068,6 +1085,67 @@ and "this is not a conforming object" were removed as unreachable: every artifac
 enters one way, so those are one fact each, not one per kind. A variant that
 survives only because one artifact still has a private validation path is the
 last trace of the design being removed.
+
+### 17.3 A validated artifact is not yet evidence
+
+§17.2 made clause 1 of §17.1 a construction. Clause 2 stayed a set of procedures,
+and the round after §17.2 found what that costs: a query snapshot recording
+`INCOMPLETE` is a **well-formed** §13 artifact — this document says so outright —
+and the falsification-scan path inspected `/enumeration` while the absence path
+did not. One artifact, two consumers, two answers. Not because the two decisions
+need different things, but because one consumer remembered a clause.
+
+So the same move applies one level up:
+
+```text
+        validated artifact           §17.2
+              |
+              v   qualify for the role
+              v     required state           enumeration, acquisition, outcome
+              v     subject relation         this record, this query, this head
+              v     replay agreement         the artifact's own claim recomputes
+              v     authority                §9.2's retained binding chain
+              |
+     role-qualified evidence
+              |
+              v
+   an admissible decision, a meaningful zero, a staleness verdict
+```
+
+**One qualification per artifact kind, consumed by every role that reads it.**
+The absence claim and the falsification scan ask different questions of a query
+snapshot — one wants an empty matched subsequence, the other wants a claim count
+that agrees with a non-empty one — but they ask them *of the same qualified
+artifact*. Splitting the qualification and giving each path the clauses somebody
+remembered is the defect, not the fix: a clause one path remembers and the other
+does not is a procedure, and the two paths will diverge again the next time one
+of them is edited.
+
+**The authority chain is an artifact chain.** §9.2's `RetentionBinding` is a
+retained object with a closed shape and a registered version, so it comes through
+the door like anything else:
+
+```text
+binding bytes the store hands over   ->  a CLAIM
+        digest                       ->  D
+        resolve(D)                   ->  retained bytes, REQUIRED
+        validate(D, retained)        ->  the door
+        /recordDigest == the record  ->  the subject relation
+```
+
+Digesting the handed-over bytes and handing that digest to the validator would be
+a tautology — any bytes are the bytes of their own digest. `resolve(D)` is what
+makes it a check, because §9.2 requires the binding to be *separately retained*:
+a store that can produce the bytes but cannot produce them under their own digest
+has produced a claim nobody kept.
+
+**A denominator drawn from the implementation confirms only that the
+implementation remembers itself.** `closure-retention-binding` is declared in
+full by redaction policy §9.2 and §9.5, and was absent from this crate's own idea
+of what artifact kinds exist — so no mutation over that idea could have found it.
+The mapping is checked in both directions, from the contracts' declared kinds to
+the implementation and back, and prose naming a kind does not count as
+implementing it.
 
 ## 18. Derived facts must not masquerade as source fields
 

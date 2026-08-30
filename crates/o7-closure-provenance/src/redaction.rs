@@ -539,6 +539,44 @@ pub(crate) fn check_authorises(
 
     let assessed = ordered_unique_at(assessment, "assessedFields")?;
     let is_assessed = |p: &str| assessed.iter().any(|a| a == p);
+
+    // §5.2 + §9.4: THE DENOMINATOR IS A CEILING AS WELL AS A FLOOR.
+    //
+    // The coverage rule below is one-directional — every `always` field must be
+    // assessed — and one direction is not the rule. §5.2 makes §5.3 the
+    // normative field set for a kind, and §9.4's whole argument is that an
+    // assessment is safe because every one of its fields is a closed vocabulary
+    // value, a boolean, a structural identifier or a JSON pointer, so no field's
+    // RANGE depends on the content being inspected. `assessedFields` is a list
+    // of pointers, and a pointer is only a structural identifier while it comes
+    // from a set fixed in advance. An entry chosen from the inspected content —
+    //
+    //     "/zz/ghp_the_credential"
+    //
+    // is syntactically a pointer, sorts wherever its author needs it to under
+    // §5.5, passes every other rule, and rides into a permanently retained
+    // closed-schema artifact. §9.4 closed the schema against exactly this and
+    // then left the one member whose values are a list open.
+    //
+    // The minimum invariant, and deliberately only the minimum: every assessed
+    // field is in `always ∪ present_only` for the record's kind. Nothing here
+    // says which of the two, and nothing here decides whether a present-only
+    // field WAS present — that is §7.1's job and the R2/R3 pair's.
+    //
+    // A kind with no §5.3 entry has an empty universe, so nothing can be
+    // legitimately assessed about it. Unreachable for the gated kinds — all five
+    // §8 projections have entries and `denominator_of` already refuses a reduced
+    // record whose locator kind has none — and stated rather than special-cased,
+    // because the alternative is a branch that admits everything when the
+    // denominator is missing.
+    if let Some(outside) = assessed.iter().find(|p| !in_required(p)) {
+        return Err(format!(
+            "/assessedFields names {outside:?}, which §5.3 does not give this kind. §5.2 \
+             fixes the denominator and §9.4 keeps an assessment safe by making every field's \
+             value range independent of the content inspected — a pointer chosen from that \
+             content is neither"
+        ));
+    }
     let flagged: Vec<&str> = assessment
         .pointer("/findings")
         .and_then(Value::as_array)

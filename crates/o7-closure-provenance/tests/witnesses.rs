@@ -95,8 +95,11 @@ impl Store {
 
         let d = digest(object).expect("digest").as_str().to_owned();
         self.records.insert(d.clone(), object.clone());
-        self.bindings
-            .insert(d.clone(), binding_bytes(&d, &assessment_digest));
+        let binding = binding_bytes(&d, &assessment_digest);
+        // RETAINED, not merely handed over: §9.2 makes the binding a separately
+        // retained object, and GREEN-B4R resolves it under its own digest.
+        self.put(&binding);
+        self.bindings.insert(d.clone(), binding);
         d
     }
 
@@ -131,10 +134,11 @@ impl Store {
             .insert("observedAt".to_owned(), json!("2026-08-05T11:11:11Z"));
         let other_digest = digest(&other).expect("digest").as_str().to_owned();
         self.records.insert(other_digest.clone(), other);
-        self.bindings.insert(
-            record_digest.to_owned(),
-            binding_bytes(record_digest, &other_digest),
-        );
+        let binding = binding_bytes(record_digest, &other_digest);
+        // RETAINED, not merely handed over: §9.2 makes the binding a separately
+        // retained object, and GREEN-B4R resolves it under its own digest.
+        self.put(&binding);
+        self.bindings.insert(record_digest.to_owned(), binding);
         other_digest
     }
 

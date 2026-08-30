@@ -123,8 +123,11 @@ impl Store {
     /// Bind `subject` (what the store will answer for) to a binding naming
     /// `names` — normally the same, deliberately different in S1.
     fn bind(&mut self, subject: &str, names: &str, assessment_digest: &str) {
-        self.bindings
-            .insert(subject.to_owned(), binding_bytes(names, assessment_digest));
+        let binding = binding_bytes(names, assessment_digest);
+        // RETAINED, not merely handed over: §9.2 makes the binding a separately
+        // retained object, and GREEN-B4R resolves it under its own digest.
+        self.put(&binding);
+        self.bindings.insert(subject.to_owned(), binding);
     }
 }
 

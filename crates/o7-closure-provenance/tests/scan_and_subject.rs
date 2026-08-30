@@ -76,8 +76,11 @@ impl Store {
             "observedAt": "2026-08-05T09:03:00Z",
         }));
         let d = self.put(object);
-        self.bindings
-            .insert(d.clone(), binding_bytes(&d.clone(), &assessment));
+        let binding = binding_bytes(&d, &assessment);
+        // RETAINED, not merely handed over: §9.2 makes the binding a separately
+        // retained object, and GREEN-B4R resolves it under its own digest.
+        self.put(&binding);
+        self.bindings.insert(d.clone(), binding);
         d
     }
 }

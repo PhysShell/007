@@ -24,7 +24,7 @@
 
 use o7_closure_provenance::artifact::{
     locator_shape, HEAD_READ_EVENT_AVAILABLE, HEAD_READ_EVENT_FAILED, LOCATOR_SHAPES,
-    REDUCED_RECORD,
+    REDUCED_RECORD, RETENTION_BINDING,
 };
 use o7_closure_provenance::redaction::{
     required_fields, MemberKind, ASSESSMENT_CONDITIONAL, ASSESSMENT_REQUIRED, REQUIRED_FIELDS,
@@ -338,6 +338,35 @@ fn the_reduced_record_shape_is_the_one_the_contract_states() {
     );
 }
 
+/// §9.2's `RetentionBinding` block.
+///
+/// The kind D1 was about. It is declared in full by §9.2 and again by §9.5, and
+/// for three rounds it appeared in this crate exactly once — in a doc comment —
+/// while `authorised` read two members straight out of whatever bytes a store
+/// handed over. A table nobody checks against the document is how that stays
+/// true after somebody adds the table.
+#[test]
+fn the_retention_binding_shape_is_the_one_the_contract_states() {
+    let block = block_starting("Binding is a **separate retained object**");
+    let contract = members_in(&block, &["RetentionBinding", "REQUIRED"]);
+    assert_eq!(
+        contract,
+        [
+            "schemaVersion",
+            "sourceKind",
+            "recordDigest",
+            "assessmentDigest"
+        ],
+        "§9.2's RetentionBinding block is not the four members it has always had"
+    );
+    let table: Vec<&str> = RETENTION_BINDING.iter().map(|m| m.name).collect();
+    assert_eq!(
+        table,
+        contract.iter().map(String::as_str).collect::<Vec<_>>(),
+        "§9.2's members, in order, are not the table's"
+    );
+}
+
 #[test]
 fn every_locator_shape_is_the_one_the_contract_states() {
     let block = block_starting("### 7.3 The locator is identity, not surviving evidence");
@@ -381,15 +410,18 @@ fn every_locator_shape_is_the_one_the_contract_states() {
 
 /// §8.1's two `HeadReadEvent` shapes.
 ///
-/// THE ONE READING THIS TEST ENCODES, stated so it is checkable rather than
-/// assumed: §8.1's blocks name `role`, `acquisition`, `observedAt` and the
-/// member that distinguishes the two variants, and do NOT repeat `schemaVersion`
-/// and `sourceKind`. Those are required anyway by provenance V1 §7, which
-/// obliges every canonical object to be domain-separated by its own content —
-/// the reading §9 states outright for the assessment, applied to the object §8.1
-/// defines. If a later revision of §8.1 lists them, this test keeps passing; if
-/// it says they are absent, this test fails and the reading gets revisited
-/// rather than silently outliving the document.
+/// THIS TEST USED TO ENCODE A READING, and it no longer has to. §8.1's blocks
+/// named `role`, `acquisition`, `observedAt` and the member distinguishing the
+/// two variants, and did not repeat `schemaVersion` and `sourceKind`; those were
+/// supplied here on §7's authority — every canonical object is domain-separated
+/// by its own content — and the doc comment recorded that as a reading so it
+/// could be revisited rather than silently outlive the document.
+///
+/// It was revisited. §8.1 now lists both members in both blocks and declares
+/// `sourceKind: github-head-read-event` outright, so nothing is added on this
+/// side and this is a plain transcription check again. If a later revision drops
+/// either member, the table stops matching the document instead of matching an
+/// assumption about it.
 #[test]
 fn the_head_read_event_shapes_are_the_ones_the_contract_states() {
     let block = {
@@ -406,13 +438,7 @@ fn the_head_read_event_shapes_are_the_ones_the_contract_states() {
         .split_once("HeadReadEvent, acquisition = FAILED")
         .unwrap_or_else(|| panic!("§8.1 no longer defines the FAILED variant"));
 
-    let universal = ["schemaVersion", "sourceKind"];
-
-    let mut expect_available: Vec<String> = universal.iter().map(|m| (*m).to_owned()).collect();
-    expect_available.extend(members_in(
-        available,
-        &["HeadReadEvent, acquisition = AVAILABLE"],
-    ));
+    let expect_available = members_in(available, &["HeadReadEvent, acquisition = AVAILABLE"]);
     let table: Vec<&str> = HEAD_READ_EVENT_AVAILABLE.iter().map(|m| m.name).collect();
     assert_eq!(
         table,
@@ -420,7 +446,7 @@ fn the_head_read_event_shapes_are_the_ones_the_contract_states() {
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        "the AVAILABLE event shape differs from §8.1 plus §7's universal members"
+        "the AVAILABLE event shape differs from §8.1"
     );
 
     // MUST BE ABSENT is a rule about the key set, and a closed key set is how it
@@ -436,16 +462,14 @@ fn the_head_read_event_shapes_are_the_ones_the_contract_states() {
         "§8.1's FAILED variant no longer excludes exactly snapshotDigest"
     );
 
-    let mut expect_failed: Vec<String> = universal.iter().map(|m| (*m).to_owned()).collect();
-    expect_failed.extend(
-        members_in(failed, &[])
-            .into_iter()
-            .filter(|m| !absent.contains(&m.as_str())),
-    );
+    let expect_failed: Vec<String> = members_in(failed, &[])
+        .into_iter()
+        .filter(|m| !absent.contains(&m.as_str()))
+        .collect();
     let table: Vec<&str> = HEAD_READ_EVENT_FAILED.iter().map(|m| m.name).collect();
     assert_eq!(
         table,
         expect_failed.iter().map(String::as_str).collect::<Vec<_>>(),
-        "the FAILED event shape differs from §8.1 plus §7's universal members"
+        "the FAILED event shape differs from §8.1"
     );
 }
