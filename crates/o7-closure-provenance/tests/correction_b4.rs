@@ -574,16 +574,28 @@ fn refused(probe: Probe, artifact: &Value) -> bool {
             matches!(verdict, ScanVerdict::CannotCheck { .. })
         }
         Probe::HeadEvent => {
-            let snapshot = store.put(&pull_request_head());
-            // The mutant already names a snapshot digest of its own; re-point it
-            // at this store's snapshot unless the mutation removed the member.
-            let mut event = artifact.clone();
-            if let Some(o) = event.as_object_mut() {
-                if o.contains_key("snapshotDigest") {
-                    o.insert("snapshotDigest".to_owned(), json!(snapshot));
-                }
+            // §5.3 gates github-pull-request-head, so §9.2 requires the snapshot
+            // to carry retention authority. RED-B4's fixture retained it with
+            // none, which modelled a world the contract forbids — that is CX-6,
+            // and the door now refuses it.
+            let snapshot = store.retain_under(
+                &pull_request_head(),
+                &retain_assessment("github-pull-request-head"),
+            );
+            // The specimen already names this snapshot's digest, because a10
+            // builds it from `digest(&pull_request_head())` and the store retains
+            // that exact object. An earlier revision re-pointed `snapshotDigest`
+            // here to be safe, which silently OVERWROTE the WrongMemberType
+            // mutation and made that whole mutant untested — a harness that
+            // repairs the specimen it is supposed to be breaking.
+            if let Some(named) = artifact.pointer("/snapshotDigest").and_then(Value::as_str) {
+                assert_eq!(
+                    named, snapshot,
+                    "fixture: an unmutated /snapshotDigest must already name this store's \
+                     snapshot, so that nothing here needs to repair the specimen"
+                );
             }
-            let before = store.put(&event);
+            let before = store.put(artifact);
             let mut after_event = head_read_event(&snapshot);
             after_event
                 .as_object_mut()
@@ -604,8 +616,11 @@ fn refused(probe: Probe, artifact: &Value) -> bool {
             )
         }
         Probe::HeadSnapshot => {
-            let mutated = store.put(artifact);
-            let conforming = store.put(&pull_request_head());
+            // Both snapshots carry authority, so the ONLY thing that can refuse a
+            // mutant is its own malformation.
+            let assessment = retain_assessment("github-pull-request-head");
+            let mutated = store.retain_under(artifact, &assessment);
+            let conforming = store.retain_under(&pull_request_head(), &assessment);
             let before = store.put(&head_read_event(&mutated));
             let mut after_event = head_read_event(&conforming);
             after_event
@@ -849,5 +864,70 @@ fn b2_retention_semantics_are_not_computed_for_an_artifact_that_may_not_exist() 
             .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
         "expected MalformedArtifact; PointerBlocked would mean the partition of a \
          forbidden object was consulted: got {why:?}"
+    );
+}
+
+/// ADDED IN GREEN-B4, and it guards the denominator rather than the law.
+///
+/// Every test above asserts that no mutant escaped. All of them would also pass
+/// if the families generated nothing at all — an empty adversarial surface has
+/// no escapes either, and that is the `failure -> empty set -> green` demon
+/// wearing the costume of a passing suite. So the size of the surface is itself
+/// asserted: shrinking a specimen, dropping a family, or removing a kind from
+/// the denominator fails here even when every remaining mutant is refused.
+///
+/// The floor is deliberately below the current count. It is a guard against
+/// collapse, not a transcription of a number that legitimately grows whenever a
+/// contract gains a member.
+#[test]
+fn the_adversarial_surface_has_not_silently_shrunk() {
+    let cases: Vec<(&str, Value, Option<&str>)> = vec![
+        ("github-pull-request-head", pull_request_head(), None),
+        ("github-actions-check", actions_check(), None),
+        ("github-submitted-review", submitted_review(), Some("/user")),
+        ("github-review-comment", review_comment(), Some("/user")),
+        ("github-issue-comment", issue_comment(), Some("/user")),
+        (
+            "github-reduced-source-record",
+            reduced_record(),
+            Some("/locator"),
+        ),
+        (
+            "closure-retention-assessment",
+            retain_assessment("github-submitted-review"),
+            Some("/detector"),
+        ),
+        (
+            "github-query-snapshot",
+            query_snapshot(),
+            Some("/pagination"),
+        ),
+        (
+            "github-head-read-event",
+            head_read_event(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            None,
+        ),
+    ];
+
+    let mut total = 0usize;
+    for (kind, specimen, nested) in &cases {
+        let mut per_kind = 0usize;
+        for family in ALL_FAMILIES {
+            per_kind += mutants(specimen, family, *nested).len();
+        }
+        assert!(
+            per_kind >= 6,
+            "{kind}: the family generates only {per_kind} mutants, which is fewer than one \
+             per adversarial class"
+        );
+        total += per_kind;
+    }
+    assert!(
+        total >= 100,
+        "the whole adversarial surface generates {total} mutants; RED-B4 measured 122 across \
+         eleven probes and a collapse to below a hundred means a specimen, a family or a \
+         kind was dropped"
     );
 }

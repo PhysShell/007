@@ -271,6 +271,13 @@ fn review_comment(stable_id: &str, owning_review: &str) -> Value {
         "user": {"id": "9000000901", "login": "synthetic-external-reviewer", "type": "User"},
         "authorAssociation": "NONE",
         "body": "here specifically\n",
+        // §8.4 makes commitId, originalCommitId and path REQUIRED. This fixture
+        // carried none of them and was accepted for as long as nothing validated
+        // the closed form — the same defect at the fixture level that RED-B4
+        // measured at the implementation level.
+        "commitId": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+        "originalCommitId": "1f2e3d4c5b6a798807162534435261708f9e0d1c",
+        "path": "crates/o7-closure-provenance/src/lib.rs",
         "createdAt": "2026-08-05T09:02:47Z",
         "updatedAt": "2026-08-05T09:02:47Z",
     })

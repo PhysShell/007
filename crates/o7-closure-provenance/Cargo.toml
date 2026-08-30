@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 o7-closure-canonical = { path = "../o7-closure-canonical" }
 o7-closure-classifier = { path = "../o7-closure-classifier" }
+o7-closure-matcher = { path = "../o7-closure-matcher" }
 serde_json = "1"
 
 [lints.rust]

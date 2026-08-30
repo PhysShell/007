@@ -25,6 +25,7 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 struct Store {
     records: BTreeMap<String, Value>,
+    bindings: BTreeMap<String, RetentionBinding>,
 }
 impl Store {
     fn put(&mut self, object: &Value) -> String {
@@ -32,19 +33,57 @@ impl Store {
         self.records.insert(d.clone(), object.clone());
         d
     }
+
+    /// Retain a GATED projection with the §9.2 authority it requires.
+    ///
+    /// This store used to answer `None` from `binding_for` unconditionally, and
+    /// staleness consumed head snapshots through it happily — which is CX-6
+    /// exactly, and external review found it by reading this helper rather than
+    /// the implementation. §5.3's gated set includes `github-pull-request-head`,
+    /// so a head projection needs an authorising assessment like any other
+    /// gated source, and the fixture that could not express one was modelling a
+    /// world the contract forbids.
+    fn retain_gated(&mut self, object: &Value) -> String {
+        let assessment = self.put(&json!({
+            "schemaVersion": 1,
+            "sourceKind": "closure-retention-assessment",
+            "redactionPolicyVersion": "1",
+            "detector": {
+                "id": "synthetic-detector",
+                "version": "1",
+                "configDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            },
+            "representation": "decoded-source-field-values",
+            "assessedFields": [
+                "/head/ref", "/head/repo/full_name", "/head/sha", "/number"
+            ],
+            "coverageComplete": true,
+            "outcome": "RETAIN",
+            "observedAt": "2026-08-05T09:03:00Z",
+        }));
+        let d = self.put(object);
+        self.bindings.insert(
+            d.clone(),
+            RetentionBinding {
+                record_digest: d.clone(),
+                assessment_digest: assessment,
+            },
+        );
+        d
+    }
 }
 impl RetainedEvidence for Store {
     fn resolve(&self, d: &str) -> Option<Value> {
         self.records.get(d).cloned()
     }
-    fn binding_for(&self, _record_digest: &str) -> Option<RetentionBinding> {
-        None
+    fn binding_for(&self, record_digest: &str) -> Option<RetentionBinding> {
+        self.bindings.get(record_digest).cloned()
     }
 }
 
 /// A retained head read: the §8.1 event plus the snapshot it points at.
 fn evidenced_head(store: &mut Store, role: &str, head_sha: &str) -> HeadRead {
-    let snapshot = store.put(&json!({
+    let snapshot = store.retain_gated(&json!({
         "schemaVersion": 1,
         "sourceKind": "github-pull-request-head",
         "repository": "PhysShell/007",

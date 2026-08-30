@@ -1098,7 +1098,20 @@ fn check_query_snapshot_shape(snapshot: &Value) -> Result<(), MatchError> {
 
 /// Both directions of a closed shape: nothing required missing, nothing outside
 /// the declared set present.
-fn check_shape(value: &Value, members: &[Member], path: &str) -> Result<(), String> {
+/// Check `value` against a closed member table, in both directions.
+///
+/// Every REQUIRED member present with the right type, every OPTIONAL-IF-PRESENT
+/// member correctly typed when present, never `null`, nested objects closed
+/// too — and no key outside the declared set.
+///
+/// PUBLIC BECAUSE SLICE B NEEDS EXACTLY THIS, AND A SECOND COPY WOULD BE A
+/// SECOND TRUTH. `o7-closure-provenance` validates the same §8 and §13 forms
+/// before admitting an artifact into decision semantics, over the same
+/// [`SOURCE_SCHEMAS`] and [`QUERY_SNAPSHOT_SCHEMAS`] tables that
+/// `tests/schema_parity.rs` checks against the contract. Re-transcribing either
+/// the tables or this walk into that crate would create a place for the two to
+/// drift silently, which is the failure the parity test exists to prevent.
+pub fn check_shape(value: &Value, members: &[Member], path: &str) -> Result<(), String> {
     let object = value
         .as_object()
         .ok_or_else(|| format!("{path}/ is not an object"))?;

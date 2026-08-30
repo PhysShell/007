@@ -480,7 +480,9 @@ fn ordered_unique(object: &Value, name: &str) -> Result<Vec<String>, String> {
 /// Returning the pair rather than just the set keeps the two cases visible at
 /// the call site, because the outcome rule differs between them and collapsing
 /// that was one of the escapes.
-fn denominator(record: &Value) -> Result<(bool, Option<&'static RequiredFields>), String> {
+fn denominator_of(
+    record: &crate::artifact::ValidatedArtifact,
+) -> Result<(bool, Option<&'static RequiredFields>), String> {
     let kind = record
         .pointer("/sourceKind")
         .and_then(Value::as_str)
@@ -526,13 +528,16 @@ fn denominator(record: &Value) -> Result<(bool, Option<&'static RequiredFields>)
 /// bounded above by `always ∪ present_only`. Refusing on the undeterminable half
 /// would refuse conformant records; asserting it would be a check that cannot
 /// see what it claims to.
-pub(crate) fn check_authorises(record: &Value, assessment: &Value) -> Result<(), String> {
-    let (is_reduced, required) = denominator(record)?;
+pub(crate) fn check_authorises(
+    record: &crate::artifact::ValidatedArtifact,
+    assessment: &crate::artifact::ValidatedArtifact,
+) -> Result<(), String> {
+    let (is_reduced, required) = denominator_of(record)?;
     let always: &[&str] = required.map_or(&[], |r| r.always);
     let present_only: &[&str] = required.map_or(&[], |r| r.present_only);
     let in_required = |p: &str| always.contains(&p) || present_only.contains(&p);
 
-    let assessed = ordered_unique(assessment, "assessedFields")?;
+    let assessed = ordered_unique_at(assessment, "assessedFields")?;
     let is_assessed = |p: &str| assessed.iter().any(|a| a == p);
     let flagged: Vec<&str> = assessment
         .pointer("/findings")
@@ -543,7 +548,7 @@ pub(crate) fn check_authorises(record: &Value, assessment: &Value) -> Result<(),
                 .collect()
         })
         .unwrap_or_default();
-    let outcome = member_str(assessment, "outcome")?;
+    let outcome = member_str_at(assessment, "outcome")?;
 
     // §9: every field a finding names MUST be in the §5.3 required set AND in
     // assessedFields. Not pedantry about well-formedness — a detector can only
@@ -606,7 +611,7 @@ pub(crate) fn check_authorises(record: &Value, assessment: &Value) -> Result<(),
     // reading CANNOT_ASSESS bound to an assessment reading BLOCK_SECRET, every
     // structural check passing, and the retained bytes disagreeing with what was
     // actually done.
-    let record_outcome = member_str(record, "outcome")?;
+    let record_outcome = member_str_at(record, "outcome")?;
     if record_outcome != outcome {
         return Err(format!(
             "§9.6: the record's own /outcome is {record_outcome:?} and its authorising \
@@ -629,7 +634,7 @@ pub(crate) fn check_authorises(record: &Value, assessment: &Value) -> Result<(),
         );
     }
 
-    let blocked = ordered_unique(record, "blockedFields")?;
+    let blocked = ordered_unique_at(record, "blockedFields")?;
     let is_blocked = |p: &str| blocked.iter().any(|b| b == p);
     let retained: Vec<String> = record
         .pointer("/retainedFields")
@@ -683,4 +688,45 @@ pub(crate) fn check_authorises(record: &Value, assessment: &Value) -> Result<(),
     }
 
     Ok(())
+}
+
+// ---- The same two readers, over a validated artifact.
+//
+// Deliberately thin wrappers rather than a generic: the whole point of
+// `ValidatedArtifact` is that it is NOT interchangeable with `Value`, and a
+// trait letting both satisfy one bound would hand that back.
+
+fn member_str_at<'a>(
+    artifact: &'a crate::artifact::ValidatedArtifact,
+    name: &str,
+) -> Result<&'a str, String> {
+    artifact
+        .str_at(&format!("/{name}"))
+        .ok_or_else(|| format!("/{name} is not a string"))
+}
+
+fn ordered_unique_at(
+    artifact: &crate::artifact::ValidatedArtifact,
+    name: &str,
+) -> Result<Vec<String>, String> {
+    let items = artifact
+        .pointer(&format!("/{name}"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("/{name} is not an array"))?;
+    let mut out: Vec<String> = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let text = item
+            .as_str()
+            .ok_or_else(|| format!("/{name}[{i}] is not a string"))?;
+        if let Some(previous) = out.last() {
+            if previous.as_str() >= text {
+                return Err(format!(
+                    "§5.5: /{name} must be unique and in ascending lexical order; \
+                     {previous:?} is followed by {text:?}"
+                ));
+            }
+        }
+        out.push(text.to_owned());
+    }
+    Ok(out)
 }

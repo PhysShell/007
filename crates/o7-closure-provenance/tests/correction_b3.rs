@@ -294,7 +294,7 @@ fn s8_an_assessment_with_an_extra_top_level_member_is_not_conforming() {
     let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
         "an assessment carrying a member outside §9's closed key set is non-conformant, and \
          §9.4 names that member as the exfiltration channel: got {why:?}"
     );
@@ -314,7 +314,7 @@ fn s9_an_assessment_with_an_extra_member_inside_detector_is_not_conforming() {
     let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
         "got {why:?}"
     );
 }
@@ -329,7 +329,7 @@ fn s10_findings_present_on_a_retain_outcome_is_not_conforming() {
     let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
         "findings is present IFF outcome is BLOCK_SECRET; a RETAIN record carrying findings \
          claims both that something was found and that nothing was: got {why:?}"
     );
@@ -356,7 +356,7 @@ fn s11_incomplete_coverage_without_a_failure_code_is_not_conforming() {
     let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
         "got {why:?}"
     );
 }
@@ -383,7 +383,7 @@ fn s12_a_finding_carrying_more_than_field_and_finding_id_is_not_conforming() {
     let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
         "got {why:?}"
     );
 }
@@ -921,9 +921,10 @@ fn s30_an_absent_present_only_field_is_not_a_hole_in_the_partition() {
         "schemaVersion": 1,
         "sourceKind": "github-reduced-source-record",
         "locatorKind": "github-actions-check",
+        // §7.3 gives this kind repository + stableId and NO pullRequest. The
+        // fixture carried one and nothing checked the locator's closed shape.
         "locator": {
             "repository": "PhysShell/007",
-            "pullRequest": "9001",
             "stableId": "9100000201",
         },
         "redactionPolicyVersion": "1",
@@ -1031,7 +1032,7 @@ fn s33_an_outcome_its_own_findings_and_coverage_do_not_produce_is_refused() {
     let why = refused(&admissibility(&basis(&d, "/body"), &store)).to_vec();
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
         "got {why:?}"
     );
 }
@@ -1056,7 +1057,7 @@ fn s34_block_secret_with_an_empty_findings_list_is_refused() {
     let why = refused(&admissibility(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::MalformedArtifact { .. })),
         "got {why:?}"
     );
 }

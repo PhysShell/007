@@ -1012,6 +1012,63 @@ Three consequences, each of which was a live escape before it was written down:
   and query whose own `enumeration` reads `INCOMPLETE`, passes every content
   check and returns zero claims as a fact about the surface.
 
+### 17.2 Validation is a door, not a habit
+
+§17.1 says what must be established before an artifact influences a decision.
+This says where. The distinction is not pedantry: three correction rounds stated
+§17.1 correctly and implemented it as separate checks in separate paths, and each
+round found the next path it had not been carried to.
+
+```text
+RetainedEvidence::resolve(..)
+        |
+        v   digest identity
+        v   known artifact kind
+        v   exact closed form — required, optional-if-present, no unknown
+        v      members, nested closure too, REGISTERED schemaVersion
+        v   gate classification
+        |
+   validated artifact
+        |
+        +--> retention authority      +--> scan semantics
+        +--> pointer semantics        +--> head-read semantics
+        +--> query replay             +--> subject and relation checks
+```
+
+**A raw resolved object is not an admissible argument to any semantic path.**
+Not "should not be" — must not be expressible as one. A consumer added next year
+cannot reach pointer, scan, head or relation semantics without coming through
+the door, because the type the door returns is the only thing those paths accept
+and nothing else can construct it.
+
+Three consequences that are easy to miss, each of which was a defect before it
+was written down:
+
+- **Order is part of the claim.** A malformed reduced record must be refused as
+  a malformed artifact and never as a blocked pointer. `PointerBlocked` is a
+  statement about the retention semantics of that record, so producing it means
+  the partition was consulted — the object was treated *as* a reduced record —
+  before anything established that it is one.
+
+- **The gate side is a property of the kind, not of the call site.** §5.3's
+  gated set includes `github-pull-request-head`, so the subject read acquires
+  §9.2 authority by being a gated kind and not by a binding lookup written into
+  the head path. A check placed at one call site is a check the next call site
+  will not have.
+
+- **The version is part of admissibility.** §8 and §13 both give a changed shape
+  a new version, so `schemaVersion` is matched against the REGISTERED values of
+  that kind rather than merely typed as an integer. A version this reader does
+  not know describes a key set nobody agreed to, and checking it against a
+  neighbouring version's table is checking the wrong contract.
+
+**A refusal vocabulary shrinks when a door is added, and that is the point.**
+Assessment-specific spellings of "these bytes are not the ones the digest names"
+and "this is not a conforming object" were removed as unreachable: every artifact
+enters one way, so those are one fact each, not one per kind. A variant that
+survives only because one artifact still has a private validation path is the
+last trace of the design being removed.
+
 ## 18. Derived facts must not masquerade as source fields
 
 `ReviewEvidence.carries_finding` is **not** a GitHub API field. It is derived,
@@ -1231,6 +1288,12 @@ it as open — necessary conditions presented as sufficient ones.
 | Is a scan's own COMPLETE its authority? | §13, §16 — no; the evidencing snapshot's `enumeration` is |
 | May any retained record fill the expected-query-snapshot role? | §13 — no; only a `github-query-snapshot` |
 | What does a check with no reachable failure establish? | §24.8 — nothing; it is removed, not witnessed |
+| May a raw resolved object reach any semantic path? | §17.2 — no; the door's type is the only admissible argument |
+| Where is closed-form validation performed? | §17.2 — once, before role, authority and every relation check |
+| Is `schemaVersion` typed or checked? | §17.2 — checked against the registered versions of that kind |
+| What refuses a malformed reduced record? | §17.2 — a malformed-artifact refusal, never a blocked pointer |
+| Does the subject read need retention authority? | §5.3, §9.2 — yes; it is a gated kind, and the classification is what applies it |
+| Does `github-head-read-event` carry `schemaVersion` and `sourceKind`? | §7, §8.1 — yes, by §7's universal rule; §8.1 lists only the members that distinguish its two shapes |
 
 ## 23. Residuals — OWED, not decided here
 
@@ -1719,3 +1782,75 @@ reduced record and a complete projection are keyed in different vocabularies. Th
 fixtures had been mixing them since the reduced record was first written, and
 every check that existed accepted it. Recorded as redaction policy §7.5, with the
 asymmetry itself as a residual there.
+
+
+### 24.9 Added in the choke-point round
+
+The fourth round is the first that was not a list of escapes. The owner's ruling
+on the third read, in substance: the seven findings deduplicate to three, two of
+them one architectural defect, and the answer is not a fourth patch round.
+
+**What RED-B4 measured, before anything was fixed.** Every artifact kind this
+crate can admit, crossed with one generated adversarial family — unknown
+top-level member, unknown nested member, each required member removed in turn,
+wrong member type, wrong `schemaVersion`, wrong `sourceKind` or role:
+
+```text
+github-review-comment                       22 malformed mutants admitted
+github-submitted-review                     16
+github-query-snapshot   expected-query      15
+github-issue-comment                        14
+github-pull-request-head  gated source      12
+github-actions-check                        10
+github-query-snapshot   scan evidence       10
+github-head-read-event                       8
+github-reduced-source-record                 7
+github-pull-request-head  subject read       7
+closure-retention-assessment                 1
+                                           ---
+                                           122
+```
+
+The last row is the diagnosis as a number. The previous round applied clause 1
+to the assessment and to nothing else, so the assessment admitted one malformed
+mutant and every other artifact admitted between seven and twenty-two. The
+finding was not "a check was missed" but "whole-object validation was made a
+special case of one artifact".
+
+**Generated rather than enumerated, and that is the methodological point.** A
+hand-written list of adversarial cases is a list of what somebody thought of,
+which is the failure being corrected. A table of kinds crossed with a table of
+mutations has no such ceiling: adding a kind adds its whole family, and a kind
+never added is visibly absent from one list rather than invisibly absent from
+sixty. The size of that surface is itself asserted, because a suite whose
+families generate nothing has no escapes either.
+
+**The acceptance criterion was not "the witnesses pass".** It was that removing
+the door turns them red. Each artifact kind's dispatch was bypassed in turn and
+the suite re-run; every bypass was caught, as was removing the whole closed-form
+call, flattening the gate classification to ungated, and accepting any kind in
+any role. A choke point nothing proves is a choke point is a new sign over the
+old corridor.
+
+**One transcription, still.** The five §8 projections and the §13 query snapshot
+are read from the matcher crate's tables — the ones its own parity test already
+checks against this document — rather than transcribed a second time. Only the
+forms that crate has no reason to define were added, and each is parity-checked
+against its own contract. Runtime completeness bought with a fresh copy of a
+normative schema would trade one provenance defect for another.
+
+**Two contract readings were made explicit rather than assumed.** §8.1's
+`HeadReadEvent` blocks name `role`, `acquisition`, `observedAt` and the member
+that distinguishes the two shapes, and do not repeat `schemaVersion` and
+`sourceKind`; those are required anyway by §7's universal rule, which is the
+reading §9 states outright for the assessment. And §8.1's "MUST BE ABSENT" for a
+failed read's `snapshotDigest` is enforced by the closed key set rather than by a
+second rule saying so. Both are asserted by the parity test, so a later revision
+of §8.1 that contradicts either fails the build instead of outliving it.
+
+**Fixtures had been non-conformant since they were written.** The review-comment
+specimen carried none of §8.4's REQUIRED `commitId`, `originalCommitId` or
+`path`, and a reduced record for a check run carried a `pullRequest` its §7.3
+locator does not have. Every check that existed accepted both. That is the same
+defect one level down from the one the round is about, and it is worth recording
+that the door found it rather than a reviewer.

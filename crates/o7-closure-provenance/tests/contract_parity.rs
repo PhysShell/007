@@ -22,6 +22,10 @@
 // is the failure-to-empty-set-to-green demon the whole crate is about.
 #![allow(clippy::expect_used, clippy::panic)]
 
+use o7_closure_provenance::artifact::{
+    locator_shape, HEAD_READ_EVENT_AVAILABLE, HEAD_READ_EVENT_FAILED, LOCATOR_SHAPES,
+    REDUCED_RECORD,
+};
 use o7_closure_provenance::redaction::{
     required_fields, MemberKind, ASSESSMENT_CONDITIONAL, ASSESSMENT_REQUIRED, REQUIRED_FIELDS,
 };
@@ -262,5 +266,186 @@ fn the_closed_vocabularies_are_the_ones_the_contract_states() {
         table("representation", ASSESSMENT_REQUIRED),
         expected("representation"),
         "§9.3's representation vocabulary is not the table's"
+    );
+}
+
+// ---- The three forms Slice A has no reason to define.
+//
+// The five §8 projections and the §13 query snapshot are NOT re-checked here:
+// they are `o7-closure-matcher`'s tables, checked against the contract by that
+// crate's `schema_parity.rs`, and `artifact.rs` reads them rather than copying
+// them. Adding a second assertion over the same table here would create the
+// second truth this file exists to prevent — one more place to update, and one
+// more place to forget.
+
+const PROVENANCE: &str = include_str!("../../../docs/architecture/closure-source-provenance-v1.md");
+
+/// Members named in a contract block: the first whitespace-run-delimited field
+/// of each line, when it reads as an identifier. Everything after it is the
+/// document's gloss on the member, not another member.
+fn members_in(block: &str, strip: &[&str]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in block.lines() {
+        let mut rest = line.trim();
+        for prefix in strip {
+            if let Some(r) = rest.strip_prefix(prefix) {
+                rest = r.trim();
+            }
+        }
+        if rest.is_empty() {
+            continue;
+        }
+        for field in rest.split("  ") {
+            let field = field.trim();
+            if field.is_empty() {
+                continue;
+            }
+            // An identifier is a member; anything else is prose.
+            if field.chars().all(|c| c.is_ascii_alphanumeric())
+                && field.chars().next().is_some_and(char::is_lowercase)
+            {
+                if !out.iter().any(|m| m == field) {
+                    out.push(field.to_owned());
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn the_reduced_record_shape_is_the_one_the_contract_states() {
+    let block = block_starting("## 7. The reduced source record");
+    let contract = members_in(
+        &block,
+        &[
+            "sourceKind           github-reduced-source-record",
+            "REQUIRED",
+        ],
+    );
+    assert!(
+        contract.len() >= 9,
+        "§7 parsed to {} members, fewer than the contract has ever had: {contract:?}",
+        contract.len()
+    );
+    let table: Vec<&str> = REDUCED_RECORD.iter().map(|m| m.name).collect();
+    assert_eq!(
+        table,
+        contract.iter().map(String::as_str).collect::<Vec<_>>(),
+        "§7's REQUIRED members, in order, are not the table's"
+    );
+}
+
+#[test]
+fn every_locator_shape_is_the_one_the_contract_states() {
+    let block = block_starting("### 7.3 The locator is identity, not surviving evidence");
+    let mut rows: Vec<(String, Vec<String>)> = Vec::new();
+    for line in block.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(kind) = fields.next() else { continue };
+        if !kind.starts_with("github-") {
+            continue;
+        }
+        rows.push((kind.to_owned(), fields.map(str::to_owned).collect()));
+    }
+    assert_eq!(
+        rows.len(),
+        5,
+        "§7.3 parsed to {} locator rows; the contract defines five gated kinds",
+        rows.len()
+    );
+
+    for (kind, members) in &rows {
+        let Some(shape) = locator_shape(kind) else {
+            panic!("§7.3 defines a locator for {kind:?} and the table has no entry");
+        };
+        let table: Vec<&str> = shape.members.iter().map(|m| m.name).collect();
+        assert_eq!(
+            table,
+            members.iter().map(String::as_str).collect::<Vec<_>>(),
+            "the locator shape for {kind:?} differs from §7.3"
+        );
+    }
+
+    let named: Vec<&str> = rows.iter().map(|(k, _)| k.as_str()).collect();
+    for shape in LOCATOR_SHAPES {
+        assert!(
+            named.contains(&shape.locator_kind),
+            "the table carries a locator for {:?}, which §7.3 does not define",
+            shape.locator_kind
+        );
+    }
+}
+
+/// §8.1's two `HeadReadEvent` shapes.
+///
+/// THE ONE READING THIS TEST ENCODES, stated so it is checkable rather than
+/// assumed: §8.1's blocks name `role`, `acquisition`, `observedAt` and the
+/// member that distinguishes the two variants, and do NOT repeat `schemaVersion`
+/// and `sourceKind`. Those are required anyway by provenance V1 §7, which
+/// obliges every canonical object to be domain-separated by its own content —
+/// the reading §9 states outright for the assessment, applied to the object §8.1
+/// defines. If a later revision of §8.1 lists them, this test keeps passing; if
+/// it says they are absent, this test fails and the reading gets revisited
+/// rather than silently outliving the document.
+#[test]
+fn the_head_read_event_shapes_are_the_ones_the_contract_states() {
+    let block = {
+        let at = PROVENANCE
+            .find("HeadReadEvent, acquisition = AVAILABLE")
+            .unwrap_or_else(|| panic!("§8.1 no longer defines HeadReadEvent"));
+        let rest = &PROVENANCE[at..];
+        let close = rest
+            .find("```")
+            .unwrap_or_else(|| panic!("unterminated §8.1 event block"));
+        rest[..close].to_owned()
+    };
+    let (available, failed) = block
+        .split_once("HeadReadEvent, acquisition = FAILED")
+        .unwrap_or_else(|| panic!("§8.1 no longer defines the FAILED variant"));
+
+    let universal = ["schemaVersion", "sourceKind"];
+
+    let mut expect_available: Vec<String> = universal.iter().map(|m| (*m).to_owned()).collect();
+    expect_available.extend(members_in(
+        available,
+        &["HeadReadEvent, acquisition = AVAILABLE"],
+    ));
+    let table: Vec<&str> = HEAD_READ_EVENT_AVAILABLE.iter().map(|m| m.name).collect();
+    assert_eq!(
+        table,
+        expect_available
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        "the AVAILABLE event shape differs from §8.1 plus §7's universal members"
+    );
+
+    // MUST BE ABSENT is a rule about the key set, and a closed key set is how it
+    // is enforced: the member simply is not in the table.
+    let absent: Vec<&str> = failed
+        .lines()
+        .filter(|l| l.contains("MUST BE ABSENT"))
+        .filter_map(|l| l.split_whitespace().next())
+        .collect();
+    assert_eq!(
+        absent,
+        ["snapshotDigest"],
+        "§8.1's FAILED variant no longer excludes exactly snapshotDigest"
+    );
+
+    let mut expect_failed: Vec<String> = universal.iter().map(|m| (*m).to_owned()).collect();
+    expect_failed.extend(
+        members_in(failed, &[])
+            .into_iter()
+            .filter(|m| !absent.contains(&m.as_str())),
+    );
+    let table: Vec<&str> = HEAD_READ_EVENT_FAILED.iter().map(|m| m.name).collect();
+    assert_eq!(
+        table,
+        expect_failed.iter().map(String::as_str).collect::<Vec<_>>(),
+        "the FAILED event shape differs from §8.1 plus §7's universal members"
     );
 }

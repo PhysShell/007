@@ -97,6 +97,15 @@ impl Store {
         d
     }
 
+    /// Retain a gated head projection together with the assessment that
+    /// authorises it. §5.3 gates `github-pull-request-head`; §9.2 then applies.
+    fn retain_under_head(&mut self, object: &Value) -> String {
+        let assessment = self.put(&head_assessment());
+        let d = self.put(object);
+        self.bind(&d, &d, &assessment);
+        d
+    }
+
     /// Bind `subject` (what the store will answer for) to a binding naming
     /// `names` — normally the same, deliberately different in S1.
     fn bind(&mut self, subject: &str, names: &str, assessment_digest: &str) {
@@ -179,6 +188,23 @@ fn head_event(role: &str, snapshot_digest: &str) -> Value {
         "snapshotDigest": snapshot_digest,
         "observedAt": "2026-08-05T09:00:00Z",
     })
+}
+
+/// A conforming §9 assessment for the §5.3 always-set of a head projection.
+///
+/// §5.3 gates `github-pull-request-head`, so §9.2 requires its retained
+/// projection to have a reachable authorising assessment exactly as a review
+/// does. These fixtures retained head snapshots with none, which modelled a
+/// world the contract forbids — CX-6, at the fixture level.
+fn head_assessment() -> Value {
+    let mut a = conforming_assessment();
+    a.as_object_mut()
+        .expect("the assessment is an object")
+        .insert(
+            "assessedFields".to_owned(),
+            json!(["/head/ref", "/head/repo/full_name", "/head/sha", "/number"]),
+        );
+    a
 }
 
 /// A §8.1 `github-pull-request-head` projection.
@@ -333,7 +359,7 @@ fn s3_assessment_bytes_that_are_not_the_ones_the_digest_names_are_refused() {
     let why = refused(&outcome);
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::AssessmentDigestMismatch { .. })),
+            .any(|u| matches!(u, Unresolved::RecordDigestMismatch { .. })),
         "got {why:?}"
     );
 }
@@ -348,9 +374,14 @@ fn s4_an_object_that_is_not_a_retention_assessment_is_refused() {
 
     let outcome = admissibility(&basis(&d, "/commitId"), &store);
     let why = refused(&outcome);
+    // WrongKindForRole and not MalformedArtifact, and the distinction is one the
+    // single door made available: this decoy is a perfectly well-formed §8.3
+    // projection. Nothing about it is malformed — it simply cannot fill the role
+    // of authorising a retention. Before the door, one assessment-shaped refusal
+    // stood for both facts.
     assert!(
         why.iter()
-            .any(|u| matches!(u, Unresolved::MalformedAssessment { .. })),
+            .any(|u| matches!(u, Unresolved::WrongKindForRole { .. })),
         "an authorising assessment must be a §9 RetentionAssessment, not merely some \
          retained object: got {why:?}"
     );
@@ -416,7 +447,7 @@ fn s5b_a_head_read_whose_event_is_malformed_is_refused() {
 #[test]
 fn s5e_an_event_recording_a_failed_read_is_not_a_successful_one() {
     let mut store = Store::default();
-    let snapshot = store.put(&head_snapshot("deadbeef"));
+    let snapshot = store.retain_under_head(&head_snapshot("deadbeef"));
     let contradictory = store.put(&json!({
         "schemaVersion": 1,
         "sourceKind": "github-head-read-event",
@@ -446,7 +477,7 @@ fn s5e_an_event_recording_a_failed_read_is_not_a_successful_one() {
 #[test]
 fn s5c_two_properly_evidenced_matching_head_reads_are_not_stale() {
     let mut store = Store::default();
-    let snapshot = store.put(&head_snapshot("deadbeef"));
+    let snapshot = store.retain_under_head(&head_snapshot("deadbeef"));
     let before = store.put(&head_event("HEAD_BEFORE", &snapshot));
     let after = store.put(&head_event("HEAD_AFTER", &snapshot));
 
@@ -468,8 +499,8 @@ fn s5c_two_properly_evidenced_matching_head_reads_are_not_stale() {
 #[test]
 fn s5d_an_evidenced_moved_head_is_stale() {
     let mut store = Store::default();
-    let first = store.put(&head_snapshot("deadbeef"));
-    let second = store.put(&head_snapshot("feedface"));
+    let first = store.retain_under_head(&head_snapshot("deadbeef"));
+    let second = store.retain_under_head(&head_snapshot("feedface"));
     let before = store.put(&head_event("HEAD_BEFORE", &first));
     let after = store.put(&head_event("HEAD_AFTER", &second));
 

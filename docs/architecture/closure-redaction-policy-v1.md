@@ -432,6 +432,25 @@ sits permanently in the record as `stableId` — the field-retention gate bypass
 by an alias. A locator is what lets you go and look again; it is never what you
 show instead of having looked.
 
+### 7.4 What the record is, and is not
+
+- Its `sourceKind` is **distinct** from every provenance V1 §8 kind and MUST NOT
+  reuse the refused kind or that kind's `schemaVersion`. A partial record wearing
+  a complete record's identity is how a projection silently becomes weaker than
+  its contract.
+- `blockedFields` MUST be non-empty. A record that blocked nothing is not a
+  reduced record — it is a complete projection, and should be one.
+- It is canonicalized, digested and retained like any other object, and bound to
+  its authorising assessment per §9.2.
+- **It satisfies §11 of provenance V1 only for facts derived solely from the
+  fields it actually contains in `retainedFields`.** A decision that read a
+  blocked field is not rescued by it, and neither is one that reads the locator.
+
+That last rule is the load-bearing one. A wrong-SHA `OWED` derives from
+`review.commitId` and the subject head; if the review *body* is blocked while
+`/commit_id` was assessed clean and retained, that decision remains fully
+explainable from retained immutable bytes.
+
 ### 7.5 Which pointer space a consumer reads in
 
 Not a new decision — a consequence of two existing ones that had never been put
@@ -468,25 +487,6 @@ retention loss.
 
 The asymmetry itself stays as a residual in §11. Removing it is a schema change
 to one of the two contracts and is not made in a correction round.
-
-### 7.4 What the record is, and is not
-
-- Its `sourceKind` is **distinct** from every provenance V1 §8 kind and MUST NOT
-  reuse the refused kind or that kind's `schemaVersion`. A partial record wearing
-  a complete record's identity is how a projection silently becomes weaker than
-  its contract.
-- `blockedFields` MUST be non-empty. A record that blocked nothing is not a
-  reduced record — it is a complete projection, and should be one.
-- It is canonicalized, digested and retained like any other object, and bound to
-  its authorising assessment per §9.2.
-- **It satisfies §11 of provenance V1 only for facts derived solely from the
-  fields it actually contains in `retainedFields`.** A decision that read a
-  blocked field is not rescued by it, and neither is one that reads the locator.
-
-That last rule is the load-bearing one. A wrong-SHA `OWED` derives from
-`review.commitId` and the subject head; if the review *body* is blocked while
-`/commit_id` was assessed clean and retained, that decision remains fully
-explainable from retained immutable bytes.
 
 ## 8. Derived facts over blocked content
 
@@ -1003,6 +1003,9 @@ retention axis.
 | May a `BLOCK_SECRET` assessment stand behind a complete projection? | §6.2 — no |
 | Is `coverageComplete` checkable, or only assertable? | §5.2 — checkable, against the §5.3 set |
 | Must a record outside the gate carry a `RetentionBinding`? | §11 — no; §9.2 scopes the requirement to gated records |
+| Is the locator's shape checked, or only its presence? | §7.3, §9.5 — checked, as the exact key set for `locatorKind` |
+| Which kinds does §9.2's authority requirement reach? | §5.3's gated set, `github-pull-request-head` included |
+| Where does a consumer validate the reduced record's own form? | provenance §17.2 — at the door, before any partition rule runs |
 | What is still OWED, and what does it block? | §11 |
 | Does this unblock acquisition? | §12 — no |
 
@@ -1222,3 +1225,38 @@ Nothing refused `findings: []` under it. The presence rules were all satisfied,
 both conditionals were correct, and the record claimed simultaneously that
 something was found and that nothing was — `failure -> empty set -> green`
 wearing the one costume §5.6 had not been written about.
+
+
+## 20. Correction round 7 — the choke-point round
+
+No contract text changed in this round beyond §7.5's placement, which is the
+point: the defect was in how a consumer implemented these rules, not in the
+rules. It is recorded here because two things this document says turned out to
+be load-bearing in a way the prose did not make obvious.
+
+**§9.5's nested closure reaches the locator, and nothing was checking it.** The
+section lists `github-reduced-source-record → locator → the §7.3 shape for
+locatorKind`, which makes the locator's key set exact and *conditional on the
+record's own `locatorKind`*. A consumer that checks the locator's presence, or
+checks one fixed shape for all five gated kinds, has not implemented this. The
+fixture that exposed it carried a `pullRequest` in a check-run locator, which
+§7.3 does not give that kind, and every check that existed accepted it.
+
+**§9.2's requirement reaches the subject read.** §5.3's gated set includes
+`github-pull-request-head`, so a retained head projection needs a reachable
+authorising assessment exactly as a retained review does. This is stated in two
+places that a reader is unlikely to hold at once — the gated set here, the head
+projection in provenance §8.1 — and the consumer had been resolving head
+snapshots with no binding at all since the first implementation. The correction
+is not a binding lookup added to the head path: it is the head projection being
+a gated kind, so that the authority requirement follows from the classification
+and reaches every path that ever resolves one.
+
+**The general result, recorded because it outlives this round.** A rule that six
+consumers must each remember is not a property of a system; it is a property of
+whoever last wrote a consumer. This document can state a rule, and the parity
+tests can hold a table to it, but neither can make an implementation route every
+artifact through it. That has to be a construction — a validated form that the
+semantic paths are the only consumers of, and that nothing but validation can
+produce. Three rounds of finding the next unprotected path is the evidence for
+preferring that construction over another round of careful reading.
