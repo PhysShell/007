@@ -69,7 +69,7 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DecisionInput, RetainedEvidence,
+    admissibility, Admissible, DecisionBasis, DecisionInput, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -78,6 +78,7 @@ const MATCHER_ID: &str = "review-by-expected-author-login";
 const MATCHER_VERSION: &str = "1";
 const OBSERVATION: &str = "review/external";
 const ANOTHER_OBSERVATION: &str = "check/an-entirely-different-observation";
+const FOREIGN_POLICY: &str = "99-a-policy-nobody-ran";
 
 const REVIEW_REQ: [&str; 9] = [
     "/author_association",
@@ -185,11 +186,70 @@ fn absence_basis(expected: &str) -> DecisionBasis {
     }
 }
 
+/// The decision was refused, AND refused for the relation this witness names.
+///
+/// WHY THE PREDICATE, AND WHY IT ARRIVED LATE. The first version of this helper
+/// asserted only `matches!(outcome, CannotCheck { .. })`. That is the defect two
+/// commits of this very round exist to prevent — `ed9b77d` and `6fd62d7` both
+/// corrected fixtures that would have gone green for a reason other than the one
+/// they name — and it reappeared in the file preregistering the next three.
+/// External review caught it. Demonstrated before the repair: deleting the
+/// REQUIRED `surface` member from F1-A's snapshot makes it refuse as a MALFORMED
+/// ARTIFACT, and F1-A still passed.
+///
+/// Sibling witnesses in this crate already pinned their variant —
+/// `witnesses.rs` asserts `RecordDigestMismatch` and `NoSuchRecord`,
+/// `correction_b2.rs` asserts `BindingSubjectMismatch` — so the inconsistency
+/// was internal to our own suite rather than a gap nobody had thought about.
+///
+/// WHAT THE PREDICATE PINS ON. A variant plus an identity, never the whole
+/// message. Where the fixture chose an offending VALUE — a foreign observation,
+/// a foreign policy version — the predicate requires the refusal to name that
+/// value, which is stable against any rewording because the fixture owns it.
+/// Where the defect is an ABSENCE there is no such value, and the predicate
+/// names the axis instead; that one is prose-coupled on purpose, and a future
+/// rewording must update it deliberately rather than silently widen it.
+///
+/// NEGATIVE CONTROLS. Each was applied to this file, run, and reverted; each
+/// must turn the named witness RED, and did.
+///
+/// ```text
+/// NC-1  delete REQUIRED /surface from the snapshot
+///       -> F1-A, F2-A refuse as MalformedArtifact         both RED
+/// NC-2  delete REQUIRED /representation from the assessment
+///       -> F3-A refuses as MalformedArtifact              F3-A RED
+/// NC-3  downgrade F2-A's snapshot to schemaVersion 1
+///       -> F2-A refuses as QueryDoesNotSupportRole on the
+///          IMPLEMENTATION axis                            F2-A RED
+/// ```
+///
+/// NC-3 is the one that matters. NC-1 and NC-2 only show the helper separates a
+/// malformed artifact from a relation refusal. NC-3 keeps the VARIANT identical
+/// and changes only which relation is open — and the witness still fails. That
+/// is the difference between pinning a variant and pinning a variant plus the
+/// identity the witness is actually about.
 #[track_caller]
-fn refuses(outcome: &Admissible, what: &str) {
+fn refuses_because(
+    outcome: &Admissible,
+    what: &str,
+    relation: &str,
+    is_the_relation: impl Fn(&Unresolved) -> bool,
+) {
+    // Two asserts rather than a let-else, because `clippy::panic` is denied
+    // tree-wide and this file will not spend an allowance on a test helper.
+    let why: &[Unresolved] = match outcome {
+        Admissible::CannotCheck { why } => why,
+        Admissible::Yes { .. } => &[],
+    };
     assert!(
         matches!(outcome, Admissible::CannotCheck { .. }),
         "{what}: admitted. The artifact is conforming and that was never the question"
+    );
+    assert!(
+        why.iter().any(is_the_relation),
+        "{what}: refused, but not for {relation}. A witness that accepts ANY refusal reports \
+         green over a property it never established — and would keep reporting it while the \
+         relation stayed open behind an unrelated check: got {why:?}"
     );
 }
 
@@ -216,7 +276,15 @@ fn admits(outcome: &Admissible, what: &str) {
 fn f1a_an_unbound_matcher_implementation_cannot_qualify_a_replay() {
     let mut store = Store::default();
     let s = store.put(&snapshot(1, OBSERVATION));
-    refuses(&admissibility(&absence_basis(&s), &store), "F1-A");
+    refuses_because(
+        &admissibility(&absence_basis(&s), &store),
+        "F1-A",
+        "the matcher implementation axis",
+        |u| {
+            matches!(u, Unresolved::QueryDoesNotSupportRole { why, .. }
+                if why.contains("implementation axis"))
+        },
+    );
 }
 
 /// F1-B — BOUNDARY. The same query at version 2 with a correct
@@ -246,7 +314,15 @@ fn f1b_a_bound_matcher_implementation_still_qualifies() {
 fn f2a_a_snapshot_for_another_observation_does_not_prove_this_absence() {
     let mut store = Store::default();
     let s = store.put(&snapshot(2, ANOTHER_OBSERVATION));
-    refuses(&admissibility(&absence_basis(&s), &store), "F2-A");
+    refuses_because(
+        &admissibility(&absence_basis(&s), &store),
+        "F2-A",
+        "the observation the decision is about",
+        |u| {
+            matches!(u, Unresolved::QueryDoesNotSupportRole { why, .. }
+                if why.contains(ANOTHER_OBSERVATION))
+        },
+    );
 }
 
 /// F2-B — BOUNDARY. The same query for the observation the basis names is
@@ -332,8 +408,16 @@ fn reads(record: &str, pointer: &str) -> DecisionBasis {
 #[test]
 fn f3a_an_assessment_from_another_policy_does_not_authorise_this_record() {
     let mut store = Store::default();
-    let d = store.retain_under(&reduced("1"), &block_body("99-a-policy-nobody-ran"));
-    refuses(&admissibility(&reads(&d, "/id"), &store), "F3-A");
+    let d = store.retain_under(&reduced("1"), &block_body(FOREIGN_POLICY));
+    refuses_because(
+        &admissibility(&reads(&d, "/id"), &store),
+        "F3-A",
+        "the redaction policy version of the authorising assessment",
+        |u| {
+            matches!(u, Unresolved::AssessmentDoesNotAuthorise { why, .. }
+                if why.contains(FOREIGN_POLICY))
+        },
+    );
 }
 
 /// F3-B — BOUNDARY. The same pair under one policy stays admissible.
