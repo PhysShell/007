@@ -185,6 +185,19 @@ fn g3d_near_misses_are_refused_by_the_domain_and_not_by_luck() {
         ("2026-08-05T11:03:00+02:00", "a numeric offset"),
         ("2026-08-05T09:03:00", "no designator at all"),
         ("2026-02-30T09:03:00Z", "a date that does not exist"),
+        // Found by a negative control, not by writing the list. Relaxing the
+        // length check left every case above still refused — the Z check caught
+        // the offset, the punctuation check caught the rest — so nothing in this
+        // file was actually holding the length. A string that is a conforming
+        // instant with something appended is the case only the length refuses.
+        (
+            "2026-08-05T09:03:00Z ",
+            "a conforming instant with a trailing space",
+        ),
+        (
+            "2026-08-05T09:03:00Zt",
+            "a conforming instant with anything appended",
+        ),
     ] {
         let what = format!("G3-D ({why})");
         refuses(&assessment_observed_at(json!(value)), &what, value);
@@ -248,10 +261,7 @@ const INVENTORY: &[(&str, Bounding)] = &[
     ),
     (
         "assessment/observedAt",
-        Bounding::Residual(
-            "G3-A. An assessment can claim any string as the time the detector looked, so no \
-             ordering, freshness or comparison question can be asked of it",
-        ),
+        Bounding::Here("g3a_an_assessment_observed_at_must_be_an_instant"),
     ),
     (
         "assessment/detector/id",
@@ -344,14 +354,11 @@ const INVENTORY: &[(&str, Bounding)] = &[
     ),
     (
         "head_read_available/observedAt",
-        Bounding::Residual(
-            "G3-B. §8.1 exists to bracket an evaluation between two reads and this is what says \
-             which came first; unconstrained, the bracket cannot order its own events",
-        ),
+        Bounding::Here("g3b_an_available_head_read_observed_at_must_be_an_instant"),
     ),
     (
         "head_read_failed/observedAt",
-        Bounding::Residual("G3-C, as for the AVAILABLE shape"),
+        Bounding::Here("g3c_a_failed_head_read_observed_at_must_be_an_instant"),
     ),
     (
         "head_read_failed/reason",
@@ -375,9 +382,16 @@ fn walk_redaction(
     for member in members {
         let at = format!("{prefix}/{}", member.name);
         match member.kind {
-            MemberKind::Text | MemberKind::TextArray => found.push(at),
+            // Timestamp is string-valued and belongs in the denominator: the
+            // question this file asks is which STRING members have a value
+            // domain, and a member that has just acquired one is the answer
+            // changing rather than the question going away.
+            MemberKind::Text | MemberKind::TextArray | MemberKind::Timestamp => found.push(at),
             MemberKind::Object(nested) => found.extend(walk_redaction(&at, nested)),
             MemberKind::ObjectArray(nested) => found.extend(walk_redaction(&at, nested)),
+            // Exhaustive on purpose. A kind added later must be classified here
+            // deliberately, and a catch-all would let it leave the denominator
+            // silently — which is the shape of the defect this file is about.
             MemberKind::Integer | MemberKind::Bool | MemberKind::OneOf(_) => {}
         }
     }
@@ -390,9 +404,15 @@ fn walk_artifact(prefix: &str, members: &[o7_closure_matcher::Member]) -> Vec<St
     for member in members {
         let at = format!("{prefix}/{}", member.name);
         match member.kind {
-            ValueKind::Text | ValueKind::TextArray => found.push(at),
+            ValueKind::Text | ValueKind::TextArray | ValueKind::Timestamp => found.push(at),
             ValueKind::Object(nested) => found.extend(walk_artifact(&at, nested)),
-            _ => {}
+            // Exhaustive for the same reason as the redaction walk above. The
+            // `_ => {}` this replaces was the CX-1 shape sitting inside the
+            // audit written to prevent it: a string-valued kind added to the
+            // matcher crate would have dropped out of the denominator with
+            // nothing failing, and its inventory rows would have turned into
+            // orphans blamed on the tables.
+            ValueKind::Integer | ValueKind::Bool | ValueKind::OneOf(_) | ValueKind::OpenObject => {}
         }
     }
     found

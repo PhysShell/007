@@ -22,6 +22,7 @@
 //! `tests/contract_parity.rs`, which parses them out of the markdown. The
 //! expectation is the document, never a second copy of it.
 
+use o7_closure_matcher::utc_instant;
 use serde_json::Value;
 
 /// One member of a closed shape.
@@ -38,6 +39,15 @@ pub enum MemberKind {
     Bool,
     /// An array whose every element is a string.
     TextArray,
+    /// An RFC 3339 UTC instant, exactly `YYYY-MM-DDThh:mm:ssZ`.
+    ///
+    /// Delegates to `o7_closure_matcher::utc_instant`, which is where the §8.1
+    /// head-read events get the same rule. One implementation: redaction policy
+    /// V1 §9 and provenance V1 §8.1 freeze the SAME domain, and two
+    /// transcriptions of one rule is one rule too many — the principle
+    /// `contract_parity.rs` exists to enforce, applied to a check rather than to
+    /// a table.
+    Timestamp,
     /// A string whose value must be one of a closed set.
     OneOf(&'static [&'static str]),
     /// A nested object with its own closed shape.
@@ -114,7 +124,7 @@ pub const ASSESSMENT_REQUIRED: &[Member] = &[
     },
     Member {
         name: "observedAt",
-        kind: MemberKind::Text,
+        kind: MemberKind::Timestamp,
     },
 ];
 
@@ -257,6 +267,12 @@ pub(crate) fn check_member(found: &Value, kind: MemberKind, at: &str) -> Result<
     }
     match kind {
         MemberKind::Text if found.as_str().is_none() => Err(format!("{at} is not a string")),
+        MemberKind::Timestamp => {
+            let text = found
+                .as_str()
+                .ok_or_else(|| format!("{at} is not a string"))?;
+            utc_instant(text).map_err(|why| format!("{at} {why}"))
+        }
         MemberKind::Integer if !found.is_i64() && !found.is_u64() => {
             Err(format!("{at} is not an integer"))
         }

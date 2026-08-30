@@ -182,7 +182,7 @@ pub const HEAD_READ_EVENT_AVAILABLE: &[Member] = &[
     req("role", ValueKind::OneOf(&["HEAD_BEFORE", "HEAD_AFTER"])),
     req("acquisition", ValueKind::OneOf(&["AVAILABLE"])),
     req("snapshotDigest", ValueKind::Text),
-    req("observedAt", ValueKind::Text),
+    req("observedAt", ValueKind::Timestamp),
 ];
 
 /// §8.1's `HeadReadEvent`, `acquisition = FAILED`.
@@ -198,7 +198,7 @@ pub const HEAD_READ_EVENT_FAILED: &[Member] = &[
     req("role", ValueKind::OneOf(&["HEAD_BEFORE", "HEAD_AFTER"])),
     req("acquisition", ValueKind::OneOf(&["FAILED"])),
     req("reason", ValueKind::Text),
-    req("observedAt", ValueKind::Text),
+    req("observedAt", ValueKind::Timestamp),
 ];
 
 // ---- Kinds, and which side of the gate each falls on.
