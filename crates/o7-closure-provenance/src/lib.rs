@@ -175,6 +175,22 @@ pub enum Unresolved {
         snapshot_digest: String,
         why: String,
     },
+    /// The artifact is not a conforming closed form of its declared kind.
+    ///
+    /// Clause 1 of the round's law with the emphasis three review rounds showed
+    /// it needs: **closed schema**, not merely bytes, digest and type. It is
+    /// deliberately a refusal about the ARTIFACT rather than about the question
+    /// being asked of it, because the ordering is the whole point. An object the
+    /// contract forbids to exist must be refused before anything reasons about
+    /// its retention, its partition, its enumeration or its subject — answering
+    /// `PointerBlocked` for a malformed reduced record is already a statement
+    /// about the retention semantics of an artifact that has no right to have
+    /// any.
+    MalformedArtifact {
+        digest: String,
+        kind: String,
+        why: String,
+    },
     /// The assessment is a conforming §9 object and does not authorise THIS
     /// record: its outcome refuses the record's own kind, contradicts the
     /// record's own outcome, or its findings and coverage do not compute the
