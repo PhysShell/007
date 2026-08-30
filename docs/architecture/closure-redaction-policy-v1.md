@@ -488,6 +488,16 @@ retention loss.
 The asymmetry itself stays as a residual in §11. Removing it is a schema change
 to one of the two contracts and is not made in a correction round.
 
+**Where a consumer that needs BOTH names puts them.** §8 requires a derived fact
+to remain usable when every field it reads survived §7.1, and that obligation
+cannot be met without knowing that `/stableId` and `/id` are the same field. The
+rule above still holds: no global table. A derivation names the two spellings of
+the fields **it** reads, beside the rule that reads them, and nothing else
+acquires a translation. That declaration is scoped to a handful of fields, it is
+checked against §5.3 and against §8 rather than maintained by hand, and it fails
+in both representations if it is wrong — which is what a global table between two
+contracts could not offer.
+
 ## 8. Derived facts over blocked content
 
 Provenance V1 §18 requires every derived fact influencing the classifier to list
@@ -531,6 +541,19 @@ an answer to be trusted.
 Resolution reaches `retainedFields` **only**. Per §7.3 the locator is identity,
 not surviving evidence, so a decision basis naming `/id` is not satisfied by the
 record's `stableId` even though the two describe the same number.
+
+And the resolution is representation-aware, per §7.5:
+
+```text
+complete §8 projection    read the canonical member        /stableId
+reduced source record     read retainedFields[decoded]     /id
+either                    never the locator                §7.3
+```
+
+A consumer that reads one vocabulary against both record kinds does not merely
+fail — it fails in the direction that looks like retention loss, reporting a fact
+whose every input survived as though the evidence were gone. That is the reading
+this section exists to forbid, arrived at from the other side.
 
 ## 9. Detector provenance
 

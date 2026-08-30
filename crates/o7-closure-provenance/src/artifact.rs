@@ -261,21 +261,21 @@ impl ValidatedArtifact {
         self.value.pointer(pointer).and_then(Value::as_str)
     }
 
-    /// The validated object itself, for the one caller that cannot take a
-    /// `&ValidatedArtifact`.
-    ///
-    /// `pub(crate)` deliberately: no consumer outside this crate can reach it,
-    /// so the public surface stays validated-only. The single caller is
-    /// `check_derived`, and the reason is provenance V1 §18's identity rule —
-    /// a registered derivation's FILE BYTES are its identity, and changing
-    /// `derive`'s parameter type would require issuing
-    /// `review-carries-finding/2` for a signature change rather than a semantic
-    /// one. The predicate still only ever sees artifacts that came through the
-    /// door, because `check_derived` resolves every cited source through it
-    /// first; what it does not carry is the type-level proof of that.
-    pub(crate) const fn as_value(&self) -> &Value {
-        &self.value
-    }
+    // `as_value()` WAS HERE, and it is REMOVED.
+    //
+    // It existed for one caller, `check_derived`, and it was justified by
+    // provenance V1 §18's identity rule: changing `derive`'s parameter type
+    // would force `review-carries-finding/2` for a signature change rather than
+    // a behaviour change. The justification was sound and the conclusion was
+    // wrong. Handing the rule the artifact's whole raw object did not merely
+    // fail to carry the type-level proof — it threw away the distinction
+    // between a canonical §8 projection and a §5.3-keyed reduced record, and
+    // lost every derived fact over a redacted-but-retained source.
+    //
+    // `check_derived` now materialises a source view per the derivation's own
+    // declared inputs, so the rule still reads a plain object, §18's identity
+    // still lives in the implementation file's bytes, and no path in this crate
+    // reaches an artifact's raw value again.
 }
 
 /// Why an artifact did not pass the door.

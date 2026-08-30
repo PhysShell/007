@@ -38,7 +38,8 @@
 // identity check in the crate now happens once, inside `artifact::validate`,
 // which is the observable form of the choke point.
 use crate::artifact::{ArtifactKind, Gate, ValidatedArtifact};
-use serde_json::Value;
+use crate::derivations::DerivationInput;
+use serde_json::{Map, Value};
 
 pub mod artifact;
 pub mod derivations;
@@ -231,11 +232,44 @@ pub enum Unresolved {
         found: String,
     },
     /// A derived fact does not follow from the sources it names.
+    ///
+    /// `recomputed` is a value the rule actually produced. It is never `Null`
+    /// standing in for "the rule did not run": that spelling made evidence loss
+    /// and a contradicted claim report as the same fact, and the two are the
+    /// ones a reader most needs told apart.
     DerivationDisagrees {
         derivation: String,
         claimed: Value,
         recomputed: Value,
     },
+    /// A derived fact cites a number of sources the derivation does not take.
+    ///
+    /// A defect in the CLAIM, not in the evidence: nothing was recomputed and
+    /// nothing was lost, so it is neither a disagreement nor a retention loss.
+    DerivationArityMismatch {
+        derivation: String,
+        expected: usize,
+        cited: usize,
+    },
+    /// A field the derivation reads did not resolve in the source that carries
+    /// it — blocked by the gate, or absent from the projection.
+    ///
+    /// EVIDENCE LOSS, and it is reported as itself. The accompanying
+    /// [`Unresolved::PointerBlocked`] or [`Unresolved::PointerAbsent`] says
+    /// which field and which of the two happened; this says what it cost.
+    DerivationInputUnavailable {
+        derivation: String,
+        version: String,
+        source_digest: String,
+    },
+    /// Every field the derivation reads resolved, and the rule still produced no
+    /// value.
+    ///
+    /// Distinct from [`Unresolved::DerivationInputUnavailable`] because the
+    /// remedy is different: nothing was lost, so the values that survived are
+    /// not the ones the rule can use — a retained field of the wrong type, for
+    /// instance. Never reported as the negative answer.
+    DerivationCannotRecompute { derivation: String, version: String },
     /// A derived fact names a derivation this crate cannot re-execute.
     UnknownDerivation { derivation: String, version: String },
 }
@@ -582,36 +616,53 @@ fn check_derived<E: RetainedEvidence>(
         return;
     };
 
-    if fact.derived_from.len() != entry.arity {
-        into.push(Unresolved::DerivationDisagrees {
+    if fact.derived_from.len() != entry.arity() {
+        into.push(Unresolved::DerivationArityMismatch {
             derivation: fact.derivation.clone(),
-            claimed: fact.value.clone(),
-            recomputed: Value::Null,
+            expected: entry.arity(),
+            cited: fact.derived_from.len(),
         });
         return;
     }
 
-    let mut sources = Vec::with_capacity(entry.arity);
-    for source_digest in &fact.derived_from {
+    let mut sources = Vec::with_capacity(entry.arity());
+    for (inputs, source_digest) in entry.sources.iter().zip(&fact.derived_from) {
         // Every cited source goes through the same resolution the decision's own
         // inputs do. A derived fact resting on bytes nobody was permitted to keep
         // is not better evidenced than a decision resting on them.
-        match resolve_artifact(
+        let Some(record) = resolve_artifact(
             store,
             source_digest,
             ConsumedAs::GatedSource,
             declared,
             into,
-        ) {
-            Some(record) => sources.push(record),
-            None => return,
+        ) else {
+            return;
+        };
+
+        match derivation_source_view(&record, inputs) {
+            Ok(view) => sources.push(view),
+            Err(ViewError::Input(why)) => {
+                into.push(why);
+                into.push(Unresolved::DerivationInputUnavailable {
+                    derivation: fact.derivation.clone(),
+                    version: fact.version.clone(),
+                    source_digest: source_digest.clone(),
+                });
+                return;
+            }
+            // The registry entry, not the artifact. Nothing was lost and nothing
+            // disagreed; the crate simply cannot assemble what the rule reads.
+            Err(ViewError::Undeclarable) => {
+                into.push(Unresolved::DerivationCannotRecompute {
+                    derivation: fact.derivation.clone(),
+                    version: fact.version.clone(),
+                });
+                return;
+            }
         }
     }
 
-    // Every source above came through the door; this hands the predicate their
-    // validated bytes. See `ValidatedArtifact::as_value` for why the signature
-    // is not changed instead.
-    let sources: Vec<Value> = sources.iter().map(|a| a.as_value().clone()).collect();
     match (entry.derive)(&sources) {
         Some(recomputed) if recomputed == fact.value => {}
         Some(recomputed) => into.push(Unresolved::DerivationDisagrees {
@@ -619,15 +670,106 @@ fn check_derived<E: RetainedEvidence>(
             claimed: fact.value.clone(),
             recomputed,
         }),
-        // The derivation could not read what it needs. Not `false`: a rule that
-        // could not run has established nothing, and reporting that as the
-        // negative outcome is the absent-signal-as-negative-result error.
-        None => into.push(Unresolved::DerivationDisagrees {
+        // Every declared input resolved and the rule still produced nothing.
+        // Not `false`: a rule that could not run has established nothing, and
+        // reporting that as the negative outcome is the
+        // absent-signal-as-negative-result error. Not `DerivationDisagrees`
+        // either — nothing disagreed.
+        None => into.push(Unresolved::DerivationCannotRecompute {
             derivation: fact.derivation.clone(),
-            claimed: fact.value.clone(),
-            recomputed: Value::Null,
+            version: fact.version.clone(),
         }),
     }
+}
+
+/// THE DERIVATION SOURCE VIEW: one validated artifact, read in ITS OWN
+/// representation, projected into the vocabulary the rule reads.
+///
+/// ```text
+/// ValidatedArtifact
+///       |
+///       +-- CompleteProjection   read input.canonical   §8 member names
+///       +-- ReducedSourceRecord  read input.decoded     §5.3 retainedFields
+///       |
+///       v
+/// { input.canonical: value, .. }   <- the only thing the rule ever sees
+/// ```
+///
+/// WHY THIS EXISTS. `check_derived` used to hand the rule the artifact's whole
+/// raw object, which threw away the one distinction between the two
+/// representations. A reduced record keyed in §5.3's decoded space then answered
+/// nothing to a rule reading canonical members, and a fact whose every input had
+/// survived the gate came back as if the evidence were gone. Redaction §8 says
+/// exactly the opposite: facts derived solely from fields that survived §7.1 are
+/// unaffected.
+///
+/// WHY IT READS `retainedFields` AND NOTHING ELSE. §7.3 and §8: the locator is
+/// identity, not surviving evidence, so a record whose `/id` was blocked does
+/// not answer for it out of `locator.stableId` even though the two describe the
+/// same number. Delegating to [`read_pointer`] is what makes that true here
+/// rather than true again — it is the same reader the decision's own inputs go
+/// through, so the field gate cannot be honoured in one path and forgotten in
+/// the other.
+///
+/// WHY THE VIEW IS BUILT RATHER THAN PASSED THROUGH, even for a complete
+/// projection whose members are already canonical. The rule then reads exactly
+/// the fields its registry entry declares, in both representations, over one
+/// code path. A rule that quietly started consulting a field nobody declared
+/// would stop working immediately instead of working until somebody redacted
+/// that field.
+fn derivation_source_view(
+    record: &ValidatedArtifact,
+    inputs: &[DerivationInput],
+) -> Result<Value, ViewError> {
+    let mut view = Value::Object(Map::new());
+    for input in inputs {
+        let pointer = match record.kind() {
+            ArtifactKind::ReducedSourceRecord => input.decoded,
+            _ => input.canonical,
+        };
+        let value = read_pointer(record, pointer).map_err(ViewError::Input)?;
+        place(&mut view, input.canonical, value).ok_or(ViewError::Undeclarable)?;
+    }
+    Ok(view)
+}
+
+/// Why a source view could not be built — and the two reasons are about
+/// different things, which is the whole reason they are not one.
+enum ViewError {
+    /// A field the rule reads did not resolve in the artifact. A fact about the
+    /// EVIDENCE, carrying the pointer-level refusal that says which and why.
+    Input(Unresolved),
+    /// A registry entry declared a `canonical` name that is not a pointer this
+    /// crate can write, or two that collide. A fact about the DECLARATION, held
+    /// unreachable by `tests/derivation_source_view.rs` rather than assumed
+    /// away.
+    Undeclarable,
+}
+
+/// Write a value at an RFC 6901 pointer, creating intermediate objects.
+///
+/// `None` when the pointer is not one (no leading `/`) or crosses a member that
+/// already exists and is not an object.
+fn place(target: &mut Value, pointer: &str, value: Value) -> Option<()> {
+    let segments: Vec<String> = pointer
+        .strip_prefix('/')?
+        .split('/')
+        .map(|s| s.replace("~1", "/").replace("~0", "~"))
+        .collect();
+    place_segments(target, &segments, value)
+}
+
+fn place_segments(target: &mut Value, segments: &[String], value: Value) -> Option<()> {
+    let (head, rest) = segments.split_first()?;
+    let map = target.as_object_mut()?;
+    if rest.is_empty() {
+        map.insert(head.clone(), value);
+        return Some(());
+    }
+    let child = map
+        .entry(head.clone())
+        .or_insert_with(|| Value::Object(Map::new()));
+    place_segments(child, rest, value)
 }
 
 /// Bind one decision basis to retained evidence.
@@ -1114,4 +1256,58 @@ fn resolve_head_sha<E: RetainedEvidence>(
         .str_at("/headSha")
         .map(str::to_owned)
         .ok_or_else(|| "names a head snapshot with no headSha".to_owned())
+}
+
+#[cfg(test)]
+mod place_tests {
+    //! `place` is private and every current declaration writes a single
+    //! top-level member, so the nested and malformed paths have no reachable
+    //! caller yet. They are not speculative — §5.3's required sets are full of
+    //! `/user/login` and `/head/sha`, and §8's projections nest `user` — but
+    //! they are unexercised, and unexercised behaviour at a boundary is how a
+    //! source view comes to silently drop a field. Tested here rather than
+    //! assumed.
+
+    use super::place;
+    use serde_json::{json, Map, Value};
+
+    fn empty() -> Value {
+        Value::Object(Map::new())
+    }
+
+    #[test]
+    fn a_nested_pointer_creates_the_objects_it_runs_through() {
+        let mut v = empty();
+        assert!(place(&mut v, "/user/login", json!("octocat")).is_some());
+        assert!(place(&mut v, "/user/id", json!("1")).is_some());
+        assert_eq!(v, json!({"user": {"login": "octocat", "id": "1"}}));
+    }
+
+    #[test]
+    fn rfc_6901_escapes_are_decoded() {
+        let mut v = empty();
+        assert!(place(&mut v, "/a~1b", json!(1)).is_some());
+        assert!(place(&mut v, "/c~0d", json!(2)).is_some());
+        assert_eq!(v, json!({"a/b": 1, "c~d": 2}));
+    }
+
+    #[test]
+    fn a_string_that_is_not_a_pointer_is_refused() {
+        let mut v = empty();
+        assert!(place(&mut v, "stableId", json!("x")).is_none());
+        assert_eq!(v, empty(), "a refused write leaves nothing behind");
+    }
+
+    /// Two declared inputs where one's path runs through the other's value.
+    ///
+    /// Refused rather than overwritten: silently replacing `user` with an object
+    /// would hand the rule a view in which one declared field had vanished, and
+    /// a rule reading a field that is not there yields `None`, which this round
+    /// exists to stop reporting as an answer.
+    #[test]
+    fn a_pointer_crossing_a_non_object_is_refused() {
+        let mut v = empty();
+        assert!(place(&mut v, "/user", json!("octocat")).is_some());
+        assert!(place(&mut v, "/user/login", json!("octocat")).is_none());
+    }
 }

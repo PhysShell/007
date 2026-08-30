@@ -19,15 +19,62 @@ use serde_json::Value;
 ///
 /// A bare `fn` pointer for the reason `MatcherFn` is one — it cannot capture an
 /// environment, so its inputs are exactly what it is handed.
+///
+/// The `Value`s it is handed are **not** retained artifacts. Each is a view
+/// materialised by `check_derived` out of one validated source, carrying
+/// exactly the fields [`DerivationEntry::sources`] declares and nothing else.
+/// See [`DerivationInput`] for why the parameter type did not change instead.
 pub type DerivationFn = fn(sources: &[Value]) -> Option<Value>;
+
+/// One field a derivation reads, under both of the names the contracts give it.
+///
+/// Redaction policy §7.5 records an asymmetry that is easy to read past: a
+/// complete §8 projection is keyed in the CANONICAL vocabulary, a reduced source
+/// record is keyed in §5.3's DECODED one, and the two are not the same set of
+/// names. §8 of the same document then requires that a fact whose every input
+/// survived redaction remain usable — which cannot be satisfied without knowing
+/// that `/stableId` and `/id` are the same field.
+///
+/// §7.5 also refuses a global correspondence table, and it is right to: a third
+/// mapping maintained alongside two contracts is a place for them to disagree
+/// silently. So the correspondence is not global. Each derivation names the two
+/// spellings of the fields IT reads, next to the rule that reads them, and
+/// nothing else acquires a translation.
+///
+/// WHAT KEEPS THE DECLARATION HONEST, since it is not the hashed implementation
+/// bytes. `check_derived` materialises the view from this declaration in BOTH
+/// representations and hands the rule nothing else. A declaration that omits a
+/// field the rule reads therefore breaks the complete-projection case as well as
+/// the reduced one; a `canonical` name that is wrong breaks both; a `decoded`
+/// name that is wrong breaks the reduced case. Each of the three is a
+/// preregistered witness in `tests/correction_b4d.rs` and
+/// `tests/derivation_source_view.rs`, so the declaration is checked by execution
+/// rather than by review.
+///
+/// WHY NOT CHANGE `DerivationFn` TO TAKE THE SOURCES INSTEAD. §18's identity
+/// rule: a registered derivation's file bytes ARE its identity, and a signature
+/// change would force `review-carries-finding/2` for a change that alters no
+/// behaviour of the rule. Keeping the rule reading a plain object, and making
+/// the CALLER responsible for producing a faithful one, leaves the identity
+/// where the contract puts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivationInput {
+    /// The §8 projection member, and the name the rule itself reads.
+    pub canonical: &'static str,
+    /// The §5.3 decoded source field, and therefore the `retainedFields` key a
+    /// reduced record carries it under.
+    pub decoded: &'static str,
+}
 
 /// One registered derivation.
 #[derive(Debug, Clone, Copy)]
 pub struct DerivationEntry {
     pub id: &'static str,
     pub version: &'static str,
-    /// How many source snapshots the derivation consumes, in order.
-    pub arity: usize,
+    /// The fields the derivation reads out of each source it consumes, in
+    /// order. Its length is the arity — declared once, so a rule cannot take a
+    /// number of sources different from the number it names inputs for.
+    pub sources: &'static [&'static [DerivationInput]],
     /// The exact bytes of the file defining `derive`, embedded at compile time.
     pub implementation_source: &'static str,
     /// SHA-256 of [`Self::implementation_source`], the identity of
@@ -47,12 +94,36 @@ mod carries_finding_v1;
 pub const REGISTRY: &[DerivationEntry] = &[DerivationEntry {
     id: "review-carries-finding",
     version: "1",
-    arity: 2,
+    sources: &[
+        // 0 — the submitted review. §8.3 `stableId`; §5.3 `/id`.
+        &[DerivationInput {
+            canonical: "/stableId",
+            decoded: "/id",
+        }],
+        // 1 — the review comment. §8.4 `pullRequestReviewId`;
+        // §5.3 `/pull_request_review_id`.
+        &[DerivationInput {
+            canonical: "/pullRequestReviewId",
+            decoded: "/pull_request_review_id",
+        }],
+    ],
     implementation_source: include_str!("derivations/carries_finding_v1.rs"),
     implementation_digest:
         "sha256:9990c9990875b746b0afcc3bda59538b34aeaaef87f9efeb98a03c5d9d7e902e",
     derive: carries_finding_v1::derive,
 }];
+
+impl DerivationEntry {
+    /// How many source snapshots the derivation consumes, in order.
+    ///
+    /// Derived from [`Self::sources`] rather than declared beside it: two
+    /// statements of one number are two chances to disagree, and the one that
+    /// would have been wrong is the one nothing reads.
+    #[must_use]
+    pub const fn arity(&self) -> usize {
+        self.sources.len()
+    }
+}
 
 /// Resolve an identity pair to exactly one derivation. Fails closed.
 #[must_use]
