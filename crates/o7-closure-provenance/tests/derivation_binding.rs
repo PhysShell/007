@@ -92,3 +92,37 @@ fn an_unreadable_source_is_not_a_negative_result() {
         "too few sources is not an answer either"
     );
 }
+
+/// A derivation whose bytes are not the ones its version is bound to is refused.
+///
+/// WHAT THIS ESTABLISHES AND WHAT IT DOES NOT. This is the CHECKER: given an
+/// entry whose declared digest does not describe its source, `verify_implementation`
+/// reports drift rather than shrugging. It says nothing about whether the
+/// decision path consults it — the registry is `const`, so no test can make the
+/// real entry drift at runtime.
+///
+/// The WIRING is established by a source mutation instead, recorded in
+/// GREEN-DERIV-BIND: setting the declared digest to a wrong value now turns
+/// `witnesses::b6/b7/b7b`, `derivation_source_view` and `correction_b4d` red.
+/// Before that commit only this file's `every_registered_derivation_is_the_code_bound_to_it`
+/// failed, and `b7b_a_correctly_derived_fact_is_admitted` stayed green — the
+/// decision path admitting a fact computed by code whose binding does not hold.
+/// Both halves are needed and neither substitutes for the other.
+#[test]
+fn an_entry_whose_bytes_are_not_its_declared_digest_is_refused() {
+    let bound = resolve("review-carries-finding", "1").expect("registered");
+    let drifted = o7_closure_provenance::derivations::DerivationEntry {
+        implementation_digest: "sha256:\
+            0000000000000000000000000000000000000000000000000000000000000000",
+        ..*bound
+    };
+    let drift = verify_implementation(&drifted).expect_err("a wrong digest must be refused");
+    assert_eq!(drift.id, "review-carries-finding");
+    assert_eq!(drift.version, "1");
+    assert_ne!(
+        drift.computed, drift.expected,
+        "the refusal must report both the bytes' actual digest and the one the version is \
+         bound to; a drift report naming one of them tells a reader nothing to act on"
+    );
+    verify_implementation(bound).expect("the real entry must still verify");
+}

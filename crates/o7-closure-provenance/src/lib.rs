@@ -278,6 +278,20 @@ pub enum Unresolved {
     DerivationCannotRecompute { derivation: String, version: String },
     /// A derived fact names a derivation this crate cannot re-execute.
     UnknownDerivation { derivation: String, version: String },
+    /// A registered derivation is not the code bound to its `(id, version)`.
+    ///
+    /// §18's identity rule, refused at DECISION time rather than only in a test.
+    /// Distinct from every other derivation refusal because nothing about the
+    /// evidence is wrong: the sources resolved, the inputs are available, and
+    /// the rule was never allowed to run — because nothing established that it
+    /// is the rule the fact names. A behaviour change needs a new version, never
+    /// a new digest on this one.
+    DerivationImplementationDrift {
+        derivation: String,
+        version: String,
+        expected: String,
+        computed: String,
+    },
     /// A conforming §13 query snapshot whose state or whose own recorded claim
     /// does not support the decision consuming it.
     ///
@@ -967,6 +981,34 @@ fn check_derived<E: RetainedEvidence>(
         });
         return;
     };
+
+    // THE IMPLEMENTATION BINDING, BEFORE THE RULE RUNS.
+    //
+    // §18 gives a registered derivation its identity in the bytes of the file
+    // that implements it, and `derivations::verify_implementation` is the check.
+    // It had exactly one caller in this crate and it was
+    // `tests/derivation_binding.rs` — so CI caught drift in this repository and
+    // the DECISION PATH did not. A derived fact could be recomputed by code
+    // whose binding does not hold, under an unchanged `(id, version)`.
+    //
+    // The matcher does the opposite and always did: `recompute_matched` calls
+    // `verify_binding` before scoring a single candidate. The asymmetry is the
+    // whole finding — one replayable rule verified its implementation at
+    // decision time and the other verified it in a test.
+    //
+    // Refused as its own fact. `DerivationDisagrees` would say the sources do
+    // not imply the claim, and `DerivationCannotRecompute` would say the rule
+    // ran and produced nothing. Neither happened: the rule was never allowed to
+    // run, because nothing established it is the rule.
+    if let Err(drift) = derivations::verify_implementation(entry) {
+        into.push(Unresolved::DerivationImplementationDrift {
+            derivation: fact.derivation.clone(),
+            version: fact.version.clone(),
+            expected: drift.expected.to_owned(),
+            computed: drift.computed,
+        });
+        return;
+    }
 
     if fact.derived_from.len() != entry.arity() {
         into.push(Unresolved::DerivationArityMismatch {
