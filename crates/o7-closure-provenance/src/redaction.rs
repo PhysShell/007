@@ -156,7 +156,28 @@ pub const ASSESSMENT_CONDITIONAL: &[Member] = &[
 pub struct RequiredFields {
     pub locator_kind: &'static str,
     pub always: &'static [&'static str],
-    pub present_only: &'static [&'static str],
+    pub present_only: &'static [PresentOnly],
+}
+
+/// One §5.3 present-only field, carried in BOTH of §7.5's vocabularies.
+///
+/// §5.3's rule has two halves and they live in different spaces. "Joins the
+/// required set exactly when it is present in the decoded source" is a
+/// statement about a decoded pointer; the only thing a consumer holds is a
+/// record, and a complete §8 projection spells the same field canonically. One
+/// pointer alone cannot express the rule, so the pair is the table entry.
+///
+/// The canonical half is not a transformation of the decoded half. It is §8's
+/// own OPTIONAL-IF-PRESENT spelling, transcribed, and
+/// `tests/contract_parity.rs` checks both halves against the two documents
+/// rather than against each other — a camel-case function would agree with
+/// itself no matter what §8 said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PresentOnly {
+    /// §5.3's pointer into the decoded source object.
+    pub decoded: &'static str,
+    /// The member a complete §8 projection carries the same field under.
+    pub canonical: &'static str,
 }
 
 pub const REQUIRED_FIELDS: &[RequiredFields] = &[
@@ -206,22 +227,53 @@ pub const REQUIRED_FIELDS: &[RequiredFields] = &[
             "/updated_at",
         ],
         present_only: &[
-            "/in_reply_to_id",
-            "/line",
-            "/original_line",
-            "/side",
-            "/start_line",
+            PresentOnly {
+                decoded: "/in_reply_to_id",
+                canonical: "inReplyToId",
+            },
+            PresentOnly {
+                decoded: "/line",
+                canonical: "line",
+            },
+            PresentOnly {
+                decoded: "/original_line",
+                canonical: "originalLine",
+            },
+            PresentOnly {
+                decoded: "/side",
+                canonical: "side",
+            },
+            PresentOnly {
+                decoded: "/start_line",
+                canonical: "startLine",
+            },
         ],
     },
     RequiredFields {
         locator_kind: "github-pull-request-head",
         always: &["/number", "/head/sha", "/head/ref", "/head/repo/full_name"],
-        present_only: &["/updated_at"],
+        present_only: &[PresentOnly {
+            decoded: "/updated_at",
+            canonical: "updatedAt",
+        }],
     },
     RequiredFields {
         locator_kind: "github-actions-check",
         always: &["/id", "/name", "/head_sha", "/status"],
-        present_only: &["/conclusion", "/started_at", "/completed_at"],
+        present_only: &[
+            PresentOnly {
+                decoded: "/conclusion",
+                canonical: "conclusion",
+            },
+            PresentOnly {
+                decoded: "/started_at",
+                canonical: "startedAt",
+            },
+            PresentOnly {
+                decoded: "/completed_at",
+                canonical: "completedAt",
+            },
+        ],
     },
 ];
 
@@ -536,22 +588,92 @@ fn denominator_of(
 /// conformant assessment reading `BLOCK_SECRET` resolves exactly as well as one
 /// reading `RETAIN`.
 ///
-/// WHAT IS NOT CHECKED, AND WHY. §5.3's present-only fields join the required set
-/// exactly when they are present in the decoded source. A consumer holds the
-/// record and not the decoded source, so it cannot distinguish a present-only
-/// field that was absent upstream from one that was dropped here. Every rule
-/// below is therefore stated over the **always** set, which is determinable, and
-/// bounded above by `always ∪ present_only`. Refusing on the undeterminable half
-/// would refuse conformant records; asserting it would be a check that cannot
-/// see what it claims to.
+/// WHAT IS AND IS NOT CHECKED, AND WHY. §5.3's present-only fields join the
+/// required set exactly when they are present in the decoded source, and the
+/// record is the only thing a consumer holds. That splits the set in two rather
+/// than putting all of it out of reach:
+///
+/// ```text
+/// the record carries the field    determinable — the record says it was there
+/// the record does not carry it    undeterminable — dropped here, or never sent
+/// ```
+///
+/// The first half is required, by the coverage rule below. An earlier revision
+/// stated the second half's argument over the whole set and left `conclusion`
+/// on a check run — present on real evidence, never in `always` — as content a
+/// decision could read and no gate was ever asked about.
+///
+/// The second half is still not demanded. Refusing on it would refuse
+/// conformant records, and asserting it would be a check that cannot see what
+/// it claims to. The ceiling is unchanged: everything assessed must be in
+/// `always ∪ present_only`.
 pub(crate) fn check_authorises(
     record: &crate::artifact::ValidatedArtifact,
     assessment: &crate::artifact::ValidatedArtifact,
 ) -> Result<(), String> {
     let (is_reduced, required) = denominator_of(record)?;
     let always: &[&str] = required.map_or(&[], |r| r.always);
-    let present_only: &[&str] = required.map_or(&[], |r| r.present_only);
-    let in_required = |p: &str| always.contains(&p) || present_only.contains(&p);
+    let present_only: &[PresentOnly] = required.map_or(&[], |r| r.present_only);
+    let in_required = |p: &str| always.contains(&p) || present_only.iter().any(|f| f.decoded == p);
+
+    // §5.3'S FLOOR, IN WHICHEVER VOCABULARY THIS RECORD IS WRITTEN IN.
+    //
+    //     A present-only field joins the required set exactly when it is
+    //     present in the decoded source. Absent means nothing to assess;
+    //     present means it is retained and must therefore be assessed like any
+    //     other.
+    //
+    // The doc comment above once argued the whole of this was undeterminable,
+    // on the grounds that a consumer holds the record and not the decoded
+    // source. That is true of a field the record does NOT carry, and it is
+    // still the reason the absent half is not demanded. It is not true of one
+    // the record DOES carry, and the argument for the ceiling was being reused
+    // as an argument against the floor. The consequence was durable rather than
+    // incidental: `conclusion` on a check run is present on real evidence,
+    // never in the `always` set, and was therefore a field the gate was
+    // structurally never asked about while a decision read its value.
+    //
+    // WHAT COUNTS AS THE RECORD DECLARING PRESENCE, and both readings are the
+    // record's own statement rather than an inference about upstream:
+    //
+    //     complete projection   §8 lists these members OPTIONAL-IF-PRESENT, so
+    //                           carrying one says the decoded source had it.
+    //                           §8 and §5.3 both make `null` the same input as
+    //                           absent, so a null member says nothing.
+    //     reduced record        §7.1 partitions the required set and puts every
+    //                           field in exactly one half, so a pointer in
+    //                           either half is the record saying that field was
+    //                           in the set — and a pointer in neither says it
+    //                           never was.
+    //
+    // Read here with `pointer` and `get` rather than through the ordered
+    // partition below, because this is a presence question and the ordering
+    // rules are §5.5's; running them early would move which refusal a malformed
+    // record reports without changing that it is refused.
+    let present_now: Vec<&'static str> = present_only
+        .iter()
+        .filter(|f| {
+            if is_reduced {
+                let named_in = |member: &str| {
+                    record
+                        .pointer(&format!("/{member}"))
+                        .is_some_and(|half| match half {
+                            Value::Array(items) => {
+                                items.iter().any(|i| i.as_str() == Some(f.decoded))
+                            }
+                            Value::Object(fields) => fields.contains_key(f.decoded),
+                            _ => false,
+                        })
+                };
+                named_in("retainedFields") || named_in("blockedFields")
+            } else {
+                record
+                    .pointer(&format!("/{}", f.canonical))
+                    .is_some_and(|v| !v.is_null())
+            }
+        })
+        .map(|f| f.decoded)
+        .collect();
 
     let assessed = ordered_unique_at(assessment, "assessedFields")?;
     let is_assessed = |p: &str| assessed.iter().any(|a| a == p);
@@ -639,6 +761,19 @@ pub(crate) fn check_authorises(
             return Err(format!(
                 "/coverageComplete is true and {missing:?} is not in /assessedFields. §5.2 \
                  fixes the denominator in §5.3 and forbids taking it from the same producer"
+            ));
+        }
+        // The denominator is `always ∪ the present-only fields this record
+        // declares present`, and the second half is why the two loops are not
+        // one: the pointer alone does not say which rule refused it, and
+        // "§5.3 puts a field you kept in the set" is a different sentence from
+        // "you did not assess a field that is always required".
+        if let Some(missing) = present_now.iter().find(|p| !is_assessed(p)) {
+            return Err(format!(
+                "/coverageComplete is true and {missing:?} is not in /assessedFields. §5.3 \
+                 puts a present-only field in the required set exactly when it is present, \
+                 and this record carries it — present means it is retained and must therefore \
+                 be assessed like any other"
             ));
         }
     }

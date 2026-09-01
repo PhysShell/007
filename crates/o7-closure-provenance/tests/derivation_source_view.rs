@@ -167,7 +167,10 @@ fn every_declared_decoded_input_is_a_required_field_of_its_slots_locator_kind() 
                     .expect("the slot kind is a §5.3 locatorKind; the audit above holds that");
                 assert!(
                     required.always.contains(&input.decoded)
-                        || required.present_only.contains(&input.decoded),
+                        || required
+                            .present_only
+                            .iter()
+                            .any(|f| f.decoded == input.decoded),
                     "{}/{} slot {position} takes a {}, and {:?} is not in that kind's §5.3 \
                      required set. §7.1 builds `retainedFields` out of that set and nothing \
                      else, so a reduced record of the surface this slot admits can never carry \

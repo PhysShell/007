@@ -121,9 +121,14 @@ fn every_required_field_set_is_the_one_the_contract_states() {
             always.as_slice(),
             "the `always` set for {kind:?} differs from §5.3"
         );
+        let decoded: Vec<&str> = table.present_only.iter().map(|f| f.decoded).collect();
         assert_eq!(
-            table.present_only,
-            present_only.as_slice(),
+            decoded.as_slice(),
+            present_only
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<&str>>()
+                .as_slice(),
             "the `present-only` set for {kind:?} differs from §5.3"
         );
     }
@@ -135,6 +140,70 @@ fn every_required_field_set_is_the_one_the_contract_states() {
             "the table carries {:?}, which §5.3 does not define. An extra denominator is not a \
              harmless spare: §5.2 makes this set normative, and a kind the contract never gated \
              would be admitted with a required set nobody agreed to",
+            entry.locator_kind
+        );
+    }
+}
+
+/// §8's `OPTIONAL-IF-PRESENT` members for one `sourceKind`, read out of the
+/// provenance contract.
+///
+/// §8's projection blocks name the same fields §5.3's present-only sets do, in
+/// the canonical spelling. Two documents, one rule — which is exactly the shape
+/// that drifts.
+fn contract_optional_members(source_kind: &str) -> Vec<String> {
+    let needle = format!("`sourceKind: {source_kind}`");
+    let at = PROVENANCE
+        .find(&needle)
+        .unwrap_or_else(|| panic!("§8 no longer declares a projection for {source_kind:?}"));
+    let rest = &PROVENANCE[at..];
+    let open = rest
+        .find("```text")
+        .unwrap_or_else(|| panic!("no fenced block follows {needle:?}"));
+    let body = &rest[open..];
+    let close = body
+        .find("```\n")
+        .unwrap_or_else(|| panic!("unterminated fenced block after {needle:?}"));
+    let block = &body[..close];
+    let marker = block.find("OPTIONAL-IF-PRESENT").unwrap_or_else(|| {
+        panic!("§8's block for {source_kind:?} names no OPTIONAL-IF-PRESENT row at all")
+    });
+    let tail = &block[marker + "OPTIONAL-IF-PRESENT".len()..];
+    tail.lines()
+        .next()
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter(|t| *t != "(none)")
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The canonical half of every present-only entry is §8's, and §8's
+/// `OPTIONAL-IF-PRESENT` row is exactly §5.3's present-only set.
+///
+/// WHY THIS EXISTS AND NOT A CAMEL-CASE FUNCTION. The two spellings look like a
+/// transformation of one another, and a transformation would agree with itself
+/// whatever the documents said. §5.3 fixes WHEN the field joins the required
+/// set; §8 fixes what a complete projection calls it, which is the only place a
+/// consumer can see that it is present. If the two documents ever disagree
+/// about which fields are optional, the coverage rule in `check_authorises` is
+/// ranging over a set neither one states.
+#[test]
+fn every_present_only_field_is_the_one_both_contracts_state() {
+    for entry in REQUIRED_FIELDS {
+        let canonical: Vec<&str> = entry.present_only.iter().map(|f| f.canonical).collect();
+        let optional = contract_optional_members(entry.locator_kind);
+        assert_eq!(
+            canonical.as_slice(),
+            optional
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<&str>>()
+                .as_slice(),
+            "the canonical present-only members for {:?} are not §8's OPTIONAL-IF-PRESENT row. \
+             §5.3 says when a present-only field joins the required set and §8 says what a \
+             complete projection calls it; a coverage rule ranging over a set the two \
+             documents do not agree on is ranging over neither",
             entry.locator_kind
         );
     }
