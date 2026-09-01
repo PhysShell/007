@@ -1914,8 +1914,8 @@ pub fn staleness<E: RetainedEvidence>(
                 unresolved.push(format!("{slot} did not happen ({reason})"));
             }
             HeadRead::Observed { event_digest } => {
-                match resolve_head_sha(store, event_digest, expected_role, subject) {
-                    Ok(sha) => observed.push(sha),
+                match resolve_head_read(store, event_digest, expected_role, subject) {
+                    Ok(read) => observed.push(read),
                     Err(why) => unresolved.push(format!("{slot} {why}")),
                 }
             }
@@ -1966,10 +1966,52 @@ pub fn staleness<E: RetainedEvidence>(
         };
     }
 
-    for sha in &observed {
-        if sha != expected_sha {
+    // §8.1'S BRACKET, AND WHETHER THIS PAIR IS ONE.
+    //
+    //     §8.1's whole purpose is to bracket an evaluation between two reads,
+    //     and `observedAt` is what says which read came first.
+    //
+    // A `HEAD_AFTER` observed before its `HEAD_BEFORE` encloses no interval, so
+    // the evaluation it claims to bracket happened outside it and the head is
+    // unwitnessed for the whole of the span that matters.
+    //
+    // BEFORE THE DISAGREEMENT SCAN, and that placement is G4's argument rather
+    // than a new one. A read disagreeing with `expected_sha` does not establish
+    // that the head moved DURING the evaluation; the bracket is what separates
+    // that from an expectation which was already stale. A reversed pair is a
+    // missing bracket by a second route, so `Stale` is exactly as unsupported
+    // here as it is beside a read that never happened.
+    //
+    // THE EQUAL CASE IS NOT REFUSED, and the omission is a ruling rather than an
+    // oversight. §8.1 froze `observedAt` to whole seconds. Two genuine reads
+    // around a fast evaluation therefore share a second, and two equal
+    // timestamps equally cannot say which read came first. Both are true at
+    // once, which makes it a question about whether §8.1's witness is adequate
+    // at the precision it froze — not a rule an implementation may pick.
+    // Refusing on `==` would refuse conformant evidence on the strength of an
+    // implementation's preference; it is recorded as an open §8.1 question in
+    // the contract and pinned by J2A-E, and stays out of the code until §8.1
+    // settles it.
+    //
+    // The comparison is lexicographic and that is sound ONLY over §8.1's frozen
+    // form; see `ObservedHead::observed_at`.
+    if let [before, after] = observed.as_slice() {
+        if before.observed_at > after.observed_at {
+            return Staleness::CannotCheck {
+                why: format!(
+                    "the HEAD_BEFORE read was observed at {} and the HEAD_AFTER read at {}, so \
+                     the pair encloses no interval; §8.1 exists to bracket an evaluation \
+                     between two reads and these two leave it outside them",
+                    before.observed_at, after.observed_at
+                ),
+            };
+        }
+    }
+
+    for read in &observed {
+        if read.sha != expected_sha {
             return Staleness::Stale {
-                observed: sha.clone(),
+                observed: read.sha.clone(),
             };
         }
     }
@@ -1992,12 +2034,12 @@ pub fn staleness<E: RetainedEvidence>(
 /// §5.3 gives it no required field set. Its two shapes are chosen by its own
 /// `acquisition`, so an AVAILABLE event with no `snapshotDigest` and a FAILED
 /// event carrying one are both refused at the door.
-fn resolve_head_sha<E: RetainedEvidence>(
+fn resolve_head_read<E: RetainedEvidence>(
     store: &E,
     event_digest: &str,
     expected_role: &str,
     subject: &Subject,
-) -> Result<String, String> {
+) -> Result<ObservedHead, String> {
     let mut why = Vec::new();
     let Some(event) = resolve_artifact(
         store,
@@ -2065,10 +2107,44 @@ fn resolve_head_sha<E: RetainedEvidence>(
         ));
     }
 
-    snapshot
+    // §8.1 REQUIRES `observedAt` on every event, of either acquisition, and
+    // freezes its value to exactly `YYYY-MM-DDThh:mm:ssZ`. It is read out HERE,
+    // beside the SHA, because the two together are what one read contributes to
+    // the bracket: this function used to return the SHA alone, and a caller
+    // holding only SHAs cannot ask which read came first no matter how careful
+    // it is. The absent arm is the same door-guaranteed shape as `headSha`
+    // directly below it, and is written for the same reason.
+    let observed_at = event
+        .str_at("/observedAt")
+        .ok_or_else(|| "names an event with no observedAt, which §8.1 requires".to_owned())?
+        .to_owned();
+
+    let sha = snapshot
         .str_at("/headSha")
         .map(str::to_owned)
-        .ok_or_else(|| "names a head snapshot with no headSha".to_owned())
+        .ok_or_else(|| "names a head snapshot with no headSha".to_owned())?;
+
+    Ok(ObservedHead { sha, observed_at })
+}
+
+/// What one successful head read contributes to §8.1's bracket.
+///
+/// The instant travels with the SHA rather than being fetched separately,
+/// because they are one read's two halves and a pair of them is the whole of
+/// the evidence `staleness` has. Splitting them was how the bracket came to be
+/// checked for existing and never for enclosing anything.
+#[derive(Debug, Clone)]
+struct ObservedHead {
+    sha: String,
+    /// §8.1's `observedAt`, in the frozen `YYYY-MM-DDThh:mm:ssZ` form.
+    ///
+    /// COMPARED AS A STRING, AND THAT IS ONLY SOUND OVER THAT DOMAIN. The form
+    /// is fixed width, zero-padded in every field and always UTC, so byte order
+    /// and time order coincide. They stop coinciding the moment the domain
+    /// admits an offset or a fractional second, and nothing about a string
+    /// comparison would announce it — `tests/correction_j2a.rs`'s J2A-G asserts
+    /// the frozen sentence from the contract for exactly that reason.
+    observed_at: String,
 }
 
 #[cfg(test)]

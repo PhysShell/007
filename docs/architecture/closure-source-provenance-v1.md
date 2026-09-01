@@ -339,6 +339,34 @@ Recording only `subjectStale: true` makes `STALE` unexplainable from the
 artifact; recording only one snapshot digest twice makes a missing second read
 unexplainable in the same way, one level down.
 
+#### 8.1.1 OPEN QUESTION — is the frozen witness adequate to order two reads?
+
+**Non-normative. This subsection states no obligation, changes no rule, and
+nothing may be implemented on the strength of it.** It records an unresolved
+question about §8.1's evidence so that it is not rediscovered as a defect and
+not settled by an implementation picking a reading.
+
+§8.1 says the two reads bracket an evaluation and that `observedAt` is what
+says which read came first, and it freezes `observedAt` to whole seconds. A
+pair whose `HEAD_AFTER` is observed strictly before its `HEAD_BEFORE`
+contradicts the first of those and is refused — that much follows from the
+frozen text and is implemented.
+
+Equal timestamps do not follow from it, in either direction:
+
+- two genuine reads bracketing a fast evaluation serialize to the same second
+  at this precision, so refusing the pair would refuse conformant evidence;
+- two equal timestamps cannot themselves establish which read came first, so
+  admitting the pair accepts a bracket the witness does not demonstrate.
+
+Both are true at once. The question is therefore whether a whole-second
+`observedAt` is an adequate witness for the ordering §8.1 relies on, and the
+answers available to it are ones only this document can give — sub-second
+precision, an explicit ordering obligation, an explicit statement that equal
+timestamps are admissible, or a different witness for the order. Until one is
+chosen, the equal case is treated exactly as it was before the question was
+asked.
+
 ### 8.2 Check run
 
 `sourceKind: github-actions-check`
