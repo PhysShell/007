@@ -699,11 +699,21 @@ fn query_snapshot(enumeration: &str) -> Value {
         // question establishes nothing about this one.
         "requiredObservationId": "review/external",
         "binding": {"repository": "PhysShell/007", "pullRequest": "9001"},
+        // `false` since GREEN-PAGINATION, and this fixture was never coherent
+        // either: it declared `nextPagePresent: true` beside every use of it as
+        // a COMPLETE positive control, which is the exact pair §14 forbids an
+        // authoritative absence over. Nothing read the field, so nothing
+        // noticed — the same shape as the requiredObservationId note above, and
+        // the reason J3 had a green suite to hide in.
+        //
+        // `pagesObtained` shorter than `pagesRequested` is left alone. That is
+        // the ordinary shape of a query whose data ran out: more pages asked
+        // for than existed, and the flag below is how the snapshot says so.
         "pagination": {
             "perPage": 100,
             "pagesRequested": ["1", "2"],
             "pagesObtained": ["1"],
-            "nextPagePresent": true,
+            "nextPagePresent": false,
         },
         "enumeration": enumeration,
         "matcher": {

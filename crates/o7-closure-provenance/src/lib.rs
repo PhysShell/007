@@ -959,6 +959,56 @@ fn qualify_query<E: RetainedEvidence>(
         }
     }
 
+    // 1b. THE OBSERVATION THE STATE SUMMARISES. §14:
+    //
+    //     If a next page exists, pagination terminated early, a page fetch
+    //     failed, or the pagination state is unknown, the acquisition layer
+    //     MAY NOT claim authoritative absence. That is: CANNOT_CHECK.
+    //
+    //     COMPLETE + nextPagePresent: true  ->  refused
+    //
+    // `enumeration` is what the producer CONCLUDED; `nextPagePresent` is the
+    // observation it concluded from. §13 requires both to be retained precisely
+    // so the second can check the first, and reading only the first is
+    // self-certification with the contradiction sitting one member away in the
+    // same object. Nothing in this crate read the field before: it existed only
+    // in the matcher's schema table, where it is typed and never consulted.
+    //
+    // THE OTHER TWO CONDITIONS §14 NAMES ARE NOT RESTATED HERE, and the
+    // omissions are deliberate. "A page fetch failed" is an INCOMPLETE
+    // enumeration and the branch above refuses it. "Pagination terminated
+    // early" is NOT `pagesObtained` shorter than `pagesRequested` — a query
+    // whose data runs out asks for more pages than it gets, and reports that by
+    // setting this flag false — so a rule there would be an implementation
+    // inventing a norm the contract does not state.
+    //
+    // The non-boolean and absent arms fold into one refusal because they are
+    // one §14 condition: the pagination state is unknown. Both are already
+    // refused at the artifact door, where §13's REQUIRED member and its boolean
+    // type are checked, so neither arm is reachable from a validated snapshot
+    // today. They are written rather than assumed because this is the function
+    // that decides authoritative absence, and a decision that depends on where
+    // some other check happens to live is a decision resting on an accident.
+    match snapshot.pointer("/pagination/nextPagePresent") {
+        Some(Value::Bool(false)) => {}
+        Some(Value::Bool(true)) => {
+            return Err("the query snapshot records enumeration COMPLETE and \
+                 /pagination/nextPagePresent true; §14 forbids an authoritative absence when a \
+                 next page exists, and an enumeration that says both is contradicted by its \
+                 own evidence rather than supported by it"
+                .to_owned())
+        }
+        other => {
+            return Err(format!(
+                "the query snapshot's /pagination/nextPagePresent is {}, so its pagination \
+                 state is unknown; §14 puts an unknown state where it puts a next page that \
+                 exists, and a completeness witness nobody can read does not license the \
+                 result it exists to license",
+                other.map_or_else(|| "absent".to_owned(), ToString::to_string)
+            ))
+        }
+    }
+
     // 2. THE REPLAY RECORD, bound to the digest THIS artifact was validated
     //    under. `recorded_query` returns `None` for any other kind, so the role
     //    check upstream is not the only thing standing between a submitted
