@@ -469,6 +469,22 @@ pub enum Unresolved {
         profile: &'static str,
         missing: &'static str,
     },
+    /// Two of §17's requirements for one observation were each satisfied, and by
+    /// DIFFERENT artifacts of the same surface.
+    ///
+    /// A defect in the BASIS and not in any artifact in it: every one resolved,
+    /// validated, and answered the question put to it. §17 states a minimum
+    /// decision basis *per observation*, and an observation of a review is an
+    /// observation of one review — so a review supplying the observed commit
+    /// identity and a second review supplying the derivation are not that
+    /// observation's basis, they are two halves of two.
+    ///
+    /// `surface` rather than the requirement names: the surface is what the two
+    /// requirements have in common and is the thing a reader has to look at.
+    BasisSubjectNotShared {
+        profile: &'static str,
+        surface: &'static str,
+    },
     /// A derived fact fills a derivation's source slot with an artifact of a
     /// kind that slot does not take.
     ///
