@@ -1,0 +1,81 @@
+schema: oracle-v0
+case: case-0005-overload-set
+language: typescript
+oracle_kind: constructed
+
+independent_oracle:
+  available: true
+  tool: TypeScript language service (per-signature references)
+  note: >
+    tsserver attributes each call to the signature it actually selected, which
+    is what makes the per-overload expectation checkable rather than a matter of
+    opinion.
+
+adversarial_about: >
+  One name, three declarations: two overload signatures and one implementation
+  signature. Two call sites select different overloads. A resolver that keys on
+  name and arity collapses the set into a single symbol and attributes every
+  call to every signature -- which reads as a correct, complete caller set and
+  is neither.
+
+seeds:
+  - id: seed-format-impl
+    gold_identity:
+      path: source/format.ts
+      symbol: format (implementation signature)
+      line_range: [3, 5]
+  - id: seed-format-number-overload
+    gold_identity:
+      path: source/format.ts
+      symbol: format (number overload signature)
+      line_range: [1, 1]
+
+facts:
+  - seed: seed-format-impl
+    relation: callers
+    expected:
+      - path: source/app/report.ts
+        symbol: formatAmount
+        line: 4
+      - path: source/app/report.ts
+        symbol: formatWhen
+        line: 8
+    forbidden: []
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: false
+      required_caveats: [overload_ambiguity]
+      note: >
+        Every call reaches the implementation body, so the set is exhaustive at
+        this seed. Rename is unsafe from this relation alone: renaming the
+        implementation signature without both overload signatures in the same
+        edit does not compile.
+
+        The two seeds in this case ask genuinely different questions, and the
+        distinction is TypeScript's, not the corpus's. A call never SELECTS the
+        implementation signature -- getResolvedSignature returns an overload
+        signature at both call sites (verified: line 4 selects line 1, line 8
+        selects line 2). Seeding the implementation asks which calls REACH this
+        body, whose answer is every call to the symbol; seeding an overload
+        signature asks which calls select THAT signature. A tool that reports
+        the same set for both has collapsed the distinction, which is what the
+        `forbidden` entry on the next fact detects.
+
+  - seed: seed-format-number-overload
+    relation: callers
+    expected:
+      - path: source/app/report.ts
+        symbol: formatAmount
+        line: 4
+        reason: selects the number overload
+    forbidden:
+      - path: source/app/report.ts
+        symbol: formatWhen
+        line: 8
+        reason: >
+          selects the Date overload; appears here only if the overload set was
+          collapsed to a single name-keyed symbol
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: false
+      required_caveats: [overload_ambiguity]
