@@ -82,6 +82,20 @@ use std::collections::BTreeSet;
 
 const THIS_FILE: &str = include_str!("correction_g3.rs");
 
+/// The witness files a `Bounding::Here` row may point into, and their bytes.
+///
+/// The guard below used to search THIS FILE only, which was right about the
+/// property — a row may not outlive the check it claims — and too narrow about
+/// where the check may live. K1's evidence correction is the case that showed
+/// it: the bound on `redactionPolicyVersion` is held by witnesses in
+/// `correction_k1.rs`, and the alternative to widening this table was copying
+/// them here, which would make two witnesses for one rule and leave the
+/// inventory citing the copy.
+const WITNESS_FILES: &[(&str, &str)] = &[
+    ("correction_g3.rs", THIS_FILE),
+    ("correction_k1.rs", include_str!("correction_k1.rs")),
+];
+
 // ---- The behavioural half.
 
 fn assessment_observed_at(observed_at: Value) -> Value {
@@ -230,8 +244,12 @@ fn g3e_a_conforming_instant_is_still_accepted() {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bounding {
     /// A check in this crate constrains the value. Names the witness that turns
-    /// red when the check is removed.
-    Here(&'static str),
+    /// red when the check is removed, and the file it lives in — both, because
+    /// the claim is only checkable if the guard can find the witness.
+    Here {
+        file: &'static str,
+        witness: &'static str,
+    },
     /// Constrained by a mechanism that exists for another reason. Names it.
     Elsewhere(&'static str),
     /// Nothing constrains it. Says what that leaves open.
@@ -242,15 +260,55 @@ enum Bounding {
 ///
 /// Keyed by `table/member` so two members of one name in different tables are
 /// two rows — `observedAt` appears three times and they are not one fact.
+///
+/// ERRATUM, K1 — TWO ROWS OF THIS TABLE WERE WRONG, AND THE TABLE IS THE
+/// MECHANISM THAT WAS SUPPOSED TO MAKE THAT IMPOSSIBLE.
+///
+/// Until `GREEN-POLICY-DOMAIN` both `redactionPolicyVersion` rows read
+/// `Elsewhere`, citing §9.5's equality:
+///
+/// ```text
+/// assessment/redactionPolicyVersion
+///     "§9.5 equality: a record's own /redactionPolicyVersion must equal its
+///      authorising assessment's, checked by check_authorises. The VALUE is
+///      unconstrained — that a policy by that name was ever published is not
+///      established here"
+/// reduced/redactionPolicyVersion
+///     "§9.5 equality, as for the assessment's"
+/// ```
+///
+/// External review (Codex, on `30e0891`) falsified that classification, and it
+/// was wrong in two independent ways rather than one:
+///
+/// 1. The cited check DOES NOT RUN for a complete §8 projection. Those carry no
+///    `redactionPolicyVersion`, so there is no second value to compare, and
+///    `check_authorises` said so in its own comment. The citation named a check
+///    that case never reached. This is the half the review reported.
+/// 2. EQUALITY IS NOT A BOUND ON RANGE, and this half was found by testing the
+///    citation rather than reading it. Both values come from the same producer,
+///    so the same credential on both sides satisfies §9.5 exactly.
+///    `correction_k1.rs`'s K1-B is that specimen.
+///
+/// The first row's own text half-admitted it — "The VALUE is unconstrained" —
+/// and still classified the member as bounded. That is the defect worth
+/// recording: `Elsewhere` was read as "someone else's problem" when it means
+/// "constrained by a mechanism that exists for another reason", and a
+/// justification that names what it does NOT establish is not a bound. The
+/// rows below now read `Here`, naming witnesses that turn red when the check is
+/// removed.
+///
+/// The prior text is quoted above rather than replaced silently, per the
+/// adjudication: the earlier classification is not to be made to look correct
+/// in hindsight. An inventory whose failures are edited out of it is the same
+/// instrument as one that never ran.
 const INVENTORY: &[(&str, Bounding)] = &[
     // §9's assessment.
     (
         "assessment/redactionPolicyVersion",
-        Bounding::Elsewhere(
-            "§9.5 equality: a record's own /redactionPolicyVersion must equal its authorising \
-             assessment's, checked by check_authorises. The VALUE is unconstrained — that a \
-             policy by that name was ever published is not established here",
-        ),
+        Bounding::Here {
+            file: "correction_k1.rs",
+            witness: "k1a_an_unbounded_policy_version_authorises_a_complete_projection",
+        },
     ),
     (
         "assessment/assessedFields",
@@ -261,7 +319,10 @@ const INVENTORY: &[(&str, Bounding)] = &[
     ),
     (
         "assessment/observedAt",
-        Bounding::Here("g3a_an_assessment_observed_at_must_be_an_instant"),
+        Bounding::Here {
+            file: "correction_g3.rs",
+            witness: "g3a_an_assessment_observed_at_must_be_an_instant",
+        },
     ),
     (
         "assessment/detector/id",
@@ -301,11 +362,17 @@ const INVENTORY: &[(&str, Bounding)] = &[
     // §7's reduced source record.
     (
         "reduced/locatorKind",
-        Bounding::Here("g3h_an_unknown_locator_kind_is_refused_by_its_value_domain"),
+        Bounding::Here {
+            file: "correction_g3.rs",
+            witness: "g3h_an_unknown_locator_kind_is_refused_by_its_value_domain",
+        },
     ),
     (
         "reduced/redactionPolicyVersion",
-        Bounding::Elsewhere("§9.5 equality, as for the assessment's"),
+        Bounding::Here {
+            file: "correction_k1.rs",
+            witness: "k1b_equality_is_not_a_bound_on_range",
+        },
     ),
     (
         "reduced/blockedFields",
@@ -354,11 +421,17 @@ const INVENTORY: &[(&str, Bounding)] = &[
     ),
     (
         "head_read_available/observedAt",
-        Bounding::Here("g3b_an_available_head_read_observed_at_must_be_an_instant"),
+        Bounding::Here {
+            file: "correction_g3.rs",
+            witness: "g3b_an_available_head_read_observed_at_must_be_an_instant",
+        },
     ),
     (
         "head_read_failed/observedAt",
-        Bounding::Here("g3c_a_failed_head_read_observed_at_must_be_an_instant"),
+        Bounding::Here {
+            file: "correction_g3.rs",
+            witness: "g3c_a_failed_head_read_observed_at_must_be_an_instant",
+        },
     ),
     (
         "head_read_failed/reason",
@@ -504,18 +577,39 @@ fn g3f_every_string_member_is_classified() {
 /// A classification is a claim. `Elsewhere` and `Residual` carry prose a reader
 /// must weigh, and the least this can do is refuse an empty one. `Here` claims a
 /// mechanism in this crate, and that claim is checkable: the named witness must
-/// exist in this file, so a check deleted with its test cannot leave a row
-/// behind saying it is bounded.
+/// exist in the file the row names, so a check deleted with its test cannot
+/// leave a row behind saying it is bounded.
+///
+/// The file is part of the row since K1's erratum. Searching only this file was
+/// right about the property and wrong about the scope, and the row it could not
+/// express is the one whose misclassification let an unbounded member sit in
+/// the inventory reading `Elsewhere`.
 #[test]
 fn g3g_every_classification_is_checkable() {
     for (member, bounding) in INVENTORY {
         match bounding {
-            Bounding::Here(witness) => assert!(
-                THIS_FILE.contains(&format!("fn {witness}(")),
-                "{member} claims a check in this crate held by {witness:?}, and this file \
-                 declares no such witness. A row asserting a bound whose evidence does not \
-                 exist is worse than no row"
-            ),
+            Bounding::Here { file, witness } => {
+                // Two asserts rather than a let-else and a `panic!`: this
+                // crate denies `clippy::panic` in tests as well, and taking an
+                // allowance to write a nicer control flow would be spending a
+                // lint the E1 audit exists to keep honest.
+                let source = WITNESS_FILES
+                    .iter()
+                    .find(|(name, _)| name == file)
+                    .map(|(_, source)| *source)
+                    .unwrap_or_default();
+                assert!(
+                    !source.is_empty(),
+                    "{member} points at {file:?}, which WITNESS_FILES does not include. A row \
+                     whose evidence this guard cannot open is a row nobody is checking"
+                );
+                assert!(
+                    source.contains(&format!("fn {witness}(")),
+                    "{member} claims a check held by {witness:?} in {file:?}, and that file \
+                     declares no such witness. A row asserting a bound whose evidence does not \
+                     exist is worse than no row"
+                );
+            }
             Bounding::Elsewhere(why) | Bounding::Residual(why) => assert!(
                 why.len() > 20,
                 "{member}: {why:?} does not say what bounds it or what is left open. A \
