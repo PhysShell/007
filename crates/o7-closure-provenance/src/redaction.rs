@@ -848,6 +848,38 @@ pub(crate) fn check_authorises(
     }
 
     let blocked = ordered_unique_at(record, "blockedFields")?;
+
+    // §7.4'S FLOOR, AND IT IS A PROVENANCE RULE RATHER THAN A TIDINESS ONE:
+    //
+    //     `blockedFields` MUST be non-empty. A record that blocked nothing is
+    //     not a reduced record — it is a complete projection, and should be one.
+    //
+    // §7 defines this kind as the artifact that exists BECAUSE the source did
+    // not pass the gate as a whole. Without the floor a producer emits an
+    // object wearing that provenance — refused-source semantics, a
+    // `locatorKind` naming the kind that was refused, an outcome of
+    // BLOCK_SECRET or CANNOT_ASSESS — and hands over every field it was
+    // supposed to have withheld. Every partition rule below is then satisfied
+    // vacuously: nothing is in both halves, nothing required is in neither once
+    // `retainedFields` carries it all, and no finding names an unblocked field
+    // because there are no findings.
+    //
+    // REACHABLE ONLY UNDER `CANNOT_ASSESS`, and the derivation is worth stating
+    // because it says what this check is actually holding. §9.6 computes
+    // BLOCK_SECRET from the presence of findings, and §7.1 blocks a finding's
+    // field always, so an empty blocked half under that outcome was already
+    // refused by the finding rule. The two rules are independent — this one
+    // does not become unreachable if that one moves — and `correction_k2.rs`'s
+    // K2-B pins the pairing from the other side.
+    if blocked.is_empty() {
+        return Err(
+            "/blockedFields is empty. §7.4: a record that blocked nothing is not a reduced \
+             record — it is a complete projection, and should be one; this one claims the \
+             refused-source kind while withholding nothing"
+                .to_owned(),
+        );
+    }
+
     let is_blocked = |p: &str| blocked.iter().any(|b| b == p);
     let retained: Vec<String> = record
         .pointer("/retainedFields")
