@@ -967,6 +967,46 @@ pub(crate) fn check_authorises(
              the detector never successfully assessed is blocked, always"
         ));
     }
+    // §7.1: AND THE OTHER DIRECTION, which is not a second rule but the rest of
+    // the same one.
+    //
+    //     blockedFields = flagged ∪ (required \ assessed)
+    //
+    // is an EQUALITY, and the two rules above are its two inclusions read one
+    // way round: every flagged field is blocked, every retained field was
+    // assessed. Neither says a blocked field had a reason to be. §7.1 says it
+    // directly — "Retention is not discretionary in the other direction either.
+    // A field that survives the computation is retained, so the record cannot be
+    // thinned by judgement after the fact" — and until this check existed a
+    // producer could withhold a field the computation retained with every other
+    // rule still holding: the halves disjoint, nothing required in neither, the
+    // finding's own field blocked, every retained field assessed.
+    //
+    // WHY THAT IS PROVENANCE AND NOT TIDINESS. The gate's output is a decision's
+    // input, so a producer free to thin the record chooses which evidenced
+    // decisions stay makeable, and does so without lying: the object it emits
+    // passes every check. §7.1 removes that freedom by making both halves
+    // COMPUTED from the assessment. One unchecked direction hands it back.
+    //
+    // THE DOMAIN IS J1'S, not `always`. A present-only field the record declares
+    // present joins the required set and is assessed like any other, so a
+    // producer could otherwise suppress `conclusion` — present on real evidence,
+    // and the field a check decision is about. The check ranges over `blocked`
+    // itself rather than over a reconstructed denominator, so there is no half
+    // of §5.3 for it to miss: whatever is in `blockedFields` must have earned
+    // its place, and `in_required` above has already refused anything outside
+    // the kind's set.
+    if let Some(thinned) = blocked
+        .iter()
+        .find(|b| is_assessed(b) && !flagged.iter().any(|f| f == b))
+    {
+        return Err(format!(
+            "the record blocks {thinned:?}, which /assessedFields carries and no finding names. \
+             §7.1: `blockedFields = flagged ∪ (required \\ assessed)` — retention is not \
+             discretionary in the other direction either, and a field that survives the \
+             computation is retained"
+        ));
+    }
 
     Ok(())
 }
