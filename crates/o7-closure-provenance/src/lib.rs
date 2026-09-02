@@ -42,6 +42,7 @@ use crate::derivations::DerivationInput;
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{verify_matched, ImplementationCheck};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 
 pub mod artifact;
 pub mod derivations;
@@ -1555,8 +1556,8 @@ pub fn admissibility<E: RetainedEvidence>(
                     surface,
                     canonical,
                     decoded,
-                } => checked.observed.iter().any(|(found, pointer)| {
-                    *found == surface && (*pointer == canonical || *pointer == decoded)
+                } => checked.observed.iter().any(|o| {
+                    o.surface == surface && (o.pointer == canonical || o.pointer == decoded)
                 }),
                 Needs::Derived { derivation } => {
                     basis.derived.iter().any(|f| f.derivation == derivation)
@@ -1567,6 +1568,76 @@ pub fn admissibility<E: RetainedEvidence>(
                 why.push(Unresolved::BasisIncompleteForProfile {
                     profile: profile.name(),
                     missing: requirement.name,
+                });
+            }
+        }
+        let mut by_surface: BTreeMap<&'static str, Vec<Vec<&str>>> = BTreeMap::new();
+        for requirement in profile.requires() {
+            match requirement.needs {
+                Needs::Observed {
+                    surface,
+                    canonical,
+                    decoded,
+                } => {
+                    by_surface.entry(surface).or_default().push(
+                        checked
+                            .observed
+                            .iter()
+                            .filter(|o| {
+                                o.surface == surface
+                                    && (o.pointer == canonical || o.pointer == decoded)
+                            })
+                            .map(|o| o.digest)
+                            .collect(),
+                    );
+                }
+                Needs::Derived { derivation } => {
+                    // One set per SLOT KIND, unioned across the facts claiming
+                    // this derivation — the same "exists" reading as above. The
+                    // version comes from each fact rather than the requirement
+                    // because the requirement names the id only, deliberately:
+                    // whether the named version exists and recomputes is
+                    // `check_derived`'s question, answered in one place.
+                    let mut slots: BTreeMap<&'static str, Vec<&str>> = BTreeMap::new();
+                    for fact in basis.derived.iter().filter(|f| f.derivation == derivation) {
+                        let Some(entry) = derivations::resolve(&fact.derivation, &fact.version)
+                        else {
+                            continue;
+                        };
+                        for (index, slot) in entry.sources.iter().enumerate() {
+                            if let Some(cited) = fact.derived_from.get(index) {
+                                slots.entry(slot.kind).or_default().push(cited.as_str());
+                            }
+                        }
+                    }
+                    for (kind, cited) in slots {
+                        by_surface.entry(kind).or_default().push(cited);
+                    }
+                }
+                // Names no surface: §17's absence row is about the basis naming
+                // a snapshot at all, and the snapshot's own subject is checked
+                // where the snapshot is qualified.
+                Needs::ExpectedQuerySnapshot => {}
+            }
+        }
+        for (surface, witnesses) in by_surface {
+            // An empty set means that row was not satisfied, or the fact
+            // claiming it was malformed. Both are already reported, and adding
+            // "these are not one observation" for a row nobody presented would
+            // answer a question that was never asked.
+            let Some((first, rest)) = witnesses.split_first() else {
+                continue;
+            };
+            if rest.is_empty() || witnesses.iter().any(Vec::is_empty) {
+                continue;
+            }
+            let shared = first
+                .iter()
+                .any(|candidate| rest.iter().all(|set| set.contains(candidate)));
+            if !shared {
+                why.push(Unresolved::BasisSubjectNotShared {
+                    profile: profile.name(),
+                    surface,
                 });
             }
         }
@@ -1615,8 +1686,21 @@ struct CheckedBasis<'a> {
     /// the pointer it was read by. Recorded during the walk because a surface is
     /// only knowable after resolution, and resolving twice is two chances to
     /// disagree about one artifact.
-    observed: Vec<(&'static str, &'a str)>,
+    observed: Vec<ObservedField<'a>>,
     some_input_did_not_resolve: bool,
+}
+
+/// One field a basis actually observed, and the artifact it observed it on.
+///
+/// The DIGEST is here because §17's table is a minimum basis per observation:
+/// two rows about a review are two rows about ONE review, and a surface plus a
+/// pointer cannot say which artifact answered. Carrying the surface alone is
+/// what let two reviews jointly evidence one decision.
+#[derive(Debug, Clone, Copy)]
+struct ObservedField<'a> {
+    surface: &'static str,
+    pointer: &'a str,
+    digest: &'a str,
 }
 
 fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> CheckedBasis<'a> {
@@ -1626,7 +1710,7 @@ fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> 
     };
     let mut why = Vec::new();
     let mut values = Vec::new();
-    let mut observed: Vec<(&'static str, &'a str)> = Vec::new();
+    let mut observed: Vec<ObservedField<'a>> = Vec::new();
     let mut some_input_did_not_resolve = false;
 
     for input in &basis.inputs {
@@ -1640,7 +1724,11 @@ fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> 
             some_input_did_not_resolve = true;
             continue;
         };
-        observed.push((record.kind().surface(), input.pointer.as_str()));
+        observed.push(ObservedField {
+            surface: record.kind().surface(),
+            pointer: input.pointer.as_str(),
+            digest: input.source_digest.as_str(),
+        });
         match read_pointer(&record, &input.pointer) {
             Ok(value) => values.push(value),
             Err(e) => why.push(e),
