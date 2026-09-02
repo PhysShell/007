@@ -253,14 +253,21 @@ pub struct DecisionBasis {
     pub observation_id: String,
     pub inputs: Vec<DecisionInput>,
     pub derived: Vec<DerivedFact>,
-    /// For an absence claim: the query snapshot digest replay must be checked
-    /// against. It lives HERE and not in the store — that placement is the
-    /// authority path this slice exists to establish.
-    pub expected_query_digest: Option<String>,
+    /// For an absence claim: the query snapshot the claim rests on, and the
+    /// subject it must be an enumeration OF.
+    ///
+    /// It lives HERE and not in the store — that placement is the authority path
+    /// this slice exists to establish.
+    ///
+    /// The digest and the subject are ONE member and not two optional ones so
+    /// that a basis cannot name a snapshot without saying what change it is
+    /// supposed to be about. Two independent options are two things that can
+    /// disagree, and the one nobody sets is the one that stops being checked.
+    pub expected_query: Option<ExpectedQuery>,
     pub bindings: Vec<DeclaredBinding>,
     /// The redaction policy version this decision is made under, per §9.5.
     ///
-    /// Beside `expected_query_digest` for the same reason it exists: §9.4
+    /// Beside `expected_query` for the same reason it exists: §9.4
     /// requires every field of an assessment to have a range independent of the
     /// content inspected, and this member had none. The value cannot come from
     /// the assessment — that is the party that would be leaking — and cannot be
@@ -268,6 +275,23 @@ pub struct DecisionBasis {
     /// comes from the caller, exactly as `expected_sha` and the
     /// `DecisionProfile` do.
     pub expected_redaction_policy: String,
+}
+
+/// The query snapshot an absence claim rests on, and the subject it must
+/// enumerate.
+///
+/// §17's `absence` row requires the basis to name the snapshot. §13 makes the
+/// snapshot's `binding` part of what it IS, and §17.1 requires the subject to
+/// arrive from OUTSIDE the artifact being checked — so the digest alone cannot
+/// establish that a complete, empty enumeration is an enumeration of THIS
+/// change. Observation ids are reusable across pull requests; a subject is not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedQuery {
+    pub digest: String,
+    /// The repository and pull request this decision is about, supplied by the
+    /// caller exactly as `staleness` takes its subject and a falsification scan
+    /// declares its binding.
+    pub subject: QueryBinding,
 }
 
 /// Retained evidence, addressed by digest.
@@ -331,7 +355,7 @@ struct Expected<'a> {
     /// relates it to the record's, and neither names one — so a literal here
     /// would be this implementation inventing the norm it claims to enforce.
     /// The caller names the policy the decision is made under, exactly as it
-    /// names `expected_sha`, `expected_query_digest` and the `DecisionProfile`.
+    /// names `expected_sha`, `expected_query` and the `DecisionProfile`.
     policy: &'a str,
 }
 
@@ -1562,7 +1586,7 @@ pub fn admissibility<E: RetainedEvidence>(
                 Needs::Derived { derivation } => {
                     basis.derived.iter().any(|f| f.derivation == derivation)
                 }
-                Needs::ExpectedQuerySnapshot => basis.expected_query_digest.is_some(),
+                Needs::ExpectedQuerySnapshot => basis.expected_query.is_some(),
             };
             if !satisfied {
                 why.push(Unresolved::BasisIncompleteForProfile {
@@ -1743,7 +1767,8 @@ fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> 
     // other record. It is NOT read out of the store: that direction is the
     // authority path this slice exists to establish, and reversing it would make
     // the store the author of its own expectation.
-    if let Some(query_digest) = &basis.expected_query_digest {
+    if let Some(expected_query) = &basis.expected_query {
+        let query_digest = &expected_query.digest;
         if let Some(snapshot) = resolve_artifact(
             store,
             query_digest,

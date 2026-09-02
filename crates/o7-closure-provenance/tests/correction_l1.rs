@@ -202,7 +202,7 @@ fn basis(inputs: Vec<DecisionInput>, derived: Vec<DerivedFact>) -> DecisionBasis
         observation_id: "review/external".to_owned(),
         inputs,
         derived,
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }

@@ -99,8 +99,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
-    FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, ScanCompleteness,
-    ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
+    ExpectedQuery, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
+    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -293,7 +293,7 @@ fn basis(record_digest: &str, pointer: &str) -> DecisionBasis {
             pointer: pointer.to_owned(),
         }],
         derived: Vec::new(),
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }
@@ -914,7 +914,13 @@ fn s28_an_expected_query_digest_that_is_not_a_query_snapshot_is_refused() {
     let mut store = Store::default();
     let d = store.retain_under(&review(), &clean_assessment());
     let mut b = basis(&d, "/body");
-    b.expected_query_digest = Some(d.clone());
+    b.expected_query = Some(ExpectedQuery {
+        digest: d.clone(),
+        subject: QueryBinding {
+            repository: "PhysShell/007".to_owned(),
+            pull_request: "9001".to_owned(),
+        },
+    });
     let why = refused(&relations(&b, &store)).to_vec();
     assert!(
         !why.is_empty(),
@@ -1019,10 +1025,16 @@ fn s31_an_ungated_query_snapshot_needs_no_retention_binding() {
     let mut store = Store::default();
     let d = store.retain_under(&review(), &clean_assessment());
     let mut b = basis(&d, "/body");
-    b.expected_query_digest = Some(store.put(&query_snapshot("COMPLETE")));
+    b.expected_query = Some(ExpectedQuery {
+        digest: store.put(&query_snapshot("COMPLETE")),
+        subject: QueryBinding {
+            repository: "PhysShell/007".to_owned(),
+            pull_request: "9001".to_owned(),
+        },
+    });
     assert!(
         store
-            .binding_for(b.expected_query_digest.as_deref().unwrap_or(""))
+            .binding_for(b.expected_query.as_ref().map_or("", |q| q.digest.as_str()))
             .is_none(),
         "fixture: this witness is about a snapshot with NO binding"
     );
@@ -1043,7 +1055,13 @@ fn s32_an_unretained_query_snapshot_is_still_refused() {
     let d = store.retain_under(&review(), &clean_assessment());
     let mut b = basis(&d, "/body");
     let never_stored = format!("sha256:{}", "c".repeat(64));
-    b.expected_query_digest = Some(never_stored.clone());
+    b.expected_query = Some(ExpectedQuery {
+        digest: never_stored.clone(),
+        subject: QueryBinding {
+            repository: "PhysShell/007".to_owned(),
+            pull_request: "9001".to_owned(),
+        },
+    });
     let why = refused(&relations(&b, &store)).to_vec();
     assert!(
         why.iter()

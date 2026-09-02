@@ -37,7 +37,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    relations_checked, Admissible, DecisionBasis, RetainedEvidence, Unresolved,
+    relations_checked, Admissible, DecisionBasis, ExpectedQuery, QueryBinding, RetainedEvidence,
+    Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -202,7 +203,13 @@ fn absence_basis(expected: &str) -> DecisionBasis {
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
-        expected_query_digest: Some(expected.to_owned()),
+        expected_query: Some(ExpectedQuery {
+            digest: expected.to_owned(),
+            subject: QueryBinding {
+                repository: "PhysShell/007".to_owned(),
+                pull_request: "9001".to_owned(),
+            },
+        }),
         bindings: Vec::new(),
     }
 }
@@ -248,7 +255,7 @@ fn a_reduced_source_record_is_not_a_query_candidate() {
                         pointer: "/id".to_owned(),
                     }],
                     derived: Vec::new(),
-                    expected_query_digest: None,
+                    expected_query: None,
                     bindings: Vec::new(),
                 },
                 &store

@@ -302,7 +302,7 @@ fn basis(digest_of: &str, pointer: &str) -> DecisionBasis {
             pointer: pointer.to_owned(),
         }],
         derived: Vec::new(),
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }

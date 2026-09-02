@@ -347,7 +347,7 @@ fn basis(sources: Vec<String>) -> DecisionBasis {
             value: json!(true),
             derived_from: sources,
         }],
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }

@@ -199,7 +199,7 @@ fn check_basis(digest: &str) -> DecisionBasis {
             },
         ],
         derived: Vec::new(),
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }
@@ -213,7 +213,7 @@ fn one_input(digest: &str, pointer: &str) -> DecisionBasis {
             pointer: pointer.to_owned(),
         }],
         derived: Vec::new(),
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }

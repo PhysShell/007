@@ -320,7 +320,7 @@ fn carries_finding(review: &str, comment: &str) -> DecisionBasis {
             value: json!(true),
             derived_from: vec![review.to_owned(), comment.to_owned()],
         }],
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }

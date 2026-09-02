@@ -40,7 +40,7 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, Admissible, DecisionBasis, DecisionInput, DeclaredBinding, DerivedFact,
-    RetainedEvidence, Unresolved,
+    ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -417,7 +417,7 @@ fn basis(observation_id: &str, inputs: Vec<DecisionInput>) -> DecisionBasis {
         observation_id: observation_id.to_owned(),
         inputs,
         derived: Vec::new(),
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }
@@ -501,7 +501,13 @@ fn b1_the_value_read_comes_from_the_record_the_basis_named() {
     // it at `d1` — the submitted review this decision reads — which resolved and
     // re-digested perfectly while standing in for an artifact of a different
     // kind, in a role only a query snapshot can fill.
-    b.expected_query_digest = Some(store.put(&query_snapshot()));
+    b.expected_query = Some(ExpectedQuery {
+        digest: store.put(&query_snapshot()),
+        subject: QueryBinding {
+            repository: "PhysShell/007".to_owned(),
+            pull_request: "9001".to_owned(),
+        },
+    });
 
     let outcome = relations(&b, &store);
     assert_eq!(

@@ -112,7 +112,7 @@ use o7_closure_matcher::{
     ImplementationCheck, RecordedQuerySnapshot,
 };
 use o7_closure_provenance::{
-    relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput,
+    relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput, ExpectedQuery,
     FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict,
 };
 use serde_json::{json, Map, Value};
@@ -364,7 +364,13 @@ fn absence_basis(expected: &str) -> DecisionBasis {
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
-        expected_query_digest: Some(expected.to_owned()),
+        expected_query: Some(ExpectedQuery {
+            digest: expected.to_owned(),
+            subject: QueryBinding {
+                repository: "PhysShell/007".to_owned(),
+                pull_request: "9001".to_owned(),
+            },
+        }),
         bindings: Vec::new(),
     }
 }
@@ -378,7 +384,7 @@ fn basis(record: &str, pointer: &str) -> DecisionBasis {
             pointer: pointer.to_owned(),
         }],
         derived: Vec::new(),
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }

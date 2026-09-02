@@ -117,8 +117,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
-    FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, ScanCompleteness,
-    ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
+    ExpectedQuery, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
+    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -567,7 +567,7 @@ fn basis(record_digest: &str, pointer: &str) -> DecisionBasis {
             pointer: pointer.to_owned(),
         }],
         derived: Vec::new(),
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }
@@ -620,10 +620,16 @@ fn refused(probe: Probe, artifact: &Value) -> bool {
                 observation_id: "review/external".to_owned(),
                 inputs: Vec::new(),
                 derived: Vec::new(),
-                expected_query_digest: None,
+                expected_query: None,
                 bindings: Vec::new(),
             };
-            b.expected_query_digest = Some(expected);
+            b.expected_query = Some(ExpectedQuery {
+                digest: expected,
+                subject: QueryBinding {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                },
+            });
             matches!(relations(&b, &store), Admissible::CannotCheck { .. })
         }
         Probe::ScanEvidence => {

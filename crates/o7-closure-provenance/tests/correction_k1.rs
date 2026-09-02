@@ -190,7 +190,7 @@ fn check_basis(digest: &str) -> DecisionBasis {
             },
         ],
         derived: Vec::new(),
-        expected_query_digest: None,
+        expected_query: None,
         bindings: Vec::new(),
     }
 }
@@ -286,7 +286,7 @@ fn k1b_equality_is_not_a_bound_on_range() {
                 pointer: "/head_sha".to_owned(),
             }],
             derived: Vec::new(),
-            expected_query_digest: None,
+            expected_query: None,
             bindings: Vec::new(),
         },
         &store,
@@ -425,7 +425,7 @@ fn k1e_the_record_assessment_disagreement_is_still_refused() {
                 pointer: "/head_sha".to_owned(),
             }],
             derived: Vec::new(),
-            expected_query_digest: None,
+            expected_query: None,
             bindings: Vec::new(),
         },
         &store,
