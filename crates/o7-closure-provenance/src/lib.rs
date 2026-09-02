@@ -945,6 +945,40 @@ struct QualifiedQuery {
     observation: String,
 }
 
+/// §13's `binding` against the subject the DECISION is about.
+///
+/// A free function over the validated snapshot rather than a method on
+/// [`QualifiedQuery`], because both consumers ask it before qualification and at
+/// the same point in their own relation checks — and because it is the one
+/// question qualification cannot answer for itself. §17.1: the subject must
+/// arrive from outside the artifacts being checked.
+///
+/// ONE FUNCTION FOR BOTH ROLES. A falsification scan declares the query it
+/// claims to have enumerated; an absence claim names the change it is a claim
+/// about. Those are the same relation, and two copies of it are two chances to
+/// disagree about one artifact.
+fn concerns(snapshot: &ValidatedArtifact, subject: &QueryBinding) -> Result<(), String> {
+    let repository = snapshot
+        .pointer("/binding/repository")
+        .and_then(Value::as_str);
+    let pull_request = snapshot
+        .pointer("/binding/pullRequest")
+        .and_then(Value::as_str);
+    if repository == Some(subject.repository.as_str())
+        && pull_request == Some(subject.pull_request.as_str())
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "the decision is about {}#{} and this query snapshot enumerates {}#{}; a real, \
+         complete enumeration of another change is not evidence about this one",
+        subject.repository,
+        subject.pull_request,
+        repository.unwrap_or("<absent>"),
+        pull_request.unwrap_or("<absent>")
+    ))
+}
+
 impl QualifiedQuery {
     /// §13: `NotProduced` is legal only when the named matcher, applied to the
     /// retained candidate set, yields an EMPTY matched subsequence.
@@ -1782,7 +1816,17 @@ fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> 
             // contradict its claim is well-formed too. This is the same
             // qualification the scan path consumes, so the two cannot come to
             // disagree about one artifact.
-            let qualified = qualify_query(&snapshot, store, expected)
+            // THE SUBJECT FIRST, and from outside. §13 makes the snapshot's
+            // `binding` part of what the artifact is; the change this decision
+            // is about is the CALLER'S, exactly as `staleness` takes its subject
+            // and a scan declares the query it enumerated. An observation id is
+            // a role name — `review/external` — reused across every pull request
+            // and repository, so comparing it alone lets a complete, empty
+            // enumeration of another change carry a negative here. An absence
+            // claim is the one decision whose whole content is what was
+            // searched.
+            let qualified = concerns(&snapshot, &expected_query.subject)
+                .and_then(|()| qualify_query(&snapshot, store, expected))
                 .and_then(|q| q.supports_absence(&basis.observation_id).map(|()| q));
             if let Err(reason) = qualified {
                 why.push(Unresolved::QueryDoesNotSupportRole {
@@ -1970,24 +2014,10 @@ fn check_scan_evidence<E: RetainedEvidence>(
             evidenced_surface.unwrap_or("<absent>")
         ));
     }
-    let repository = snapshot
-        .pointer("/binding/repository")
-        .and_then(Value::as_str);
-    let pull_request = snapshot
-        .pointer("/binding/pullRequest")
-        .and_then(Value::as_str);
-    if repository != Some(scan.binding.repository.as_str())
-        || pull_request != Some(scan.binding.pull_request.as_str())
-    {
-        return Err(format!(
-            "the scan claims {}#{} and its evidence is a snapshot of {}#{}; a real scan of \
-             another query is not evidence about this one",
-            scan.binding.repository,
-            scan.binding.pull_request,
-            repository.unwrap_or("<absent>"),
-            pull_request.unwrap_or("<absent>")
-        ));
-    }
+    // The same relation the absence path checks, through the same function: a
+    // scan declares the query it enumerated, an absence claim names the change
+    // it is about, and those are one question asked by two roles.
+    concerns(&snapshot, &scan.binding)?;
 
     // THE STATE AND THE CLAIM, through the SAME qualification the absence path
     // consumes. `ScanCompleteness::Complete` is the CALLER's account of how far
