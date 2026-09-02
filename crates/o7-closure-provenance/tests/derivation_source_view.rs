@@ -338,6 +338,7 @@ fn reduced(locator_kind: &str, required: &[&str], stable_id: &str, id_value: Val
 
 fn basis(sources: Vec<String>) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: vec![DerivedFact {

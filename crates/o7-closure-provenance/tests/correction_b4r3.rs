@@ -197,6 +197,7 @@ fn snapshot(schema_version: i64, observation: &str) -> Value {
 
 fn absence_basis(expected: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: OBSERVATION.to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
@@ -413,6 +414,7 @@ fn block_body(policy_version: &str) -> Value {
 
 fn reads(record: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: OBSERVATION.to_owned(),
         inputs: vec![DecisionInput {
             source_digest: record.to_owned(),

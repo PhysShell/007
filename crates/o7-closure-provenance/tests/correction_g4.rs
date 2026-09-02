@@ -141,6 +141,7 @@ impl RetainedEvidence for Store {
 
 fn subject(expected_sha: &str) -> Subject {
     Subject {
+        expected_redaction_policy: "1".to_owned(),
         repository: "PhysShell/007".to_owned(),
         pull_request: "9001".to_owned(),
         expected_sha: expected_sha.to_owned(),

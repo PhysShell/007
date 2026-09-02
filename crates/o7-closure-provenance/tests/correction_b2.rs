@@ -286,6 +286,7 @@ fn query_snapshot(repository: &str, pull_request: &str, surface: &str) -> Value 
 /// the evidence checked against it.
 fn subject(expected_sha: &str) -> Subject {
     Subject {
+        expected_redaction_policy: "1".to_owned(),
         repository: "PhysShell/007".to_owned(),
         pull_request: "9001".to_owned(),
         expected_sha: expected_sha.to_owned(),
@@ -294,6 +295,7 @@ fn subject(expected_sha: &str) -> Subject {
 
 fn basis(digest_of: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "review/external".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: digest_of.to_owned(),
@@ -559,6 +561,7 @@ fn s5d_an_evidenced_moved_head_is_stale() {
 
 fn scan(binding: QueryBinding, snapshot_digest: &str) -> FalsificationSurfaceScan {
     FalsificationSurfaceScan {
+        expected_redaction_policy: "1".to_owned(),
         surface: "pull-request-review-comments".to_owned(),
         binding,
         completeness: ScanCompleteness::Complete,

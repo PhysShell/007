@@ -286,6 +286,7 @@ fn body_blocked_partition() -> (Vec<&'static str>, Vec<&'static str>) {
 
 fn basis(record_digest: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "review/external".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: record_digest.to_owned(),
@@ -750,6 +751,7 @@ fn s23_a_complete_scan_evidenced_by_an_incomplete_enumeration_is_cannot_check() 
     let evidence = store.put(&query_snapshot("INCOMPLETE"));
     let verdict = scan_verdict(
         &FalsificationSurfaceScan {
+            expected_redaction_policy: "1".to_owned(),
             surface: "pull-request-review-comments".to_owned(),
             binding: QueryBinding {
                 repository: "PhysShell/007".to_owned(),
@@ -803,6 +805,7 @@ fn head_read_at(store: &mut Store, role: &str, snapshot: &Value, observed_at: &s
 
 fn subject(repository: &str, pull_request: &str, expected_sha: &str) -> Subject {
     Subject {
+        expected_redaction_policy: "1".to_owned(),
         repository: repository.to_owned(),
         pull_request: pull_request.to_owned(),
         expected_sha: expected_sha.to_owned(),

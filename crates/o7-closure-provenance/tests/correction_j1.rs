@@ -186,6 +186,7 @@ fn check_projection(conclusion: Option<Value>) -> Value {
 
 fn check_basis(digest: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: OBSERVATION.to_owned(),
         inputs: vec![
             DecisionInput {
@@ -205,6 +206,7 @@ fn check_basis(digest: &str) -> DecisionBasis {
 
 fn one_input(digest: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: OBSERVATION.to_owned(),
         inputs: vec![DecisionInput {
             source_digest: digest.to_owned(),

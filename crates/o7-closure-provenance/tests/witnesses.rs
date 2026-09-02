@@ -413,6 +413,7 @@ fn reads(source_digest: &str, pointer: &str) -> DecisionInput {
 
 fn basis(observation_id: &str, inputs: Vec<DecisionInput>) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: observation_id.to_owned(),
         inputs,
         derived: Vec::new(),

@@ -268,6 +268,7 @@ fn snapshot(all: &[&str], matched: &[&str]) -> Value {
 
 fn absence_basis(expected: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
@@ -278,6 +279,7 @@ fn absence_basis(expected: &str) -> DecisionBasis {
 
 fn reads(record: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "review/external".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: record.to_owned(),
@@ -291,6 +293,7 @@ fn reads(record: &str, pointer: &str) -> DecisionBasis {
 
 fn scan_of(snapshot_digest: &str) -> FalsificationSurfaceScan {
     FalsificationSurfaceScan {
+        expected_redaction_policy: "1".to_owned(),
         surface: "pull-request-submitted-reviews".to_owned(),
         binding: QueryBinding {
             repository: "PhysShell/007".to_owned(),

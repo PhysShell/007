@@ -610,7 +610,44 @@ fn denominator_of(
 pub(crate) fn check_authorises(
     record: &crate::artifact::ValidatedArtifact,
     assessment: &crate::artifact::ValidatedArtifact,
+    expected_policy: &str,
 ) -> Result<(), String> {
+    // §9.4'S RANGE, AND IT IS THE ONE PROPERTY THE SCHEMA'S SECURITY ARGUMENT
+    // RESTS ON:
+    //
+    //     no field of an assessment is free text
+    //     "A closed field cannot carry a secret out because its RANGE does not
+    //      depend on the content inspected."
+    //
+    // `redactionPolicyVersion` is declared Text and admits every string, so a
+    // producer could write a credential into it and the assessment carrying it
+    // is canonicalized, digested and retained permanently as the authority for
+    // a record a decision then reads.
+    //
+    // THE EXPECTED VALUE IS THE CALLER'S, AND THAT IS NOT A DETAIL. No contract
+    // sentence registers a permitted value — §9 declares the member, §9.5
+    // relates the record's to the assessment's, and neither names one — so a
+    // literal here would be this implementation inventing the norm it enforces,
+    // which is the direction G3 refused for `observedAt`. Taking it from the
+    // assessment would be asking the party that would be leaking to nominate
+    // its own range. §17.1's first consequence settles it: the expectation
+    // arrives from outside the artifacts being checked.
+    //
+    // §9.5'S EQUALITY IS A DIFFERENT RULE AND SURVIVES BELOW. It relates two
+    // producer-supplied values to each other, which constrains DISAGREEMENT and
+    // not RANGE — `correction_g3.rs` cited it as this member's bound and
+    // `correction_k1.rs`'s K1-B is the specimen that satisfies it exactly with
+    // the same credential on both sides.
+    let assessment_policy = member_str_at(assessment, "redactionPolicyVersion")?;
+    if assessment_policy != expected_policy {
+        return Err(format!(
+            "§9.4/§9.5: the assessment was made under redaction policy version \
+             {assessment_policy:?} and this evaluation is made under {expected_policy:?}. The \
+             expected version is the caller's and never the assessment's — a member whose range \
+             is every string is free text, whatever else it agrees with"
+        ));
+    }
+
     let (is_reduced, required) = denominator_of(record)?;
     let always: &[&str] = required.map_or(&[], |r| r.always);
     let present_only: &[PresentOnly] = required.map_or(&[], |r| r.present_only);
@@ -815,7 +852,6 @@ pub(crate) fn check_authorises(
     // value to disagree. Scoped to what the artifacts actually hold rather than
     // asserted over a member that does not exist.
     let record_policy = member_str_at(record, "redactionPolicyVersion")?;
-    let assessment_policy = member_str_at(assessment, "redactionPolicyVersion")?;
     if record_policy != assessment_policy {
         return Err(format!(
             "§9.5: the record's /redactionPolicyVersion is {record_policy:?} and its \

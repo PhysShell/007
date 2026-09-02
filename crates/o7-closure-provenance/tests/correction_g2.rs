@@ -279,6 +279,7 @@ fn reduced(locator_kind: &str, required: &[&str], stable_id: &str, blocked: &str
 
 fn basis(inputs: Vec<DecisionInput>, derived: Vec<DerivedFact>) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "review/external".to_owned(),
         inputs,
         derived,

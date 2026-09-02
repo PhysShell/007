@@ -153,6 +153,7 @@ fn evidence_for(store: &mut Store, surface: &str) -> String {
 /// the evidence checked against it.
 fn subject(expected_sha: &str) -> Subject {
     Subject {
+        expected_redaction_policy: "1".to_owned(),
         repository: "PhysShell/007".to_owned(),
         pull_request: "9001".to_owned(),
         expected_sha: expected_sha.to_owned(),
@@ -161,6 +162,7 @@ fn subject(expected_sha: &str) -> Subject {
 
 fn scan(completeness: ScanCompleteness, snapshot_digest: &str) -> FalsificationSurfaceScan {
     FalsificationSurfaceScan {
+        expected_redaction_policy: "1".to_owned(),
         surface: "pull-request-review-comments".to_owned(),
         binding: QueryBinding {
             repository: "PhysShell/007".to_owned(),

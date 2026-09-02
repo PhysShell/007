@@ -242,6 +242,7 @@ fn block_secret(required: &[&str], blocked: &[&str]) -> Value {
 
 fn carries_finding(review: &str, comment: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: vec![DerivedFact {

@@ -150,6 +150,7 @@ fn assessment(outcome: &str) -> Value {
 
 fn basis(digest: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "check/ai-final-review".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: digest.to_owned(),

@@ -257,6 +257,16 @@ pub struct DecisionBasis {
     /// authority path this slice exists to establish.
     pub expected_query_digest: Option<String>,
     pub bindings: Vec<DeclaredBinding>,
+    /// The redaction policy version this decision is made under, per §9.5.
+    ///
+    /// Beside `expected_query_digest` for the same reason it exists: §9.4
+    /// requires every field of an assessment to have a range independent of the
+    /// content inspected, and this member had none. The value cannot come from
+    /// the assessment — that is the party that would be leaking — and cannot be
+    /// a literal in this crate, because no contract sentence registers one. It
+    /// comes from the caller, exactly as `expected_sha` and the
+    /// `DecisionProfile` do.
+    pub expected_redaction_policy: String,
 }
 
 /// Retained evidence, addressed by digest.
@@ -292,6 +302,36 @@ pub trait RetainedEvidence {
     /// So the store hands over BYTES, and they go through the same artifact
     /// door as everything else.
     fn binding_for(&self, record_digest: &str) -> Option<Value>;
+}
+
+/// What the caller asserts about retention, supplied independently of the store
+/// that holds the evidence being judged.
+///
+/// TWO EXPECTATIONS THAT TRAVEL TOGETHER because they are consumed together, at
+/// the one place a gated record is authorised. Threading them as two adjacent
+/// borrowed parameters through five call sites is how the wrong one gets passed
+/// once and nobody notices.
+///
+/// Both obey §17.1's first consequence: the expectation arrives from OUTSIDE the
+/// artifacts being checked. A store that could supply either would be selecting
+/// the standard it is examined against.
+#[derive(Debug, Clone, Copy)]
+struct Expected<'a> {
+    /// §9.2 bindings the caller declares between a record and its assessment.
+    declared: &'a [DeclaredBinding],
+    /// §9.5's `redactionPolicyVersion` this evaluation is made under.
+    ///
+    /// WHY THE VALUE COMES FROM HERE AND NOT FROM A TABLE IN THIS CRATE. §9.4
+    /// requires every field of an assessment to have a range that does not
+    /// depend on the content inspected, and `redactionPolicyVersion` had none:
+    /// `Text` admits every string, so a producer could write a credential into
+    /// it and the assessment carrying it is retained permanently. No contract
+    /// sentence registers a permitted value — §9 declares the member, §9.5
+    /// relates it to the record's, and neither names one — so a literal here
+    /// would be this implementation inventing the norm it claims to enforce.
+    /// The caller names the policy the decision is made under, exactly as it
+    /// names `expected_sha`, `expected_query_digest` and the `DecisionProfile`.
+    policy: &'a str,
 }
 
 /// Why a decision could not be evaluated from retained evidence.
@@ -612,7 +652,7 @@ fn resolve_artifact<E: RetainedEvidence>(
     store: &E,
     requested: &str,
     role: ConsumedAs,
-    declared: &[DeclaredBinding],
+    expected: Expected<'_>,
     into: &mut Vec<Unresolved>,
 ) -> Option<ValidatedArtifact> {
     let Some(raw) = store.resolve(requested) else {
@@ -666,7 +706,7 @@ fn resolve_artifact<E: RetainedEvidence>(
     // Ungated kinds invent no assessment. §5.3 places the query snapshot outside
     // the gate; the event and the assessment are control artifacts, and making a
     // permission depend on a permission is a recursion with no base case.
-    if artifact.kind().gate() == Gate::Gated && !authorised(store, &artifact, declared, into) {
+    if artifact.kind().gate() == Gate::Gated && !authorised(store, &artifact, expected, into) {
         return None;
     }
 
@@ -678,7 +718,7 @@ fn resolve_artifact<E: RetainedEvidence>(
 fn authorised<E: RetainedEvidence>(
     store: &E,
     record: &ValidatedArtifact,
-    declared: &[DeclaredBinding],
+    expected: Expected<'_>,
     into: &mut Vec<Unresolved>,
 ) -> bool {
     let requested = record.digest();
@@ -734,7 +774,7 @@ fn authorised<E: RetainedEvidence>(
         store,
         &binding_digest,
         ConsumedAs::RetentionBinding,
-        declared,
+        expected,
         into,
     ) else {
         return false;
@@ -780,13 +820,13 @@ fn authorised<E: RetainedEvidence>(
         store,
         &assessment_digest,
         ConsumedAs::RetentionAssessment,
-        declared,
+        expected,
         into,
     ) else {
         return false;
     };
 
-    if let Err(reason) = redaction::check_authorises(record, &assessment) {
+    if let Err(reason) = redaction::check_authorises(record, &assessment, expected.policy) {
         into.push(Unresolved::AssessmentDoesNotAuthorise {
             record_digest: requested.to_owned(),
             assessment_digest: assessment_digest.clone(),
@@ -798,7 +838,11 @@ fn authorised<E: RetainedEvidence>(
     // The retained binding is the authority on its own outcome. A basis that
     // names another assessment is asserting a permission that was never granted,
     // and it resolves perfectly well if nobody compares the two.
-    for asserted in declared.iter().filter(|b| b.record_digest == requested) {
+    for asserted in expected
+        .declared
+        .iter()
+        .filter(|b| b.record_digest == requested)
+    {
         if asserted.assessment_digest != assessment_digest {
             into.push(Unresolved::BindingMismatch {
                 record_digest: requested.to_owned(),
@@ -930,7 +974,7 @@ impl QualifiedQuery {
 fn qualify_query<E: RetainedEvidence>(
     snapshot: &ValidatedArtifact,
     store: &E,
-    declared: &[DeclaredBinding],
+    expected: Expected<'_>,
 ) -> Result<QualifiedQuery, String> {
     // 1. THE STATE. §13 puts the enumeration in the artifact and closes the
     //    vocabulary to two, precisely because a reader that accepts an
@@ -1061,7 +1105,7 @@ fn qualify_query<E: RetainedEvidence>(
         // kind rather than by a lookup bolted into the head path.
         let mut why = Vec::new();
         let Some(candidate) =
-            resolve_artifact(store, cited, ConsumedAs::QueryCandidate, declared, &mut why)
+            resolve_artifact(store, cited, ConsumedAs::QueryCandidate, expected, &mut why)
         else {
             return Err(format!(
                 "the query snapshot's candidate {cited} did not pass the door: {why:?}"
@@ -1212,7 +1256,7 @@ fn read_pointer(record: &ValidatedArtifact, pointer: &str) -> Result<Value, Unre
 fn check_derived<E: RetainedEvidence>(
     store: &E,
     fact: &DerivedFact,
-    declared: &[DeclaredBinding],
+    expected: Expected<'_>,
     into: &mut Vec<Unresolved>,
 ) {
     let Some(entry) = derivations::resolve(&fact.derivation, &fact.version) else {
@@ -1270,7 +1314,7 @@ fn check_derived<E: RetainedEvidence>(
             store,
             source_digest,
             ConsumedAs::GatedSource,
-            declared,
+            expected,
             into,
         ) else {
             return;
@@ -1560,6 +1604,10 @@ struct CheckedBasis<'a> {
 }
 
 fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> CheckedBasis<'a> {
+    let expected = Expected {
+        declared: &basis.bindings,
+        policy: &basis.expected_redaction_policy,
+    };
     let mut why = Vec::new();
     let mut values = Vec::new();
     let mut observed: Vec<(&'static str, &'a str)> = Vec::new();
@@ -1570,7 +1618,7 @@ fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> 
             store,
             &input.source_digest,
             ConsumedAs::GatedSource,
-            &basis.bindings,
+            expected,
             &mut why,
         ) else {
             some_input_did_not_resolve = true;
@@ -1584,19 +1632,19 @@ fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> 
     }
 
     for fact in &basis.derived {
-        check_derived(store, fact, &basis.bindings, &mut why);
+        check_derived(store, fact, expected, &mut why);
     }
 
     // The expected query digest is named by the basis and resolved like any
     // other record. It is NOT read out of the store: that direction is the
     // authority path this slice exists to establish, and reversing it would make
     // the store the author of its own expectation.
-    if let Some(expected) = &basis.expected_query_digest {
+    if let Some(query_digest) = &basis.expected_query_digest {
         if let Some(snapshot) = resolve_artifact(
             store,
-            expected,
+            query_digest,
             ConsumedAs::ExpectedQuerySnapshot,
-            &basis.bindings,
+            expected,
             &mut why,
         ) {
             // AND THEN THE ROLE. Structural validity was never the question here:
@@ -1605,11 +1653,11 @@ fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> 
             // contradict its claim is well-formed too. This is the same
             // qualification the scan path consumes, so the two cannot come to
             // disagree about one artifact.
-            let qualified = qualify_query(&snapshot, store, &basis.bindings)
+            let qualified = qualify_query(&snapshot, store, expected)
                 .and_then(|q| q.supports_absence(&basis.observation_id).map(|()| q));
             if let Err(reason) = qualified {
                 why.push(Unresolved::QueryDoesNotSupportRole {
-                    digest: expected.clone(),
+                    digest: query_digest.clone(),
                     role: ConsumedAs::ExpectedQuerySnapshot.name(),
                     why: reason,
                 });
@@ -1651,6 +1699,12 @@ pub struct FalsificationSurfaceScan {
     /// resolves and answers another question.
     pub binding: QueryBinding,
     pub completeness: ScanCompleteness,
+    /// The redaction policy version this scan is evaluated under, per §9.5.
+    ///
+    /// The snapshot itself is ungated, but §13's candidate set is not: every
+    /// candidate is a gated source authorised through an assessment, so the
+    /// expectation has to reach this entry point too.
+    pub expected_redaction_policy: String,
     /// The query snapshot digest this scan is evidenced by.
     ///
     /// A QUERY snapshot specifically, not any source snapshot: a scan is a claim
@@ -1754,12 +1808,19 @@ fn check_scan_evidence<E: RetainedEvidence>(
     scan: &FalsificationSurfaceScan,
     store: &E,
 ) -> Result<QualifiedQuery, String> {
+    // The scan declares no §9.2 bindings — it never has — but it does declare
+    // the policy the surface was examined under, and §13's candidate set is
+    // gated evidence authorised through assessments like any other.
+    let expected = Expected {
+        declared: &[],
+        policy: &scan.expected_redaction_policy,
+    };
     let mut why = Vec::new();
     let Some(snapshot) = resolve_artifact(
         store,
         &scan.snapshot_digest,
         ConsumedAs::ScanEvidence,
-        &[],
+        expected,
         &mut why,
     ) else {
         return Err(format!(
@@ -1810,7 +1871,7 @@ fn check_scan_evidence<E: RetainedEvidence>(
     // binding is the authority either way; `declared` only ever ADDS the
     // obligation that a basis's own claim about which assessment authorised a
     // record agrees with the retained one, and a caller with no claim makes none.
-    qualify_query(&snapshot, store, &[])
+    qualify_query(&snapshot, store, expected)
 }
 
 // ---- Subject read — provenance V1 §8.1.
@@ -1868,6 +1929,15 @@ pub struct Subject {
     pub repository: String,
     pub pull_request: String,
     pub expected_sha: String,
+    /// The redaction policy version this evaluation is made under, per §9.5.
+    ///
+    /// §5.3 puts `github-pull-request-head` in the gated set, so both head
+    /// snapshots are authorised through an assessment like any other gated
+    /// record — and this entry point takes no `DecisionBasis`, which is why the
+    /// expectation has to travel with the subject. `correction_k1.rs`'s K1-C is
+    /// the witness that a repair reaching only the basis would leave this route
+    /// open.
+    pub expected_redaction_policy: String,
 }
 
 /// Whether the subject moved, given two head reads that may not both have
@@ -2040,12 +2110,19 @@ fn resolve_head_read<E: RetainedEvidence>(
     expected_role: &str,
     subject: &Subject,
 ) -> Result<ObservedHead, String> {
+    // The subject carries the policy expectation because this entry point takes
+    // no `DecisionBasis` — and both head snapshots are gated, so both are
+    // authorised through an assessment. K1-C is the witness for that placement.
+    let expected = Expected {
+        declared: &[],
+        policy: &subject.expected_redaction_policy,
+    };
     let mut why = Vec::new();
     let Some(event) = resolve_artifact(
         store,
         event_digest,
         ConsumedAs::HeadReadEvent,
-        &[],
+        expected,
         &mut why,
     ) else {
         return Err(format!("did not pass validation: {why:?}"));
@@ -2079,7 +2156,7 @@ fn resolve_head_read<E: RetainedEvidence>(
         store,
         &snapshot_digest,
         ConsumedAs::SubjectHead,
-        &[],
+        expected,
         &mut why,
     ) else {
         return Err(format!(

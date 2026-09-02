@@ -165,6 +165,7 @@ fn pagination(next_page_present: Value) -> Value {
 
 fn absence_over(digest: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: OBSERVATION.to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
@@ -201,6 +202,7 @@ fn j3b_the_rule_belongs_to_the_snapshot_and_not_to_one_caller() {
     let digest = store.put(&snapshot("COMPLETE", pagination(json!(true))));
     let outcome = scan_verdict(
         &FalsificationSurfaceScan {
+            expected_redaction_policy: "1".to_owned(),
             surface: "pull-request-submitted-reviews".to_owned(),
             binding: QueryBinding {
                 repository: "PhysShell/007".to_owned(),

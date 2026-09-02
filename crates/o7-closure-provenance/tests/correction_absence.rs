@@ -196,6 +196,7 @@ fn matching_review() -> Value {
 
 fn absence_basis(expected: Option<&str>, inputs: Vec<DecisionInput>) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: OBSERVATION.to_owned(),
         inputs,
         derived: Vec::new(),

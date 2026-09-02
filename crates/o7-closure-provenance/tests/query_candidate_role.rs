@@ -198,6 +198,7 @@ fn snapshot(all: &[&str]) -> Value {
 
 fn absence_basis(expected: &str) -> DecisionBasis {
     DecisionBasis {
+        expected_redaction_policy: "1".to_owned(),
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
@@ -240,6 +241,7 @@ fn a_reduced_source_record_is_not_a_query_candidate() {
         matches!(
             relations(
                 &DecisionBasis {
+                    expected_redaction_policy: "1".to_owned(),
                     observation_id: "review/external".to_owned(),
                     inputs: vec![o7_closure_provenance::DecisionInput {
                         source_digest: reduced.clone(),
