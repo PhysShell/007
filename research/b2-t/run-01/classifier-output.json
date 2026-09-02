@@ -1,0 +1,412 @@
+[
+  {
+    "item_id": "item_001",
+    "classification_status": "classified",
+    "primary_root_cause": "The closure traversal's reference set was defined from one incomplete source (envelope refs) while payload-declared ref slots were an equally authoritative source, so bounds were escapable",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["incomplete-specification", "resource-bounds"],
+    "confidence": "medium",
+    "evidence": "\"Traversal seeded only from `envelope.artifact_refs`, while nearly every typed payload carries its own `ArtifactRef` slots that nothing required to be mirrored there.\""
+  },
+  {
+    "item_id": "item_002",
+    "classification_status": "classified",
+    "primary_root_cause": "A flat campaign-level question list erased which attention owned each question, merging independently varying per-attention question sets into one collection",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["ownership-grain", "lifecycle"],
+    "confidence": "high",
+    "evidence": "\"A flat `open_question_ids` could not tell the fold which attention owned a question ... and stranded a resolved attention's questions as permanently open.\""
+  },
+  {
+    "item_id": "item_003",
+    "classification_status": "classified",
+    "primary_root_cause": "Entry and exit rules for the suspension phase were unspecified, so late or stale attention events could act on a campaign that had already moved on",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["missing-guards", "staleness/ordering"],
+    "confidence": "medium",
+    "evidence": "\"Leaving `HUMAN_REQUIRED` was not safe against late attention events.\""
+  },
+  {
+    "item_id": "item_004",
+    "classification_status": "classified",
+    "primary_root_cause": "A guard was stated unconditionally over all human commands while the schema forbids the referenced field on one of them — two normative statements in direct contradiction",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["internal-contradiction", "guard-scope"],
+    "confidence": "medium",
+    "evidence": "\"The schema forbids `attention_id` on `CANCEL` while `HumanDecisionRecorded` required a referenced attention unconditionally, so the one command FD-14.6 calls unconditional would have been rejected every time.\""
+  },
+  {
+    "item_id": "item_005",
+    "classification_status": "classified",
+    "primary_root_cause": "A state field had a consumer but no producing event, leaving the whole question lane unreachable",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["dead-path", "incomplete-wiring", "duplicate-mechanism"],
+    "confidence": "medium",
+    "evidence": "\"`open_question_ids` existed, and nothing ever put an id in it ... so the `provide_answer` guard could never be satisfied.\""
+  },
+  {
+    "item_id": "item_006",
+    "classification_status": "classified",
+    "primary_root_cause": "Limits existed only at the per-object grain with no aggregate or closure-level budget, so the total resolvable size was unbounded",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["resource-bounds", "incomplete-specification"],
+    "confidence": "medium",
+    "evidence": "\"Bounds were per-object only. 256 refs × 64 MiB is 16 GiB before the DAG even branches.\""
+  },
+  {
+    "item_id": "item_007",
+    "classification_status": "classified",
+    "primary_root_cause": "One reference did not fix which of an artifact's two separately stored byte strings its digest and size identify",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["accounting-error", "resource-bounds"],
+    "confidence": "high",
+    "evidence": "\"`ArtifactRef` did not say which of an artifact's two byte strings it identified.\""
+  },
+  {
+    "item_id": "item_008",
+    "classification_status": "classified",
+    "primary_root_cause": "Genesis carried only a commitment to the budget policy rather than the values replay needs, so the log was not replay-self-contained",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["replay-self-containment"],
+    "confidence": "medium",
+    "evidence": "\"a replaying reader could verify that the policy was unchanged without ever learning what it was — while `resolve_event` needs the effective bound at genesis.\""
+  },
+  {
+    "item_id": "item_009",
+    "classification_status": "classified",
+    "primary_root_cause": "A deliverable's minimum specification depended on a component scheduled for a later phase, so definitions it cannot run without were absent from its own layer",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["layering-dependency", "spec-sequencing"],
+    "confidence": "medium",
+    "evidence": "\"A1-V0 required the reducer A2 was going to write later.\""
+  },
+  {
+    "item_id": "item_010",
+    "classification_status": "classified",
+    "primary_root_cause": "One reference field carried two distinct roles — the artifact that authorizes a transition and the artifact that merely supplies provenance for an evidence event — and its typing fit only the first",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["role-conflation", "typing-error"],
+    "confidence": "high",
+    "evidence": "\"`authority_ref` was untypeable for evidence kinds ... The word \\\"authority\\\" no longer has to pretend a `CoderReport` authorizes something.\""
+  },
+  {
+    "item_id": "item_011",
+    "classification_status": "classified",
+    "primary_root_cause": "The request to revise a contract and the campaign's later supersession by an actual successor were collapsed into a single transition, one requiring a successor that did not yet exist",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["premature-transition", "ordering"],
+    "confidence": "medium",
+    "evidence": "\"It moved to `SUPERSEDED`, which requires `superseded_by`, at a moment when the successor campaign did not exist — and then blocked the very `CampaignSuperseded` event that could have named it.\""
+  },
+  {
+    "item_id": "item_012",
+    "classification_status": "classified",
+    "primary_root_cause": "A duplicated copy of an enum vocabulary drifted from the source enum it claims to reuse (with a wrong citation range alongside)",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["spec-drift", "duplicated-vocabulary", "unknown-state-handling"],
+    "confidence": "medium",
+    "evidence": "\"A1's copy of the vocabulary stopped at `not_applicable` while the enum it claims to reuse carries `error` ... and the citation range was wrong too.\""
+  },
+  {
+    "item_id": "item_013",
+    "classification_status": "classified",
+    "primary_root_cause": "Stale text left behind by an earlier refactor: one section still referenced a top-level field another section had already replaced",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["spec-drift", "internal-contradiction"],
+    "confidence": "high",
+    "evidence": "\"FD-14.6 still spoke of a top-level `open_question_ids` that §3.14 had already deleted in favour of per-attention entries.\""
+  },
+  {
+    "item_id": "item_014",
+    "classification_status": "classified",
+    "primary_root_cause": "A single resolution function covered both genesis and non-genesis events although the two differ in what inputs are available, making the signature circular for genesis",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["staging", "bootstrapping"],
+    "confidence": "medium",
+    "evidence": "\"`resolve_event` took a campaign policy that, for `CampaignCreated`, lives inside the payload the function has yet to read.\""
+  },
+  {
+    "item_id": "item_015",
+    "classification_status": "classified",
+    "primary_root_cause": "The mere presence of a receipt was treated as proof of the execution it was supposed to attest; nothing bound the receipt to the artifact and bytes in question",
+    "r_broad": "yes",
+    "r_obs": "yes",
+    "secondary_tags": ["evidence-binding"],
+    "confidence": "high",
+    "evidence": "\"Presence of a receipt proved nothing ... A valid receipt from an unrelated execution is now `ReceiptIncongruent`.\""
+  },
+  {
+    "item_id": "item_016",
+    "classification_status": "classified",
+    "primary_root_cause": "The provider execution identity had no minting point and the only available field names a different actor's execution, so two distinct execution identities would have been taken for one",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["missing-origin", "protocol-contradiction"],
+    "confidence": "medium",
+    "evidence": "\"the envelope's `producer_execution_id` is the *controller's* identity on a controller-issued artifact (FD-10), so it could not be borrowed.\""
+  },
+  {
+    "item_id": "item_017",
+    "classification_status": "classified",
+    "primary_root_cause": "Evolving lifecycle state was carried on an immutable content-addressed artifact, merging the fixed request with the changing attention it opens",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["mutability", "derived-state"],
+    "confidence": "medium",
+    "evidence": "\"Attention lifecycle mutated an immutable artifact.\""
+  },
+  {
+    "item_id": "item_018",
+    "classification_status": "classified",
+    "primary_root_cause": "The reachable-reference definition covered only one node kind while another node kind also reaches artifacts, so those references escaped accounting",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["incomplete-specification", "resource-bounds"],
+    "confidence": "medium",
+    "evidence": "\"`immediate_refs` was defined only for envelope-bearing artifacts, while events reach artifacts through `source_ref`, `evidence_refs`, and payload slots.\""
+  },
+  {
+    "item_id": "item_019",
+    "classification_status": "classified",
+    "primary_root_cause": "A single label \"resumed\" stood in for several distinct destination phases, and nothing recorded which one a suspension should return to",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["missing-state", "totality"],
+    "confidence": "medium",
+    "evidence": "\"\\\"Resumed\\\" is not a phase, and nothing stored where to return.\""
+  },
+  {
+    "item_id": "item_020",
+    "classification_status": "classified",
+    "primary_root_cause": "The reducer's input was specified as the wire event when the transitions operate on the resolved event (verified payload, source artifact, registry views) — two distinct objects named as one",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["staging", "purity-violation"],
+    "confidence": "medium",
+    "evidence": "\"A pure, I/O-free function cannot fetch those, so the signature was quietly asking for a magic trick.\""
+  },
+  {
+    "item_id": "item_021",
+    "classification_status": "classified",
+    "primary_root_cause": "Attention ids were not fixed as unique for the campaign's lifetime, so one id could denote either a re-raised record or a distinct new attention",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["identifier-uniqueness", "internal-contradiction"],
+    "confidence": "high",
+    "evidence": "\"Attention identity was ambiguous ... leaving \\\"replace the record\\\" and \\\"append a second\\\" both defensible.\""
+  },
+  {
+    "item_id": "item_022",
+    "classification_status": "classified",
+    "primary_root_cause": "Framing constants were referred to but never assigned values, leaving digest computation implementation-defined",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["underspecification", "interoperability"],
+    "confidence": "high",
+    "evidence": "\"Four framings said \\\"tag byte\\\" with no numbering, so two conforming implementations could pick different bytes and compute different digests.\""
+  },
+  {
+    "item_id": "item_023",
+    "classification_status": "classified",
+    "primary_root_cause": "A non-actionable notification was modeled as a suspending, decision-bearing attention, so the mandated V0 path breached the suspension invariant",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["invariant-violation", "internal-contradiction"],
+    "confidence": "medium",
+    "evidence": "\"an attention nobody can act on was always a feed item wearing a decision's coat.\""
+  },
+  {
+    "item_id": "item_024",
+    "classification_status": "classified",
+    "primary_root_cause": "Terminal transitions omitted canonicalization, leaving fields populated that the state invariant forbids in terminal phases",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["invariant-violation", "incomplete-transition"],
+    "confidence": "high",
+    "evidence": "\"the event that ends a campaign could violate §3.14 on its way out.\""
+  },
+  {
+    "item_id": "item_025",
+    "classification_status": "classified",
+    "primary_root_cause": "One stage named `verify` was assigned two different verification scopes — checks decidable from bytes in hand and checks requiring CAS fetches it has no access to",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["staging", "impossible-obligation"],
+    "confidence": "medium",
+    "evidence": "\"`verify` was asked to bound a closure it could not see ... a separate CAS object that only the next stage fetches, and `verify` has no CAS.\""
+  },
+  {
+    "item_id": "item_026",
+    "classification_status": "classified",
+    "primary_root_cause": "A mandatory identity field had no defined value for human-originated artifacts, leaving \"who accepted the bytes\" and \"who authored them\" undistinguished",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["missing-case", "actor-role"],
+    "confidence": "medium",
+    "evidence": "\"`producer_execution_id` had no defined value for human artifacts ... the human one being the controller's **ingress** execution identity: who accepted the bytes, never who authored them.\""
+  },
+  {
+    "item_id": "item_027",
+    "classification_status": "classified",
+    "primary_root_cause": "An event classified as evidence-only performed a canonical mutation without advancing the version, so a single version number denoted two materially different state revisions",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["event-classification", "invariant-violation"],
+    "confidence": "medium",
+    "evidence": "\"`ProviderExecutionRecorded` cleared `active_execution` without advancing `state_version`, so two materially different states could share one version.\""
+  },
+  {
+    "item_id": "item_028",
+    "classification_status": "classified",
+    "primary_root_cause": "Receipt congruence never bound the receipt to this campaign's budget policy or this execution's id, so evidence from a foreign execution or policy satisfied the check",
+    "r_broad": "yes",
+    "r_obs": "yes",
+    "secondary_tags": ["evidence-binding", "incomplete-predicates"],
+    "confidence": "medium",
+    "evidence": "\"none compared `receipt.request.budget_policy_digest` to the campaign's, so an execution could run under a foreign budget policy and still pass.\""
+  },
+  {
+    "item_id": "item_029",
+    "classification_status": "classified",
+    "primary_root_cause": "The accepted-event set was given only as semantic prose with no wire contract, several names corresponding to no message kind at all",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["underspecification", "interoperability"],
+    "confidence": "medium",
+    "evidence": "\"`AcceptedEvent` was a list of names, six of which corresponded to no message kind at all, so two conforming implementations could build different logs.\""
+  },
+  {
+    "item_id": "item_030",
+    "classification_status": "classified",
+    "primary_root_cause": "Event-carried fields that duplicate reducer-derived values were left unconstrained against the transition that produces them",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["missing-constraints", "duplicated-data"],
+    "confidence": "medium",
+    "evidence": "\"Reducer-owned fields did not have to agree with their own transition.\""
+  },
+  {
+    "item_id": "item_031",
+    "classification_status": "classified",
+    "primary_root_cause": "One receipt spanned two grains — a single dispatch and a whole execution — without determining which of them it represented",
+    "r_broad": "yes",
+    "r_obs": "no",
+    "secondary_tags": ["grain-conflation", "evidence-structure"],
+    "confidence": "medium",
+    "evidence": "\"A single receipt carrying one `dispatch_id` beside a whole-execution manifest could not say which grain it represented.\""
+  },
+  {
+    "item_id": "item_032",
+    "classification_status": "classified",
+    "primary_root_cause": "A declared limit had no state anywhere tracking the quantity it bounds, making the constraint unenforceable",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["unenforceable-constraint", "misplaced-layer"],
+    "confidence": "high",
+    "evidence": "\"Nothing tracked a cumulative total, so the number was a claim no code could keep.\""
+  },
+  {
+    "item_id": "item_033",
+    "classification_status": "classified",
+    "primary_root_cause": "Message schemas were specified by relative reference to another shape instead of complete field tables",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["underspecification", "dangling-definition"],
+    "confidence": "high",
+    "evidence": "\"\\\"Same shape minus some fields\\\" is not a wire schema.\""
+  },
+  {
+    "item_id": "item_034",
+    "classification_status": "classified",
+    "primary_root_cause": "The artifact-kind set was left incomplete after the enum framing fix, so implementations would have had to invent spellings for digest inputs",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["underspecification", "interoperability"],
+    "confidence": "high",
+    "evidence": "\"`ArtifactKindV1` was a partial list.\""
+  },
+  {
+    "item_id": "item_035",
+    "classification_status": "classified",
+    "primary_root_cause": "Three transitions set the human-required phase directly, bypassing the single path that establishes that phase's required accompanying state",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["invariant-violation", "multiple-entry-paths", "internal-contradiction"],
+    "confidence": "medium",
+    "evidence": "\"Three transitions entered `HUMAN_REQUIRED` through the back door ... without setting `suspended_from_phase` and without opening an attention.\""
+  },
+  {
+    "item_id": "item_036",
+    "classification_status": "classified",
+    "primary_root_cause": "A single flag asserted far more than the underlying observation supports, merging a requester's claimed identity with the controller's transport observation",
+    "r_broad": "yes",
+    "r_obs": "yes",
+    "secondary_tags": ["overclaim", "claim-vs-observation", "authority-of-assertion"],
+    "confidence": "high",
+    "evidence": "\"Loopback proves transport, not humanity, identity, or an uncompromised local process.\""
+  },
+  {
+    "item_id": "item_037",
+    "classification_status": "classified",
+    "primary_root_cause": "The whole-execution outcome was derived in a way its per-dispatch observations do not support, so the label meaning \"nothing was dispatched\" could be produced after a real side effect",
+    "r_broad": "yes",
+    "r_obs": "yes",
+    "secondary_tags": ["derivation-error", "evidence-binding"],
+    "confidence": "medium",
+    "evidence": "\"A completed dispatch 0 followed by an unsent continuation derived to `failed_pre_dispatch`, which is exactly the label that would authorize a whole-execution retry.\""
+  },
+  {
+    "item_id": "item_038",
+    "classification_status": "classified",
+    "primary_root_cause": "The dispatch slot was cleared unconditionally even when the execution's outcome was ambiguous, so a crash window admitted a redrive the protocol forbids",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["unknown-state-handling", "crash-safety", "invariant-not-in-state"],
+    "confidence": "medium",
+    "evidence": "\"`ProviderExecutionRecorded` cleared `active_execution` unconditionally, so a crash between it and the escalating attention left a state where `WorkOrderIssued` passed its guard and redrove an execution FD-9 forbids redriving.\""
+  },
+  {
+    "item_id": "item_039",
+    "classification_status": "classified",
+    "primary_root_cause": "The event wire format was underspecified throughout — a digest framed but never declared, prose payload lists, a partially committed ref, and an unnamed genesis value",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["underspecification", "incomplete-commitment"],
+    "confidence": "medium",
+    "evidence": "\"`event_payload_digest` was framed but never declared; per-kind payloads were prose lists; `source_ref` was committed by digest alone.\""
+  },
+  {
+    "item_id": "item_040",
+    "classification_status": "classified",
+    "primary_root_cause": "Stale text from an earlier round still described the ready-to-merge handoff as an attention request, contradicting the sections that had since replaced it",
+    "r_broad": "no",
+    "r_obs": "no",
+    "secondary_tags": ["spec-drift", "internal-contradiction"],
+    "confidence": "medium",
+    "evidence": "\"§5.5 still called the ready-to-merge handoff an attention request — a leftover from R4, contradicting §3.9 and §5.3.\""
+  },
+  {
+    "item_id": "item_041",
+    "classification_status": "classified",
+    "primary_root_cause": "The producer of the evidence also declared which gates counted, so the criterion a green verdict rests on was taken from the same report being judged rather than from the campaign's own required set",
+    "r_broad": "yes",
+    "r_obs": "yes",
+    "secondary_tags": ["evidence-binding", "self-certification"],
+    "confidence": "medium",
+    "evidence": "\"`results[].required` let a defective controller mark an inconvenient gate as optional and have an honest reducer agree.\""
+  }
+]

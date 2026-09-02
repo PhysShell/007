@@ -165,30 +165,42 @@ Current authoritative state:
   `judge/fp-verdicts.schema.json` is its machine encoding.
 - Design record: `.claude` memory `007-harness-design`. Judge details: `judge/README.md`.
 
-## ▶ RESUME HERE — FP-direction gate (the real Phase-1 gate)
+## FP-direction gate (the real Phase-1 gate) — **PASSED, do not re-run**
 The oracle leaks-only proof passed (both `real`) — but that doesn't test the
-discriminator; a judge that always says `real` would pass it too. The FP direction
-is what matters for the 156 FP-suspects. Domain built the control. Run:
+discriminator; a judge that always says `real` would pass it too. So the FP
+direction was run against the control the domain built
+(`OwnAudit/oracle/fixtures/findings-fp-control.json`: own-check-shaped findings
+aimed at the `Fixed*ViewModel` counterparts, which do detach/dispose).
 
-```bash
-o7 judge --repo ../OwnAudit \
-         --findings ../OwnAudit/oracle/fixtures/findings-fp-control.json \
-         --rubric   ../OwnAudit/docs/fp-judge/rubric.md \
-         --out      ../OwnAudit/artifacts/fp-verdicts-fpcontrol.json
-```
-**PASS = both come back `false_positive`**, reasons citing teardown (`-=` in
-`Dispose` / `_timer.Dispose()`).
-- PASS → judge discriminates both directions → Phase-1 done → go to the STS run.
-- Says `real` on the fixed code → tune the loop:
-  1. rubric first → domain (`OwnAudit/docs/fp-judge/rubric.md`)
-  2. prompt template second → me (`judge/prompt.template.md`)
+**Both came back `false_positive`.** Phase 1 is closed in both directions: the
+judge discriminates, it does not rubber-stamp `real`.
 
-## Then — the real STS run (the 156)
+- **Domain source of truth: `OwnAudit/docs/fp-judge/STATUS.md`** — it records the
+  Phase-1 result and the Phase-2 invocation, and it moves without this file
+  moving. Read it before acting on anything in this section; where the two
+  disagree, that file wins and this one is stale.
+- Also already built on the domain side: `viz/apply_verdicts.py` (loads the
+  overlay, refuses a stale one on `generated_from`, splits real / uncertain /
+  unjudged / judged-FP) and the dashboard's triage consumption.
+
+## ▶ RESUME HERE — the real STS run (Phase 2)
 Domain hands: `--repo <STS source root>` + `--findings <STS-210 findings.json>` +
 `--out ../OwnAudit/artifacts/fp-verdicts.json`.
 - **`--dry-run` FIRST** — prints files + call count (cost estimate for ~198 ids).
   `--max-files N` to batch.
 - STS **source must be local** on this box (whole-file context).
+- **Do not cite aggregate counts from `OwnAudit/sts_audit/` as if the directory
+  were one canonical audit snapshot.** It is not one snapshot and it has no
+  directory-level canonical aggregate. `health-report.md` (15803 findings, four
+  tools) is unversioned — empty commit field, `generated: ?`. `health-report.json`
+  beside it *is* bound to commit `59e284ba`, but represents a different two-tool
+  run (10247 raw → 7436 clusters, 36 high-confidence). `PLAN.md` quotes a third
+  set again. The current STS-210 audit lives in `OwnAudit/artifacts/`, which is
+  not committed. Any quantitative claim must name the specific source
+  artifact/run it was derived from.
+- The committed per-tool SARIF under `sts_audit/` *is* usable as a raw
+  measurement substrate — it carries locations and parses. Aggregates are what
+  cannot be trusted here, not the underlying findings.
 - Overwrites the oracle overlay at that `--out`. Domain's report merges only the
   overlay whose `generated_from` == current `findings.json` (staleness guard).
 - **Perf:** the per-file `claude` calls are independent — add a bounded `--jobs N`
