@@ -37,8 +37,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    relations_checked, Admissible, DecisionBasis, ExpectedDetector, ExpectedQuery, QueryBinding,
-    RetainedEvidence, Unresolved,
+    relations_checked, AcquisitionLocator, Admissible, DecisionBasis, ExpectedDetector,
+    ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -266,6 +266,10 @@ fn a_reduced_source_record_is_not_a_query_candidate() {
                     inputs: vec![o7_closure_provenance::DecisionInput {
                         source_digest: reduced.clone(),
                         pointer: "/id".to_owned(),
+                        locator: AcquisitionLocator::Check {
+                repository: "PhysShell/007".to_owned(),
+                stable_id: "0".to_owned(),
+            },
                     }],
                     derived: Vec::new(),
                     expected_query: None,

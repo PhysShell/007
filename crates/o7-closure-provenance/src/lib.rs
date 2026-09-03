@@ -58,6 +58,12 @@ pub mod redaction;
 pub struct DecisionInput {
     pub source_digest: String,
     pub pointer: String,
+    /// §7.3's acquisition locator: which object these bytes are supposed to be.
+    ///
+    /// Required rather than optional, because a citation that cannot say which
+    /// object it asked for cannot be checked against §7.3 — and an optional
+    /// expectation is the one nobody sets.
+    pub locator: AcquisitionLocator,
 }
 
 /// A derived acquisition fact together with the source digests it names.
@@ -72,9 +78,10 @@ pub struct DerivedFact {
     pub derivation: String,
     pub version: String,
     pub value: Value,
-    /// The source snapshot digests this fact claims to be derived from, in the
-    /// order the derivation consumes them.
-    pub derived_from: Vec<String>,
+    /// The sources this fact claims to be derived from, in the order the
+    /// derivation consumes them — each naming both the bytes and, per §7.3, the
+    /// object they are supposed to be.
+    pub derived_from: Vec<CitedSource>,
 }
 
 /// The binding a decision basis asserts between a retained record and the
@@ -328,6 +335,99 @@ pub struct ExpectedDetector {
     pub config_digest: String,
 }
 
+/// The object a citation says it asked for — §7.3's locator, from the caller.
+///
+/// §7.3 states three normative rules and this is the third:
+///
+/// ```text
+/// locator MUST equal the acquisition locator of that source
+/// ```
+///
+/// and says why in the sentence after it: "shape alone is not identity. A record
+/// whose locator has the right keys and the wrong values, or the right values
+/// under the wrong `locatorKind`, is a well-formed pointer at the wrong object —
+/// which is worse than a missing one, because it resolves."
+///
+/// THE THREE VARIANTS ARE §7.3'S THREE SHAPES, so a locator that does not name
+/// one of the five kinds is not representable. `Check` has no pull request and
+/// `Head` has no stable id, both for the reasons §7.3 gives: a check is
+/// identified by repository and id, and inventing a synthetic id for the subject
+/// head would contradict the merged §8.1 schema.
+///
+/// IT COMES FROM THE CALLER, like every other expectation this crate compares
+/// against an artifact. Deriving it from the record under examination would be
+/// the record supplying the identity it is checked against — §17.1's first
+/// consequence, at the one member whose whole job is identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcquisitionLocator {
+    /// `github-issue-comment`, `github-submitted-review`, `github-review-comment`.
+    InPullRequest {
+        repository: String,
+        pull_request: String,
+        stable_id: String,
+    },
+    /// `github-actions-check`.
+    Check {
+        repository: String,
+        stable_id: String,
+    },
+    /// `github-pull-request-head`.
+    Head {
+        repository: String,
+        pull_request: String,
+    },
+}
+
+impl AcquisitionLocator {
+    /// The §7.3 member names and values this locator asserts, in §7.3's order.
+    ///
+    /// Returned as pairs rather than compared here so the comparison can range
+    /// over the SHAPE the record's `locatorKind` selects: a caller's `Check`
+    /// locator against a record declaring `github-submitted-review` must fail on
+    /// the members, not on a variant name this crate chose.
+    #[must_use]
+    pub fn members(&self) -> Vec<(&'static str, &str)> {
+        match self {
+            Self::InPullRequest {
+                repository,
+                pull_request,
+                stable_id,
+            } => vec![
+                ("repository", repository.as_str()),
+                ("pullRequest", pull_request.as_str()),
+                ("stableId", stable_id.as_str()),
+            ],
+            Self::Check {
+                repository,
+                stable_id,
+            } => vec![
+                ("repository", repository.as_str()),
+                ("stableId", stable_id.as_str()),
+            ],
+            Self::Head {
+                repository,
+                pull_request,
+            } => vec![
+                ("repository", repository.as_str()),
+                ("pullRequest", pull_request.as_str()),
+            ],
+        }
+    }
+}
+
+/// A source a decision or a derived fact cites: which object, and which bytes.
+///
+/// The digest and the locator travel together for `ExpectedQuery`'s reason — a
+/// citation that names bytes without saying which object they are supposed to be
+/// cannot be checked against §7.3, and two independent fields are two things
+/// that can disagree, with the one nobody sets being the one that stops being
+/// checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CitedSource {
+    pub digest: String,
+    pub locator: AcquisitionLocator,
+}
+
 /// Retained evidence, addressed by digest.
 ///
 /// Deliberately minimal, and deliberately unable to volunteer a digest. Every
@@ -515,6 +615,23 @@ pub enum Unresolved {
         derivation: String,
         expected: usize,
         cited: usize,
+    },
+    /// A reduced record's §7.3 locator names an object other than the one the
+    /// citation asked for.
+    ///
+    /// A RELATION failure and not a malformed artifact, and the difference is
+    /// §17.1's two classes. The record is well formed: its locator has exactly
+    /// the members §7.3 gives its kind, and every one of them is a string. What
+    /// it is not is the object this decision cited — "a well-formed pointer at
+    /// the wrong object, which is worse than a missing one, because it
+    /// resolves". Reporting that as malformed would say the producer emitted
+    /// something broken, when what happened is that a correct artifact was
+    /// consumed under a citation it does not answer.
+    LocatorSubjectMismatch {
+        digest: String,
+        member: &'static str,
+        declared: String,
+        cited: String,
     },
     /// The basis does not carry something §17's minimum decision basis requires
     /// for the profile the CALLER asked for.
@@ -1418,8 +1535,8 @@ fn check_derived<E: RetainedEvidence>(
     }
 
     let mut sources = Vec::with_capacity(entry.arity());
-    for (slot, (source, source_digest)) in entry.sources.iter().zip(&fact.derived_from).enumerate()
-    {
+    for (slot, (source, cited)) in entry.sources.iter().zip(&fact.derived_from).enumerate() {
+        let source_digest = &cited.digest;
         // Every cited source goes through the same resolution the decision's own
         // inputs do. A derived fact resting on bytes nobody was permitted to keep
         // is not better evidenced than a decision resting on them.
@@ -1702,7 +1819,10 @@ pub fn admissibility<E: RetainedEvidence>(
                         };
                         for (index, slot) in entry.sources.iter().enumerate() {
                             if let Some(cited) = fact.derived_from.get(index) {
-                                slots.entry(slot.kind).or_default().push(cited.as_str());
+                                slots
+                                    .entry(slot.kind)
+                                    .or_default()
+                                    .push(cited.digest.as_str());
                             }
                         }
                     }

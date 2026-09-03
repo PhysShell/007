@@ -69,8 +69,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DecisionInput, DecisionProfile, ExpectedDetector,
-    ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
+    admissibility, AcquisitionLocator, Admissible, DecisionBasis, DecisionInput, DecisionProfile,
+    ExpectedDetector, ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -287,6 +287,10 @@ fn a2_a_complete_absence_basis_with_an_unrequired_extra_input_still_admits() {
             vec![DecisionInput {
                 source_digest: other,
                 pointer: "/commitId".to_owned(),
+                locator: AcquisitionLocator::Check {
+                    repository: "PhysShell/007".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
             }],
         ),
         &store,

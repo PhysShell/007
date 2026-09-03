@@ -93,8 +93,8 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    admissibility, relations_checked, Admissible, DecisionBasis, DecisionInput, DecisionProfile,
-    ExpectedDetector, RetainedEvidence,
+    admissibility, relations_checked, AcquisitionLocator, Admissible, DecisionBasis, DecisionInput,
+    DecisionProfile, ExpectedDetector, RetainedEvidence,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -198,10 +198,18 @@ fn check_basis(digest: &str) -> DecisionBasis {
             DecisionInput {
                 source_digest: digest.to_owned(),
                 pointer: "/headSha".to_owned(),
+                locator: AcquisitionLocator::Check {
+                    repository: "PhysShell/007".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
             },
             DecisionInput {
                 source_digest: digest.to_owned(),
                 pointer: "/conclusion".to_owned(),
+                locator: AcquisitionLocator::Check {
+                    repository: "PhysShell/007".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
             },
         ],
         derived: Vec::new(),
@@ -223,6 +231,10 @@ fn one_input(digest: &str, pointer: &str) -> DecisionBasis {
         inputs: vec![DecisionInput {
             source_digest: digest.to_owned(),
             pointer: pointer.to_owned(),
+            locator: AcquisitionLocator::Check {
+                repository: "PhysShell/007".to_owned(),
+                stable_id: "0".to_owned(),
+            },
         }],
         derived: Vec::new(),
         expected_query: None,

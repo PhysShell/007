@@ -91,9 +91,9 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    admissibility, relations_checked, staleness, Admissible, DecisionBasis, DecisionInput,
-    DecisionProfile, ExpectedDetector, HeadRead, RetainedEvidence, Staleness, Subject, SubjectRead,
-    Unresolved,
+    admissibility, relations_checked, staleness, AcquisitionLocator, Admissible, DecisionBasis,
+    DecisionInput, DecisionProfile, ExpectedDetector, HeadRead, RetainedEvidence, Staleness,
+    Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -190,10 +190,18 @@ fn check_basis(digest: &str) -> DecisionBasis {
             DecisionInput {
                 source_digest: digest.to_owned(),
                 pointer: "/headSha".to_owned(),
+                locator: AcquisitionLocator::Check {
+                    repository: "PhysShell/007".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
             },
             DecisionInput {
                 source_digest: digest.to_owned(),
                 pointer: "/conclusion".to_owned(),
+                locator: AcquisitionLocator::Check {
+                    repository: "PhysShell/007".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
             },
         ],
         derived: Vec::new(),
@@ -298,6 +306,10 @@ fn k1b_equality_is_not_a_bound_on_range() {
             inputs: vec![DecisionInput {
                 source_digest: record.clone(),
                 pointer: "/head_sha".to_owned(),
+                locator: AcquisitionLocator::Check {
+                    repository: "PhysShell/007".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
             }],
             derived: Vec::new(),
             expected_query: None,
@@ -451,6 +463,10 @@ fn k1e_the_record_assessment_disagreement_is_still_refused() {
             inputs: vec![DecisionInput {
                 source_digest: record.clone(),
                 pointer: "/head_sha".to_owned(),
+                locator: AcquisitionLocator::Check {
+                    repository: "PhysShell/007".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
             }],
             derived: Vec::new(),
             expected_query: None,

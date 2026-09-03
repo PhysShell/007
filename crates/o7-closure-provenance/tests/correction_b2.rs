@@ -66,9 +66,9 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    relations_checked, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
-    ExpectedDetector, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
-    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
+    relations_checked, scan_verdict, staleness, AcquisitionLocator, Admissible, DecisionBasis,
+    DecisionInput, ExpectedDetector, FalsificationSurfaceScan, HeadRead, QueryBinding,
+    RetainedEvidence, ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -312,6 +312,10 @@ fn basis(digest_of: &str, pointer: &str) -> DecisionBasis {
         inputs: vec![DecisionInput {
             source_digest: digest_of.to_owned(),
             pointer: pointer.to_owned(),
+            locator: AcquisitionLocator::Check {
+                repository: "PhysShell/007".to_owned(),
+                stable_id: "0".to_owned(),
+            },
         }],
         derived: Vec::new(),
         expected_query: None,

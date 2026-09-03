@@ -39,8 +39,9 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    relations_checked, Admissible, DecisionBasis, DecisionInput, DeclaredBinding, DerivedFact,
-    ExpectedDetector, ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
+    relations_checked, AcquisitionLocator, Admissible, CitedSource, DecisionBasis, DecisionInput,
+    DeclaredBinding, DerivedFact, ExpectedDetector, ExpectedQuery, QueryBinding, RetainedEvidence,
+    Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -408,6 +409,10 @@ fn reads(source_digest: &str, pointer: &str) -> DecisionInput {
     DecisionInput {
         source_digest: source_digest.to_owned(),
         pointer: pointer.to_owned(),
+        locator: AcquisitionLocator::Check {
+            repository: "PhysShell/007".to_owned(),
+            stable_id: "0".to_owned(),
+        },
     }
 }
 
@@ -691,7 +696,24 @@ fn b6_a_derived_fact_that_its_named_sources_do_not_imply_is_refused() {
         derivation: "review-carries-finding".to_owned(),
         version: "1".to_owned(),
         value: json!(true),
-        derived_from: vec![r.clone(), c.clone()],
+        derived_from: vec![
+            CitedSource {
+                digest: r.clone(),
+                locator: AcquisitionLocator::InPullRequest {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
+            },
+            CitedSource {
+                digest: c.clone(),
+                locator: AcquisitionLocator::InPullRequest {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
+            },
+        ],
     }];
 
     let outcome = relations(&b, &store);
@@ -730,7 +752,24 @@ fn b7_a_true_fact_with_the_wrong_named_sources_is_refused() {
         derivation: "review-carries-finding".to_owned(),
         version: "1".to_owned(),
         value: json!(true),
-        derived_from: vec![r.clone(), unrelated.clone()],
+        derived_from: vec![
+            CitedSource {
+                digest: r.clone(),
+                locator: AcquisitionLocator::InPullRequest {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
+            },
+            CitedSource {
+                digest: unrelated.clone(),
+                locator: AcquisitionLocator::InPullRequest {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
+            },
+        ],
     }];
 
     let outcome = relations(&b, &store);
@@ -759,7 +798,24 @@ fn b7b_a_correctly_derived_fact_is_admitted() {
         derivation: "review-carries-finding".to_owned(),
         version: "1".to_owned(),
         value: json!(true),
-        derived_from: vec![r.clone(), owning.clone()],
+        derived_from: vec![
+            CitedSource {
+                digest: r.clone(),
+                locator: AcquisitionLocator::InPullRequest {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
+            },
+            CitedSource {
+                digest: owning.clone(),
+                locator: AcquisitionLocator::InPullRequest {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
+            },
+        ],
     }];
 
     admitted(&relations(&b, &store));
@@ -782,7 +838,14 @@ fn b7c_an_unregistered_derivation_is_refused() {
         derivation: "vibes-based-finding-detection".to_owned(),
         version: "7".to_owned(),
         value: json!(true),
-        derived_from: vec![r.clone()],
+        derived_from: vec![CitedSource {
+            digest: r.clone(),
+            locator: AcquisitionLocator::InPullRequest {
+                repository: "PhysShell/007".to_owned(),
+                pull_request: "9001".to_owned(),
+                stable_id: "0".to_owned(),
+            },
+        }],
     }];
 
     let outcome = relations(&b, &store);

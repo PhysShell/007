@@ -80,8 +80,8 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DecisionInput, DecisionProfile, DerivedFact,
-    ExpectedDetector, RetainedEvidence, Unresolved,
+    admissibility, AcquisitionLocator, Admissible, CitedSource, DecisionBasis, DecisionInput,
+    DecisionProfile, DerivedFact, ExpectedDetector, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -298,6 +298,10 @@ fn reads(digest: &str, pointer: &str) -> DecisionInput {
     DecisionInput {
         source_digest: digest.to_owned(),
         pointer: pointer.to_owned(),
+        locator: AcquisitionLocator::Check {
+            repository: "PhysShell/007".to_owned(),
+            stable_id: "0".to_owned(),
+        },
     }
 }
 
@@ -306,7 +310,24 @@ fn carries_finding(review: &str, comment: &str) -> DerivedFact {
         derivation: "review-carries-finding".to_owned(),
         version: "1".to_owned(),
         value: json!(true),
-        derived_from: vec![review.to_owned(), comment.to_owned()],
+        derived_from: vec![
+            CitedSource {
+                digest: review.to_owned(),
+                locator: AcquisitionLocator::InPullRequest {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
+            },
+            CitedSource {
+                digest: comment.to_owned(),
+                locator: AcquisitionLocator::InPullRequest {
+                    repository: "PhysShell/007".to_owned(),
+                    pull_request: "9001".to_owned(),
+                    stable_id: "0".to_owned(),
+                },
+            },
+        ],
     }
 }
 
