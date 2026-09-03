@@ -94,6 +94,7 @@ const THIS_FILE: &str = include_str!("correction_g3.rs");
 const WITNESS_FILES: &[(&str, &str)] = &[
     ("correction_g3.rs", THIS_FILE),
     ("correction_k1.rs", include_str!("correction_k1.rs")),
+    ("correction_m2.rs", include_str!("correction_m2.rs")),
 ];
 
 // ---- The behavioural half.
@@ -297,6 +298,41 @@ enum Bounding {
 /// rows below now read `Here`, naming witnesses that turn red when the check is
 /// removed.
 ///
+/// ERRATUM, M2 — AND THE SECOND TIME THIS TABLE CLASSIFIED AN UNBOUNDED MEMBER
+/// AS ACCOUNTED FOR.
+///
+/// Until `GREEN-DETECTOR-RANGE` all three `detector` rows read `Residual`:
+///
+/// ```text
+/// assessment/detector/id
+///     "DET-BIND is OWED. No registry binds a detector identity to an
+///      implementation, so a record may name a detector nobody ran"
+/// assessment/detector/version
+///     "DET-BIND is OWED, as for detector/id"
+/// assessment/detector/configDigest
+///     "DET-BIND is OWED. Nothing resolves this digest, so unlike every other
+///      digest in these tables it is never re-digested against bytes — it is a
+///      string shaped like a commitment to a configuration nobody retained"
+/// ```
+///
+/// Every sentence of that is TRUE, and none of it is what §9.4 asks. External
+/// review (Codex, on `b9eaa7d`) reported `detector.id` as free text, and the
+/// classification failed by answering a different question: binding an identity
+/// to something that ran and bounding what the member may CARRY are two
+/// obligations. DET-BIND is the first. §9.4 asks only the second, and no row
+/// here addressed it.
+///
+/// That is a subtler failure than K1's and worth separating from it. K1's rows
+/// cited a mechanism that did not hold. These cited a mechanism that does hold,
+/// for a property nobody had asked about — a residual that is accurate,
+/// load-bearing, and not a bound. `Residual` means "names what it leaves open";
+/// these named something else that was also open.
+///
+/// The rows below now read `Here` for the RANGE. DET-BIND is unchanged, still
+/// OWED, and still the reason `configDigest` is a recorded claim whose
+/// referenced configuration is not resolved — closing a range is not resolving
+/// a reference, and this erratum makes no such claim.
+///
 /// The prior text is quoted above rather than replaced silently, per the
 /// adjudication: the earlier classification is not to be made to look correct
 /// in hindsight. An inventory whose failures are edited out of it is the same
@@ -326,22 +362,24 @@ const INVENTORY: &[(&str, Bounding)] = &[
     ),
     (
         "assessment/detector/id",
-        Bounding::Residual(
-            "DET-BIND is OWED. No registry binds a detector identity to an implementation, so a \
-             record may name a detector nobody ran",
-        ),
+        Bounding::Here {
+            file: "correction_m2.rs",
+            witness: "m2a_a_detector_id_of_free_text_authorises_a_record",
+        },
     ),
     (
         "assessment/detector/version",
-        Bounding::Residual("DET-BIND is OWED, as for detector/id"),
+        Bounding::Here {
+            file: "correction_m2.rs",
+            witness: "m2b_a_detector_version_of_free_text_authorises_a_record",
+        },
     ),
     (
         "assessment/detector/configDigest",
-        Bounding::Residual(
-            "DET-BIND is OWED. Nothing resolves this digest, so unlike every other digest in \
-             these tables it is never re-digested against bytes — it is a string shaped like a \
-             commitment to a configuration nobody retained",
-        ),
+        Bounding::Here {
+            file: "correction_m2.rs",
+            witness: "m2c_a_detector_config_digest_of_free_text_authorises_a_record",
+        },
     ),
     (
         "assessment/findings/field",
