@@ -75,6 +75,7 @@ const SURFACE: &str = "pull-request-submitted-reviews";
 #[derive(Default)]
 struct Store {
     records: BTreeMap<String, Value>,
+    bindings: BTreeMap<String, Value>,
 }
 impl Store {
     fn put(&mut self, o: &Value) -> String {
@@ -82,15 +83,64 @@ impl Store {
         self.records.insert(d.clone(), o.clone());
         d
     }
+    /// Retain a gated record WITH the §9.2 binding that authorises it.
+    ///
+    /// This exists because M4 found L2-E passing without it. The absence path's
+    /// snapshot is ungated, which is why this file's first store had no binding
+    /// at all — but §13's CANDIDATE SET is gated, and a candidate with no
+    /// binding never reaches the matched-set rule the witness is named after.
+    fn retain(&mut self, record: &Value, assessed: &[&str]) -> String {
+        let assessment = json!({
+            "schemaVersion": 1,
+            "sourceKind": "closure-retention-assessment",
+            "redactionPolicyVersion": "1",
+            "detector": {
+                "id": "synthetic-detector",
+                "version": "1",
+                "configDigest":
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            },
+            "representation": "decoded-source-field-values",
+            "assessedFields": assessed,
+            "coverageComplete": true,
+            "outcome": "RETAIN",
+            "observedAt": "2026-08-05T09:03:00Z",
+        });
+        let ad = self.put(&assessment);
+        let rd = self.put(record);
+        let binding = json!({
+            "schemaVersion": 1,
+            "sourceKind": "closure-retention-binding",
+            "recordDigest": rd,
+            "assessmentDigest": ad,
+        });
+        self.put(&binding);
+        self.bindings.insert(rd.clone(), binding);
+        rd
+    }
 }
 impl RetainedEvidence for Store {
     fn resolve(&self, d: &str) -> Option<Value> {
         self.records.get(d).cloned()
     }
-    fn binding_for(&self, _record_digest: &str) -> Option<Value> {
-        None
+    fn binding_for(&self, record_digest: &str) -> Option<Value> {
+        self.bindings.get(record_digest).cloned()
     }
 }
+
+/// §5.3's required set for a submitted review, so the candidate this file
+/// retains is assessed over its whole denominator rather than partially.
+const REVIEW_REQ: [&str; 9] = [
+    "/author_association",
+    "/body",
+    "/commit_id",
+    "/id",
+    "/state",
+    "/submitted_at",
+    "/user/id",
+    "/user/login",
+    "/user/type",
+];
 
 fn bound_implementation_digest() -> String {
     let entry = resolve_matcher(MATCHER_ID, MATCHER_VERSION).expect("the matcher is registered");
@@ -270,19 +320,53 @@ fn l2d_a_mismatching_observation_is_still_refused() {
     );
 }
 
-/// L2-E — BOUNDARY. §14's empty-matched rule still fires on its own: right
+/// L2-E — BOUNDARY. §13's empty-matched rule still fires on its own: right
 /// subject, right observation, and the enumeration found something.
+///
+/// THE CANDIDATE IS AUTHORISED, AND THAT IS THE WHOLE POINT OF THIS FIXTURE.
+/// As first written this witness retained the selected review with `put`, over
+/// a store whose `binding_for` returned `None`, so the candidate was refused at
+/// the door — measured:
+///
+/// ```text
+/// QueryDoesNotSupportRole { why: "the query snapshot's candidate sha256:91e78b…
+/// did not pass the door: [NoRetentionBinding { … }]" }
+/// ```
+///
+/// It refused, so it passed, and it would have gone on passing with the
+/// matched-set rule deleted. `correction_absence.rs`'s A3 — the same question,
+/// asked one round earlier — already retained its candidate with authority; the
+/// regression was this file's, not the suite's.
+///
+/// The refusal is now pinned to the rule this witness is named after, by the
+/// digest of the matched candidate: a value the test supplies, so it does not
+/// move when a message is reworded and cannot be satisfied by a refusal about
+/// authority, the observation, or the subject.
 #[test]
 fn l2e_a_non_empty_matched_set_is_still_refused() {
     let mut store = Store::default();
-    let review = store.put(&selected_review());
-    let found = store.put(&snapshot(OURS_REPO, OURS_PR, OBSERVATION, &[review]));
+    let review = store.retain(&selected_review(), &REVIEW_REQ);
+    let found = store.put(&snapshot(
+        OURS_REPO,
+        OURS_PR,
+        OBSERVATION,
+        std::slice::from_ref(&review),
+    ));
     let outcome = admissibility(DecisionProfile::Absence, &absence_basis(&found), &store);
+    let why: &[Unresolved] = match &outcome {
+        Admissible::CannotCheck { why } => why,
+        Admissible::Yes { .. } => &[],
+    };
     assert!(
-        matches!(outcome, Admissible::CannotCheck { .. }),
-        "L2-E: an absence claim whose own evidence matched a candidate was admitted. §13 \
-         permits NotProduced only over an empty matched subsequence, and evidence that \
-         contradicts a claim is not support for it: got {outcome:?}"
+        why.iter().any(|u| matches!(
+            u,
+            Unresolved::QueryDoesNotSupportRole { why, .. } if why.contains(&review)
+        )),
+        "L2-E: an absence claim whose own evidence matched a candidate must be refused BY THE \
+         MATCHED SET, and the refusal must name the candidate that matched. §13 permits \
+         NotProduced only over an empty matched subsequence, and evidence that contradicts a \
+         claim is not support for it. A refusal for any other reason leaves that rule \
+         unwitnessed — which is exactly what this witness did before M4: got {outcome:?}"
     );
 }
 
