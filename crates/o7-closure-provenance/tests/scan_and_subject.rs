@@ -9,6 +9,7 @@
 // one site, `digest(object).expect("digest")` in the `Store::put` helper below,
 // on a JSON literal written in this file. A literal this canonicalizer cannot
 // hash is a defect in the fixture and must fail loudly rather than be skipped.
+// Extent (checked by N1): 1 `expect` site.
 #![allow(clippy::expect_used)]
 
 use o7_closure_canonical::digest;

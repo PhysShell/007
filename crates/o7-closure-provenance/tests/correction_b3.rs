@@ -94,6 +94,7 @@
 // in `put`, the `panic!` in `refused`, and the `expect`s in the mutation
 // helpers, each unreachable unless a literal a few lines above it is malformed.
 // A malformed fixture must fail loudly rather than silently weaken a witness.
+// Extent (checked by N1): 18 `expect` sites, 1 `panic` site.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;

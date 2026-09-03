@@ -112,6 +112,7 @@
 // written in it — `digest(..).expect` in `put`, and the `expect`s in the mutation
 // helpers, each unreachable unless a specimen a few lines above is malformed. A
 // broken specimen must fail loudly rather than silently weaken a whole family.
+// Extent (checked by N1): 19 `expect` sites, 3 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;

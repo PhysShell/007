@@ -20,6 +20,7 @@
 // contract section this parser cannot read must fail loudly — silently yielding
 // an empty expected set would make every assertion below vacuously true, which
 // is the failure-to-empty-set-to-green demon the whole crate is about.
+// Extent (checked by N1): 17 `panic` sites.
 #![allow(clippy::panic)]
 
 use o7_closure_provenance::artifact::{

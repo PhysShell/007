@@ -62,6 +62,7 @@
 // own handling of JSON literals written in this file. There are 20 such sites and
 // each is unreachable unless a literal a few lines above it is malformed, which
 // must fail loudly rather than be skipped.
+// Extent (checked by N1): 8 `expect` sites, 5 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
@@ -739,6 +740,113 @@ fn e1_every_restriction_lint_allowance_suppresses_something() {
     );
 }
 
+// ---- N1. The other direction of E1: an allowance wider than its justification.
+
+/// Every restriction-lint allowance must DECLARE HOW MANY sites it covers, and
+/// the declaration must be true.
+///
+/// E1 above checks that an allowance suppresses *something*. That is one
+/// inclusion of a two-directional rule, and E1 reports it as the rule. The
+/// missing direction is coverage: an allowance may suppress a site its
+/// justification never contemplated, and E1 stays green because some *other*
+/// site matches. Nothing then holds the comment to the code.
+///
+/// It is the same shape E1's own docstring names — a guard checks proxy P,
+/// reports property Q, and P is not Q — with E1 in the guard's chair. External
+/// review found the instance: `scan_and_subject.rs` justified its allowance on
+/// "exactly one site ... on a JSON literal written in this file" while covering
+/// three, two of them lookups into the matcher registry, which is neither a
+/// literal written in that file nor that test's own assertion.
+///
+/// WHAT THIS CHECKS, AND WHAT IT DOES NOT. It checks EXTENT: the declared count
+/// per lint equals the count the parser finds. It does NOT check soundness —
+/// no test can read the prose invariant and decide whether it holds. Its whole
+/// value is that the extent cannot change silently: add a site and this goes
+/// red, and whoever added it must restate the invariant over the new extent.
+/// AGENTS.md rule 4 asks for "the invariant that makes it sound"; this makes
+/// the invariant's SUBJECT explicit and stable, nothing more.
+#[test]
+fn n1_every_restriction_lint_allowance_declares_a_true_extent() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut declared_files = 0;
+
+    for path in walk(&dir.join("src"))
+        .into_iter()
+        .chain(walk(&dir.join("tests")))
+    {
+        let source = std::fs::read_to_string(&path).expect("reading a source file");
+        let parsed = syn::parse_file(&source)
+            .unwrap_or_else(|e| panic!("{path:?} is not parseable Rust, which N1 requires: {e}"));
+
+        let mut audit = Audit::default();
+        syn::visit::Visit::visit_file(&mut audit, &parsed);
+
+        if audit.allowed.is_empty() {
+            continue;
+        }
+        declared_files += 1;
+
+        let declared = declared_extent(&source).unwrap_or_else(|| {
+            panic!(
+                "{path:?} carries a restriction-lint allowance and declares no extent. \
+                 AGENTS.md rule 4 requires the invariant that makes the allowance sound; \
+                 an invariant with no stated subject cannot be held to the code. Add a \
+                 line reading `{EXTENT_PREFIX} <n> `<lint>` sites, ...` beside the allowance"
+            )
+        });
+
+        for lint in &audit.allowed {
+            let actual = lint.site_count(&audit);
+            let claimed = declared.get(lint.bare_name()).copied().unwrap_or(0);
+            assert_eq!(
+                claimed,
+                actual,
+                "{path:?} allows {} and declares {claimed} {} site(s); the parser finds \
+                 {actual}. The justification beside the allowance describes an extent the \
+                 file does not have, so whatever invariant it states is being applied to \
+                 sites nobody weighed",
+                lint.name(),
+                lint.site()
+            );
+        }
+    }
+
+    assert!(
+        declared_files >= 12,
+        "N1 examined only {declared_files} files carrying a restriction-lint allowance. \
+         It shares E1's denominator, and a shrinking denominator is how that check once \
+         reported green over files it never opened"
+    );
+}
+
+/// The line a justification must carry so its extent can be checked.
+const EXTENT_PREFIX: &str = "// Extent (checked by N1):";
+
+/// Read the declared per-lint extent out of a source file's comments.
+///
+/// Comment lines only: a line is considered only when it starts with `//` after
+/// trimming, so a string literal mentioning the prefix — including the ones in
+/// this very function — cannot feed the check its own answer. E1's third defect
+/// was exactly that, a guard manufacturing the proxy it then measured.
+fn declared_extent(source: &str) -> Option<std::collections::BTreeMap<String, usize>> {
+    let line = source
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with(EXTENT_PREFIX))?;
+    let mut out = std::collections::BTreeMap::new();
+    for part in line[EXTENT_PREFIX.len()..].split(',') {
+        let mut words = part.split_whitespace();
+        let (Some(count), Some(lint)) = (words.next(), words.next()) else {
+            continue;
+        };
+        let Ok(count) = count.parse::<usize>() else {
+            continue;
+        };
+        out.insert(lint.trim_matches('`').to_owned(), count);
+    }
+    Some(out)
+}
+
 /// The three restriction lints this crate ever allows, each paired with the call
 /// site that would justify allowing it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -787,6 +895,28 @@ impl Restriction {
             Self::UnwrapUsed => audit.unwrap_sites > 0,
             Self::ExpectUsed => audit.expect_sites > 0,
             Self::Panic => audit.panic_sites > 0,
+        }
+    }
+
+    /// The lint's name without the `clippy::` tool prefix, as a declared extent
+    /// spells it.
+    fn bare_name(self) -> &'static str {
+        match self {
+            Self::UnwrapUsed => "unwrap",
+            Self::ExpectUsed => "expect",
+            Self::Panic => "panic",
+        }
+    }
+
+    /// How many sites of this lint's kind the file actually contains.
+    ///
+    /// `has_site` above asks only whether this is non-zero. N1 needs the number,
+    /// because the question it answers is coverage rather than existence.
+    fn site_count(self, audit: &Audit) -> usize {
+        match self {
+            Self::UnwrapUsed => audit.unwrap_sites,
+            Self::ExpectUsed => audit.expect_sites,
+            Self::Panic => audit.panic_sites,
         }
     }
 }

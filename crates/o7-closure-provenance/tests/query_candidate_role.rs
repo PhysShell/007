@@ -32,6 +32,7 @@
 // Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
 // `expect` and `panic` sites below are this file's own handling of JSON literals
 // written in it, unreachable unless a specimen a few lines above is malformed.
+// Extent (checked by N1): 3 `expect` sites, 1 `panic` site.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;

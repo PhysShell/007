@@ -104,6 +104,7 @@
 // `expect` and `panic` sites below are this file's own handling of JSON literals
 // written in it, each unreachable unless a specimen a few lines above is
 // malformed. A broken specimen must fail loudly rather than weaken a witness.
+// Extent (checked by N1): 8 `expect` sites, 3 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
