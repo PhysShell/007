@@ -112,7 +112,7 @@
 // written in it — `digest(..).expect` in `put`, and the `expect`s in the mutation
 // helpers, each unreachable unless a specimen a few lines above is malformed. A
 // broken specimen must fail loudly rather than silently weaken a whole family.
-// Extent (checked by N1): 19 `expect` sites, 3 `panic` sites.
+// Extent (checked by N1): 17 `expect` sites, 3 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
@@ -124,6 +124,8 @@ use o7_closure_provenance::{
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 /// This file's witnesses ask about ONE relation each, over a basis built to
 /// isolate it. That is not a §17 decision basis and was never meant to be, so
@@ -1127,10 +1129,5 @@ fn json_type(value: &Value) -> &'static str {
 /// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
 /// registry that binds it rather than copied as a literal that can go stale.
 fn bound_implementation_digest() -> String {
-    let entry = o7_closure_matcher::resolve("review-by-expected-author-login", "1")
-        .expect("the matcher is registered");
-    o7_closure_matcher::verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest("review-by-expected-author-login", "1")
 }

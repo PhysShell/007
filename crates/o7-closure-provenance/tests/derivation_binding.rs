@@ -11,6 +11,11 @@
 // precedent in `crates/o7-closure-classifier/tests/frozen_fixtures.rs`: every
 // panic path below is this test's own assertion failing, or its own parse of a
 // JSON literal written in this file. Nothing here runs against production input.
+// The `resolve(..).expect("registered")` sites are lookups into the derivation
+// registry rather than into a literal, and are named here on their own footing:
+// this file's whole subject IS that registry, and a witness about an entry the
+// registry does not hold cannot be constructed at all. N1 records why such a
+// site is now named rather than folded into the fixture invariant.
 // Extent (checked by N1): 4 `expect` sites, 1 `panic` site.
 #![allow(clippy::expect_used, clippy::panic)]
 

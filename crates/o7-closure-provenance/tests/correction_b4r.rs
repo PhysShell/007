@@ -100,17 +100,21 @@
 //! remains OWED. Whether `/zz/<secret>` is a field this gate may claim it
 //! assessed is decidable today, from §5.2 and §5.3 alone.
 
-// Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4: most
 // `expect` and `panic` sites below are this file's own handling of JSON literals
 // written in it, each unreachable unless a specimen a few lines above is
 // malformed. A broken specimen must fail loudly rather than weaken a witness.
-// Extent (checked by N1): 8 `expect` sites, 3 `panic` sites.
+// TWO SITES ARE NOT THAT and are named here rather than left to borrow that
+// invariant: the two reads of the artifact module's source from disk. A source
+// file this check cannot read is a check reporting green over text it never
+// opened. N1 records why the exception is named rather than assumed.
+// Extent (checked by N1): 6 `expect` sites, 3 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{
-    check_recorded_implementation, resolve as resolve_matcher, verify_implementation,
-    ImplementationCheck, RecordedQuerySnapshot,
+    check_recorded_implementation, resolve as resolve_matcher, ImplementationCheck,
+    RecordedQuerySnapshot,
 };
 use o7_closure_provenance::{
     relations_checked, scan_verdict, AcquisitionLocator, Admissible, DecisionBasis, DecisionInput,
@@ -119,6 +123,8 @@ use o7_closure_provenance::{
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 /// This file's witnesses ask about ONE relation each, over a basis built to
 /// isolate it. That is not a §17 decision basis and was never meant to be, so
@@ -246,11 +252,7 @@ const MATCHER_VERSION: &str = "1";
 /// because its fixture is malformed is a witness that proves nothing about the
 /// property it names.
 fn bound_implementation_digest() -> String {
-    let entry = resolve_matcher(MATCHER_ID, MATCHER_VERSION).expect("the matcher is registered");
-    verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest(MATCHER_ID, MATCHER_VERSION)
 }
 
 /// A §13 query snapshot at `schemaVersion` 2, carrying the implementation digest

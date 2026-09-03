@@ -87,6 +87,14 @@
 // Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
 // `expect` sites below are this file's own handling of JSON literals written in
 // it, unreachable unless a specimen a few lines above is malformed.
+// ONE SITE IS NOT THAT, and is named here rather than left to borrow the
+// fixture invariant: the read of §9.4's no-free-text rule out of
+// `docs/architecture/closure-source-provenance-v1.md`. Its invariant is a
+// different one — if the sentence this witness quotes is no longer in the
+// contract, the rule moved and nothing else noticed, and the witness must fail
+// loudly instead of passing over text that is gone. N1 records why an exception
+// is now named: twelve files justified an allowance on the fixture invariant
+// while covering sites it never described.
 // Extent (checked by N1): 2 `expect` sites.
 #![allow(clippy::expect_used)]
 

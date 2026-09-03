@@ -20,6 +20,8 @@ use o7_closure_provenance::{
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
+mod common;
+
 /// The canonical bytes of a conforming §9.5 `closure-retention-binding`.
 ///
 /// RED-B4R reshaped `binding_for` to hand over BYTES rather than a decoded
@@ -358,10 +360,5 @@ fn b9e_both_reads_unavailable_is_cannot_check() {
 /// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
 /// registry that binds it rather than copied as a literal that can go stale.
 fn bound_implementation_digest() -> String {
-    let entry = o7_closure_matcher::resolve("review-by-expected-author-login", "1")
-        .expect("the matcher is registered");
-    o7_closure_matcher::verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest("review-by-expected-author-login", "1")
 }

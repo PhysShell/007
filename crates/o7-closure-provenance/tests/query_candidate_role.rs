@@ -32,17 +32,18 @@
 // Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
 // `expect` and `panic` sites below are this file's own handling of JSON literals
 // written in it, unreachable unless a specimen a few lines above is malformed.
-// Extent (checked by N1): 3 `expect` sites, 1 `panic` site.
+// Extent (checked by N1): 1 `expect` site, 1 `panic` site.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
-use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
     relations_checked, AcquisitionLocator, Admissible, DecisionBasis, ExpectedDetector,
     ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 /// This file's witnesses ask about ONE relation each, over a basis built to
 /// isolate it. That is not a §17 decision basis and was never meant to be, so
@@ -166,11 +167,7 @@ fn block_body() -> Value {
 }
 
 fn bound_implementation_digest() -> String {
-    let entry = resolve_matcher(MATCHER_ID, MATCHER_VERSION).expect("the matcher is registered");
-    verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest(MATCHER_ID, MATCHER_VERSION)
 }
 
 fn snapshot(all: &[&str]) -> Value {

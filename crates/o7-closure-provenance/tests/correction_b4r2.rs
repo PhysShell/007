@@ -101,11 +101,10 @@
 // Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
 // `expect` sites below are this file's own handling of JSON literals
 // written in it, unreachable unless a specimen a few lines above is malformed.
-// Extent (checked by N1): 4 `expect` sites.
+// Extent (checked by N1): 2 `expect` sites.
 #![allow(clippy::expect_used)]
 
 use o7_closure_canonical::digest;
-use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
     admissibility, relations_checked, scan_verdict, AcquisitionLocator, Admissible, DecisionBasis,
     DecisionInput, DecisionProfile, ExpectedDetector, ExpectedQuery, FalsificationSurfaceScan,
@@ -113,6 +112,8 @@ use o7_closure_provenance::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 /// This file's witnesses ask about ONE relation each, over a basis built to
 /// isolate it. That is not a §17 decision basis and was never meant to be, so
@@ -232,11 +233,7 @@ fn review(login: &str, stable_id: &str) -> Value {
 }
 
 fn bound_implementation_digest() -> String {
-    let entry = resolve_matcher(MATCHER_ID, MATCHER_VERSION).expect("the matcher is registered");
-    verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest(MATCHER_ID, MATCHER_VERSION)
 }
 
 /// A §13 query snapshot with everything §13 can establish about ITSELF already

@@ -35,7 +35,7 @@
 // a JSON literal written in this file. Nothing here runs against production
 // input, and a malformed literal must fail loudly rather than be skipped — a
 // skipped witness is the vacuous green this file exists to prevent.
-// Extent (checked by N1): 11 `expect` sites, 4 `panic` sites.
+// Extent (checked by N1): 9 `expect` sites, 4 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
@@ -46,6 +46,8 @@ use o7_closure_provenance::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 /// This file's witnesses ask about ONE relation each, over a basis built to
 /// isolate it. That is not a §17 decision basis and was never meant to be, so
@@ -928,10 +930,5 @@ fn b10b_a_declared_binding_that_contradicts_the_retained_one_is_refused() {
 /// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
 /// registry that binds it rather than copied as a literal that can go stale.
 fn bound_implementation_digest() -> String {
-    let entry = o7_closure_matcher::resolve("review-by-expected-author-login", "1")
-        .expect("the matcher is registered");
-    o7_closure_matcher::verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest("review-by-expected-author-login", "1")
 }

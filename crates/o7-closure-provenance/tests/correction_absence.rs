@@ -64,17 +64,18 @@
 // Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
 // `expect` sites below are this file's own handling of JSON literals written in
 // it, unreachable unless a specimen a few lines above is malformed.
-// Extent (checked by N1): 3 `expect` sites.
+// Extent (checked by N1): 1 `expect` site.
 #![allow(clippy::expect_used)]
 
 use o7_closure_canonical::digest;
-use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
     admissibility, AcquisitionLocator, Admissible, DecisionBasis, DecisionInput, DecisionProfile,
     ExpectedDetector, ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 const MATCHER_ID: &str = "review-by-expected-author-login";
 const MATCHER_VERSION: &str = "1";
@@ -129,11 +130,7 @@ impl RetainedEvidence for Store {
 }
 
 fn bound_implementation_digest() -> String {
-    let entry = resolve_matcher(MATCHER_ID, MATCHER_VERSION).expect("the matcher is registered");
-    verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest(MATCHER_ID, MATCHER_VERSION)
 }
 
 /// A §13 query snapshot at schemaVersion 2 — COMPLETE, matcher bound to its

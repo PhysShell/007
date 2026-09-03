@@ -57,12 +57,20 @@
 //! structural one is not evidence of the law and must never be documented as if
 //! it were. That conflation is the defect E2 records.
 
-// Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4: most
 // `expect` and `panic` sites below are this test's own assertions failing, or its
-// own handling of JSON literals written in this file. There are 20 such sites and
-// each is unreachable unless a literal a few lines above it is malformed, which
-// must fail loudly rather than be skipped.
-// Extent (checked by N1): 8 `expect` sites, 5 `panic` sites.
+// own handling of JSON literals written in this file, each unreachable unless a
+// literal a few lines above it is malformed.
+// SIX SITES ARE NOT THAT and are named here rather than left to borrow that
+// invariant: E1 and N1 read this crate's own source files from disk and parse
+// them, and E2 reads the module declaring `RetainedEvidence`. Their invariant is
+// a different one — a source file this audit cannot read or parse is an audit
+// with a silently shrinking denominator, which is precisely the defect E1 was
+// found to have and must never be allowed to recur quietly.
+// This comment used to claim "There are 20 such sites". It was wrong, and no
+// check held it to the code; that is the N1 finding, and the extent line below
+// is now verified.
+// Extent (checked by N1): 6 `expect` sites, 5 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
@@ -73,6 +81,8 @@ use o7_closure_provenance::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 /// This file's witnesses ask about ONE relation each, over a basis built to
 /// isolate it. That is not a §17 decision basis and was never meant to be, so
@@ -1044,10 +1054,5 @@ fn e2_retained_evidence_api_surface_is_exact_and_reviewed() {
 /// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
 /// registry that binds it rather than copied as a literal that can go stale.
 fn bound_implementation_digest() -> String {
-    let entry = o7_closure_matcher::resolve("review-by-expected-author-login", "1")
-        .expect("the matcher is registered");
-    o7_closure_matcher::verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest("review-by-expected-author-login", "1")
 }

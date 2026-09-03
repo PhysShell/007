@@ -94,7 +94,7 @@
 // in `put`, the `panic!` in `refused`, and the `expect`s in the mutation
 // helpers, each unreachable unless a literal a few lines above it is malformed.
 // A malformed fixture must fail loudly rather than silently weaken a witness.
-// Extent (checked by N1): 18 `expect` sites, 1 `panic` site.
+// Extent (checked by N1): 16 `expect` sites, 1 `panic` site.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
@@ -106,6 +106,8 @@ use o7_closure_provenance::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 /// This file's witnesses ask about ONE relation each, over a basis built to
 /// isolate it. That is not a §17 decision basis and was never meant to be, so
@@ -1224,10 +1226,5 @@ fn s35_a_reduced_record_whose_coverage_contradicts_its_assessment_is_refused() {
 /// The digest §13.1 binds `review-by-expected-author-login/1` to, taken from the
 /// registry that binds it rather than copied as a literal that can go stale.
 fn bound_implementation_digest() -> String {
-    let entry = o7_closure_matcher::resolve("review-by-expected-author-login", "1")
-        .expect("the matcher is registered");
-    o7_closure_matcher::verify_implementation(entry)
-        .expect("the registry is bound to its own implementation")
-        .as_str()
-        .to_owned()
+    common::bound_matcher_digest("review-by-expected-author-login", "1")
 }
