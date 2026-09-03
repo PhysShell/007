@@ -108,10 +108,9 @@
 // invariant: the two reads of the artifact module's source from disk. A source
 // file this check cannot read is a check reporting green over text it never
 // opened. N1 records why the exception is named rather than assumed.
-// Extent (checked by N1): 6 `expect` sites, 3 `panic` sites.
+// Extent (checked by N1): 4 `expect` sites, 3 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use o7_closure_canonical::digest;
 use o7_closure_matcher::{
     check_recorded_implementation, resolve as resolve_matcher, ImplementationCheck,
     RecordedQuerySnapshot,
@@ -169,7 +168,7 @@ struct Store {
 }
 impl Store {
     fn put(&mut self, o: &Value) -> String {
-        let d = digest(o).expect("digest").as_str().to_owned();
+        let d = common::digest_of(o);
         self.records.insert(d.clone(), o.clone());
         d
     }
@@ -320,7 +319,7 @@ fn snapshot(enumeration: &str, all: &[&str], matched: &[&str]) -> Value {
 /// depend on the very lists each witness deliberately varies.
 #[track_caller]
 fn assert_implementation_is_bound(snapshot: &Value, what: &str) {
-    let d = digest(snapshot).expect("digest").as_str().to_owned();
+    let d = common::digest_of(snapshot);
     let recorded = RecordedQuerySnapshot::from_canonical(snapshot, &d)
         .unwrap_or_else(|e| panic!("{what}: the fixture is not a conforming §13 snapshot: {e}"));
     let matcher = recorded.recorded_matcher();

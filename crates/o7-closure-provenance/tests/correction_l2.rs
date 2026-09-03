@@ -48,13 +48,6 @@
 //! different questions, and a repair that made them unreachable would look like
 //! three rules and be one.
 
-// Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
-// `expect` sites below are this file's own handling of JSON literals written in
-// it, unreachable unless a specimen a few lines above is malformed.
-// Extent (checked by N1): 1 `expect` site.
-#![allow(clippy::expect_used)]
-
-use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     admissibility, scan_verdict, Admissible, DecisionBasis, DecisionProfile, ExpectedDetector,
     ExpectedQuery, FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness,
@@ -81,7 +74,7 @@ struct Store {
 }
 impl Store {
     fn put(&mut self, o: &Value) -> String {
-        let d = digest(o).expect("digest").as_str().to_owned();
+        let d = common::digest_of(o);
         self.records.insert(d.clone(), o.clone());
         d
     }

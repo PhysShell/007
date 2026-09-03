@@ -86,16 +86,17 @@
 // loudly instead of passing over text that is gone. N1 records why an exception
 // is now named: twelve files justified an allowance on the fixture invariant
 // while covering sites it never described.
-// Extent (checked by N1): 2 `expect` sites.
+// Extent (checked by N1): 1 `expect` site.
 #![allow(clippy::expect_used)]
 
-use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     staleness, ExpectedDetector, FailedRead, HeadRead, RetainedEvidence, Staleness, Subject,
     SubjectRead,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 const PROVENANCE: &str = include_str!("../../../docs/architecture/closure-source-provenance-v1.md");
 
@@ -106,7 +107,7 @@ struct Store {
 }
 impl Store {
     fn put(&mut self, o: &Value) -> String {
-        let d = digest(o).expect("digest").as_str().to_owned();
+        let d = common::digest_of(o);
         self.records.insert(d.clone(), o.clone());
         d
     }

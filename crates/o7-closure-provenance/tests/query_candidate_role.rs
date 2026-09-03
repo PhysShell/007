@@ -30,12 +30,14 @@
 //! so "was it refused" cannot tell the two apart and "which refusal" can.
 
 // Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
-// `expect` and `panic` sites below are this file's own handling of JSON literals
-// written in it, unreachable unless a specimen a few lines above is malformed.
-// Extent (checked by N1): 1 `expect` site, 1 `panic` site.
-#![allow(clippy::expect_used, clippy::panic)]
+// single `panic!` below is this test's own assertion failing -- a candidate
+// admitted where §13's matcher is not defined over the kind. The fixture-digest
+// and matcher-registry sites this file used to justify here now live once in
+// `tests/common/mod.rs`, which is why the `clippy::expect_used` half of this
+// allowance is gone rather than reworded.
+// Extent (checked by N1): 1 `panic` site.
+#![allow(clippy::panic)]
 
-use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, AcquisitionLocator, Admissible, DecisionBasis, ExpectedDetector,
     ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
@@ -89,7 +91,7 @@ struct Store {
 }
 impl Store {
     fn put(&mut self, o: &Value) -> String {
-        let d = digest(o).expect("digest").as_str().to_owned();
+        let d = common::digest_of(o);
         self.records.insert(d.clone(), o.clone());
         d
     }

@@ -35,10 +35,9 @@
 // a JSON literal written in this file. Nothing here runs against production
 // input, and a malformed literal must fail loudly rather than be skipped — a
 // skipped witness is the vacuous green this file exists to prevent.
-// Extent (checked by N1): 9 `expect` sites, 4 `panic` sites.
+// Extent (checked by N1): 5 `expect` sites, 4 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, AcquisitionLocator, Admissible, CitedSource, DecisionBasis, DecisionInput,
     DeclaredBinding, DerivedFact, ExpectedDetector, ExpectedQuery, QueryBinding, RetainedEvidence,
@@ -111,11 +110,11 @@ impl Store {
         // that cannot satisfy its own contract is modelling a store production
         // must refuse.
         let assessment = conforming_assessment(object);
-        let assessment_digest = digest(&assessment).expect("digest").as_str().to_owned();
+        let assessment_digest = common::digest_of(&assessment);
         self.records
             .insert(assessment_digest.clone(), assessment.clone());
 
-        let d = digest(object).expect("digest").as_str().to_owned();
+        let d = common::digest_of(object);
         self.records.insert(d.clone(), object.clone());
         let binding = binding_bytes(&d, &assessment_digest);
         // RETAINED, not merely handed over: §9.2 makes the binding a separately
@@ -129,7 +128,7 @@ impl Store {
     /// `github-query-snapshot` outside the gate, so no assessment about one can
     /// exist and none is demanded.
     fn put(&mut self, object: &Value) -> String {
-        let d = digest(object).expect("digest").as_str().to_owned();
+        let d = common::digest_of(object);
         self.records.insert(d.clone(), object.clone());
         d
     }
@@ -154,7 +153,7 @@ impl Store {
             .as_object_mut()
             .expect("the assessment is an object")
             .insert("observedAt".to_owned(), json!("2026-08-05T11:11:11Z"));
-        let other_digest = digest(&other).expect("digest").as_str().to_owned();
+        let other_digest = common::digest_of(&other);
         self.records.insert(other_digest.clone(), other);
         let binding = binding_bytes(record_digest, &other_digest);
         // RETAINED, not merely handed over: §9.2 makes the binding a separately

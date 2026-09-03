@@ -112,7 +112,7 @@
 // written in it — `digest(..).expect` in `put`, and the `expect`s in the mutation
 // helpers, each unreachable unless a specimen a few lines above is malformed. A
 // broken specimen must fail loudly rather than silently weaken a whole family.
-// Extent (checked by N1): 17 `expect` sites, 3 `panic` sites.
+// Extent (checked by N1): 16 `expect` sites, 3 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
@@ -169,8 +169,7 @@ struct Store {
 
 impl Store {
     fn put(&mut self, object: &Value) -> String {
-        let d = digest(object).expect("a specimen must be canonicalizable");
-        let d = d.as_str().to_owned();
+        let d = common::digest_of(object);
         self.records.insert(d.clone(), object.clone());
         d
     }

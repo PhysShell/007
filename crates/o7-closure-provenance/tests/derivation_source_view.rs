@@ -26,10 +26,9 @@
 // precedent in `tests/derivation_binding.rs`: every panic path below is this
 // test's own assertion failing, or its own parse of a JSON literal written in
 // this file. Nothing here runs against production input.
-// Extent (checked by N1): 3 `expect` sites, 1 `panic` site.
+// Extent (checked by N1): 2 `expect` sites, 1 `panic` site.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use o7_closure_canonical::digest;
 use o7_closure_matcher::{Member, ValueKind, SOURCE_SCHEMAS};
 use o7_closure_provenance::derivations::REGISTRY;
 use o7_closure_provenance::redaction::REQUIRED_FIELDS;
@@ -39,6 +38,8 @@ use o7_closure_provenance::{
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 /// This file's witnesses ask about ONE relation each, over a basis built to
 /// isolate it. That is not a §17 decision basis and was never meant to be, so
@@ -257,7 +258,7 @@ struct Store {
 }
 impl Store {
     fn put(&mut self, o: &Value) -> String {
-        let d = digest(o).expect("digest").as_str().to_owned();
+        let d = common::digest_of(o);
         self.records.insert(d.clone(), o.clone());
         d
     }

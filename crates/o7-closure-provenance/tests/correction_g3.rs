@@ -65,13 +65,6 @@
 //! G3-G  every classification is checkable               INVENTORY
 //! ```
 
-// Justification for the restriction-lint allowance, per AGENTS.md rule 4: the
-// `expect` sites below are this file's own handling of JSON literals written in
-// it, unreachable unless a specimen a few lines above is malformed.
-// Extent (checked by N1): 1 `expect` site.
-#![allow(clippy::expect_used)]
-
-use o7_closure_canonical::digest;
 use o7_closure_matcher::ValueKind;
 use o7_closure_provenance::artifact::{
     validate, HEAD_READ_EVENT_AVAILABLE, HEAD_READ_EVENT_FAILED, LOCATOR_SHAPES, REDUCED_RECORD,
@@ -80,6 +73,8 @@ use o7_closure_provenance::artifact::{
 use o7_closure_provenance::redaction::{MemberKind, ASSESSMENT_CONDITIONAL, ASSESSMENT_REQUIRED};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+
+mod common;
 
 const THIS_FILE: &str = include_str!("correction_g3.rs");
 
@@ -144,7 +139,7 @@ fn failed_event(observed_at: Value) -> Value {
 /// decision: the question is whether the OBJECT conforms, and routing it through
 /// `admissibility` would make a shape result depend on a basis.
 fn validates(object: &Value) -> Result<(), String> {
-    let d = digest(object).expect("digest").as_str().to_owned();
+    let d = common::digest_of(object);
     match validate(&d, object) {
         Ok(_) => Ok(()),
         Err(e) => Err(format!("{e:?}")),

@@ -94,10 +94,9 @@
 // in `put`, the `panic!` in `refused`, and the `expect`s in the mutation
 // helpers, each unreachable unless a literal a few lines above it is malformed.
 // A malformed fixture must fail loudly rather than silently weaken a witness.
-// Extent (checked by N1): 16 `expect` sites, 1 `panic` site.
+// Extent (checked by N1): 15 `expect` sites, 1 `panic` site.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, scan_verdict, staleness, AcquisitionLocator, Admissible, DecisionBasis,
     DecisionInput, ExpectedDetector, ExpectedQuery, FalsificationSurfaceScan, HeadRead,
@@ -151,7 +150,7 @@ struct Store {
 
 impl Store {
     fn put(&mut self, object: &Value) -> String {
-        let d = digest(object).expect("digest").as_str().to_owned();
+        let d = common::digest_of(object);
         self.records.insert(d.clone(), object.clone());
         d
     }

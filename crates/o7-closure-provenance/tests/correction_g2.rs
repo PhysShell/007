@@ -84,16 +84,17 @@
 // loudly instead of passing over text that is gone. N1 records why an exception
 // is now named: twelve files justified an allowance on the fixture invariant
 // while covering sites it never described.
-// Extent (checked by N1): 7 `expect` sites.
+// Extent (checked by N1): 6 `expect` sites.
 #![allow(clippy::expect_used)]
 
-use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     admissibility, AcquisitionLocator, Admissible, CitedSource, DecisionBasis, DecisionInput,
     DecisionProfile, DerivedFact, ExpectedDetector, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+mod common;
 
 const REVIEW_ID: &str = "9000000901";
 const COMMENT_ID: &str = "9000000202";
@@ -135,7 +136,7 @@ struct Store {
 }
 impl Store {
     fn put(&mut self, o: &Value) -> String {
-        let d = digest(o).expect("digest").as_str().to_owned();
+        let d = common::digest_of(o);
         self.records.insert(d.clone(), o.clone());
         d
     }

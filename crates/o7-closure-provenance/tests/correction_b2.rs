@@ -70,10 +70,9 @@
 // This comment used to claim "There are 20 such sites". It was wrong, and no
 // check held it to the code; that is the N1 finding, and the extent line below
 // is now verified.
-// Extent (checked by N1): 7 `expect` sites, 6 `panic` sites.
+// Extent (checked by N1): 6 `expect` sites, 6 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, scan_verdict, staleness, AcquisitionLocator, Admissible, DecisionBasis,
     DecisionInput, ExpectedDetector, FalsificationSurfaceScan, HeadRead, QueryBinding,
@@ -127,7 +126,7 @@ struct Store {
 impl Store {
     /// Retain an object under its own digest, with no binding.
     fn put(&mut self, object: &Value) -> String {
-        let d = digest(object).expect("digest").as_str().to_owned();
+        let d = common::digest_of(object);
         self.records.insert(d.clone(), object.clone());
         d
     }

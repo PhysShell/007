@@ -5,14 +5,6 @@
 //! read that did not happen are both losses of evidence, and both have an
 //! obvious wrong answer that looks like an answer.
 
-// Justification for the restriction-lint allowance, per AGENTS.md rule 4: exactly
-// one site, `digest(object).expect("digest")` in the `Store::put` helper below,
-// on a JSON literal written in this file. A literal this canonicalizer cannot
-// hash is a defect in the fixture and must fail loudly rather than be skipped.
-// Extent (checked by N1): 1 `expect` site.
-#![allow(clippy::expect_used)]
-
-use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     scan_verdict, staleness, ExpectedDetector, FailedRead, FalsificationSurfaceScan, HeadRead,
     QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead,
@@ -46,7 +38,7 @@ struct Store {
 }
 impl Store {
     fn put(&mut self, object: &Value) -> String {
-        let d = digest(object).expect("digest").as_str().to_owned();
+        let d = common::digest_of(object);
         self.records.insert(d.clone(), object.clone());
         d
     }
