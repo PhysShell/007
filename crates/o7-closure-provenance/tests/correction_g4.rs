@@ -188,10 +188,14 @@ fn unretained_head() -> HeadRead {
     }
 }
 
-fn failed(reason: &str) -> HeadRead {
-    HeadRead::Failed {
-        code: FailedRead::RequestFailed,
-    }
+/// A head read that did not happen, under §8.1's closed vocabulary.
+///
+/// The helper took a free-text sentence until M1 closed the member; the
+/// witnesses below turn on the read having FAILED rather than on why, which is
+/// why the code they pass is uniform and the sentences they used to pass are
+/// gone.
+fn failed(code: FailedRead) -> HeadRead {
+    HeadRead::Failed { code }
 }
 
 #[track_caller]
@@ -212,7 +216,7 @@ fn g4a_a_failed_after_read_beside_a_disagreeing_before_is_cannot_check() {
     let mut store = Store::default();
     let read = SubjectRead {
         before: evidenced_head(&mut store, "HEAD_BEFORE", "bbbb"),
-        after: failed("HTTP 502 on the second head read"),
+        after: failed(FailedRead::RequestFailed),
     };
     cannot_check(&staleness(&subject("aaaa"), &read, &store), "G4-A");
 }
@@ -225,7 +229,7 @@ fn g4a_a_failed_after_read_beside_a_disagreeing_before_is_cannot_check() {
 fn g4b_a_failed_before_read_beside_a_disagreeing_after_is_cannot_check() {
     let mut store = Store::default();
     let read = SubjectRead {
-        before: failed("permission denied"),
+        before: failed(FailedRead::Unauthorized),
         after: evidenced_head(&mut store, "HEAD_AFTER", "bbbb"),
     };
     cannot_check(&staleness(&subject("aaaa"), &read, &store), "G4-B");
@@ -290,7 +294,7 @@ fn g4f_a_failed_read_beside_an_agreeing_one_stays_cannot_check() {
     let mut store = Store::default();
     let read = SubjectRead {
         before: evidenced_head(&mut store, "HEAD_BEFORE", "aaaa"),
-        after: failed("HTTP 502"),
+        after: failed(FailedRead::RequestFailed),
     };
     cannot_check(&staleness(&subject("aaaa"), &read, &store), "G4-F");
 }

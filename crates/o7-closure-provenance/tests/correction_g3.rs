@@ -134,7 +134,7 @@ fn failed_event(observed_at: Value) -> Value {
         "sourceKind": "github-head-read-event",
         "role": "HEAD_AFTER",
         "acquisition": "FAILED",
-        "reason": "the read did not complete",
+        "reasonCode": "REQUEST_FAILED",
         "observedAt": observed_at,
     })
 }
@@ -333,6 +333,32 @@ enum Bounding {
 /// referenced configuration is not resolved — closing a range is not resolving
 /// a reference, and this erratum makes no such claim.
 ///
+/// DISCHARGED, M1 — one row left this table because its member stopped being
+/// free text, which is the only way a row here is allowed to disappear.
+///
+/// Until `NORM/RED-FAILED-READ-CODE` the inventory carried:
+///
+/// ```text
+/// head_read_failed/reason
+///     "free text in a retained object. §9.4 removed free text from findings
+///      deliberately, and this member was not reconsidered when that was
+///      decided. Narrower than the finding case — an acquisition layer writes
+///      it, not a detector over secret-bearing content — but nothing here
+///      bounds what it may carry. NOT closed by this round: a closed reason set
+///      is a contract change this file does not make on its own"
+/// ```
+///
+/// That row was right about the defect, right about the remedy, and right that
+/// it could not apply the remedy itself. External review (Codex, on `b9eaa7d`)
+/// reported the channel as reachable, §8.1 was amended to declare `reasonCode`
+/// over a closed vocabulary, and the member is no longer a `Text` member of any
+/// table — so it leaves the denominator this file walks.
+///
+/// It is recorded here rather than deleted quietly because a row vanishing from
+/// an inventory looks identical whether the member was closed or the table
+/// stopped looking at it. `g3f` catches the second case — it caught this rename
+/// on the commit that made it — and this note is what distinguishes the first.
+///
 /// The prior text is quoted above rather than replaced silently, per the
 /// adjudication: the earlier classification is not to be made to look correct
 /// in hindsight. An inventory whose failures are edited out of it is the same
@@ -470,16 +496,6 @@ const INVENTORY: &[(&str, Bounding)] = &[
             file: "correction_g3.rs",
             witness: "g3c_a_failed_head_read_observed_at_must_be_an_instant",
         },
-    ),
-    (
-        "head_read_failed/reason",
-        Bounding::Residual(
-            "free text in a retained object. §9.4 removed free text from findings deliberately, \
-             and this member was not reconsidered when that was decided. Narrower than the \
-             finding case — an acquisition layer writes it, not a detector over secret-bearing \
-             content — but nothing here bounds what it may carry. NOT closed by this round: a \
-             closed reason set is a contract change this file does not make on its own",
-        ),
     ),
 ];
 

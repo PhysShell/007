@@ -143,6 +143,21 @@ fn available_event(store: &mut Store, role: &str, at: &str) -> String {
     }))
 }
 
+/// The refusal text of a `CannotCheck`, or a description of whatever came
+/// instead.
+///
+/// A function rather than a `let ... else { panic! }` at each site: this crate
+/// denies `clippy::panic` in tests as well, and taking an allowance for nicer
+/// control flow would spend a lint the E1 audit exists to keep honest. Every
+/// caller asserts on the returned text, so a verdict that is not `CannotCheck`
+/// fails its own assertion with the verdict printed.
+fn cannot_check_why(verdict: &Staleness) -> String {
+    match verdict {
+        Staleness::CannotCheck { why } => why.clone(),
+        other => format!("{other:?}"),
+    }
+}
+
 /// M1-A — a retained FAILED event whose diagnostic carries a credential.
 ///
 /// Consumed through the door as HEAD_BEFORE, so the refusal is the validator's
@@ -170,10 +185,7 @@ fn m1a_a_failed_event_carrying_free_text_is_not_a_conforming_event() {
         },
         &store,
     );
-    let why = match &verdict {
-        Staleness::CannotCheck { why } => why.clone(),
-        other => format!("{other:?}"),
-    };
+    let why = cannot_check_why(&verdict);
     // THE PROPERTY IS THE DOOR, NOT THE VERDICT TEXT. An earlier draft asserted
     // that the credential did not reach `why`, and passed before the repair —
     // because a FAILED event is refused for its acquisition status on this path
@@ -217,9 +229,11 @@ fn m1b_a_failed_read_cannot_carry_a_callers_free_text() {
             },
             &store,
         );
-        let Staleness::CannotCheck { why } = &verdict else {
-            panic!("M1-B: a failed HEAD_AFTER is CANNOT_CHECK by §8.1: got {verdict:?}");
-        };
+        let why = cannot_check_why(&verdict);
+        assert!(
+            matches!(verdict, Staleness::CannotCheck { .. }),
+            "M1-B: a failed HEAD_AFTER is CANNOT_CHECK by §8.1: got {verdict:?}"
+        );
         assert!(
             !why.contains("Authorization") && !why.contains("ghp_"),
             "M1-B: the verdict text carries content a caller supplied. `HeadRead::Failed` takes \
@@ -256,9 +270,11 @@ fn m1c_each_closed_code_is_a_conforming_event() {
             },
             &store,
         );
-        let Staleness::CannotCheck { why } = &verdict else {
-            panic!("M1-C: a FAILED before-read is CANNOT_CHECK: got {verdict:?}");
-        };
+        let why = cannot_check_why(&verdict);
+        assert!(
+            matches!(verdict, Staleness::CannotCheck { .. }),
+            "M1-C: a FAILED before-read is CANNOT_CHECK: got {verdict:?}"
+        );
         assert!(
             !why.contains("did not pass validation"),
             "M1-C: {code:?} is one of §8.1's four codes and the event carrying it was refused as \
@@ -291,9 +307,7 @@ fn m1d_a_code_outside_the_vocabulary_is_refused() {
         },
         &store,
     );
-    let Staleness::CannotCheck { why } = &verdict else {
-        panic!("M1-D: got {verdict:?}");
-    };
+    let why = cannot_check_why(&verdict);
     assert!(
         why.contains("did not pass validation"),
         "M1-D: a reasonCode outside §8.1's four values was accepted. An open set with four \

@@ -197,7 +197,20 @@ pub const HEAD_READ_EVENT_FAILED: &[Member] = &[
     req("sourceKind", ValueKind::OneOf(&["github-head-read-event"])),
     req("role", ValueKind::OneOf(&["HEAD_BEFORE", "HEAD_AFTER"])),
     req("acquisition", ValueKind::OneOf(&["FAILED"])),
-    req("reason", ValueKind::Text),
+    // §8.1's closed vocabulary, and the reason it is closed is redaction §9.4's:
+    // an acquisition layer writes this member while holding an HTTP response and
+    // an authorization header, and `Text` admits every string. The event is
+    // ungated — a control artifact — so no redaction gate ever examines it, and
+    // what it carries is canonicalized, digested and retained permanently.
+    req(
+        "reasonCode",
+        ValueKind::OneOf(&[
+            "NOT_FOUND",
+            "RATE_LIMITED",
+            "REQUEST_FAILED",
+            "UNAUTHORIZED",
+        ]),
+    ),
     req("observedAt", ValueKind::Timestamp),
 ];
 
