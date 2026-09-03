@@ -354,12 +354,21 @@ fn basis(sources: Vec<String>) -> DecisionBasis {
             value: json!(true),
             derived_from: sources
                 .into_iter()
-                .map(|digest| CitedSource {
+                .enumerate()
+                .map(|(slot, digest)| CitedSource {
                     digest,
                     locator: AcquisitionLocator::InPullRequest {
                         repository: "PhysShell/007".to_owned(),
                         pull_request: "9001".to_owned(),
-                        stable_id: "0".to_owned(),
+                        // §18's slot order: the submitted review, then the
+                        // review comment. The citation names which object each
+                        // slot asked for, and getting that from the record
+                        // would be the record naming itself.
+                        stable_id: if slot == 0 {
+                            REVIEW_ID.to_owned()
+                        } else {
+                            COMMENT_ID.to_owned()
+                        },
                     },
                 })
                 .collect(),

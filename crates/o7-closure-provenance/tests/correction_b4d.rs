@@ -262,7 +262,7 @@ fn carries_finding(review: &str, comment: &str) -> DecisionBasis {
                     locator: AcquisitionLocator::InPullRequest {
                         repository: "PhysShell/007".to_owned(),
                         pull_request: "9001".to_owned(),
-                        stable_id: "0".to_owned(),
+                        stable_id: REVIEW_ID.to_owned(),
                     },
                 },
                 CitedSource {
@@ -270,7 +270,7 @@ fn carries_finding(review: &str, comment: &str) -> DecisionBasis {
                     locator: AcquisitionLocator::InPullRequest {
                         repository: "PhysShell/007".to_owned(),
                         pull_request: "9001".to_owned(),
-                        stable_id: "0".to_owned(),
+                        stable_id: COMMENT_ID.to_owned(),
                     },
                 },
             ],

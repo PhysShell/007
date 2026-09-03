@@ -289,7 +289,7 @@ fn a2_a_complete_absence_basis_with_an_unrequired_extra_input_still_admits() {
                 pointer: "/commitId".to_owned(),
                 locator: AcquisitionLocator::Check {
                     repository: "PhysShell/007".to_owned(),
-                    stable_id: "0".to_owned(),
+                    stable_id: "9100000201".to_owned(),
                 },
             }],
         ),

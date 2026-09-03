@@ -572,9 +572,10 @@ fn basis(record_digest: &str, pointer: &str) -> DecisionBasis {
         inputs: vec![DecisionInput {
             source_digest: record_digest.to_owned(),
             pointer: pointer.to_owned(),
-            locator: AcquisitionLocator::Check {
+            locator: AcquisitionLocator::InPullRequest {
                 repository: "PhysShell/007".to_owned(),
-                stable_id: "0".to_owned(),
+                pull_request: "9001".to_owned(),
+                stable_id: "9000000901".to_owned(),
             },
         }],
         derived: Vec::new(),

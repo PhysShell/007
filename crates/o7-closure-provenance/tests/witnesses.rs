@@ -409,9 +409,13 @@ fn reads(source_digest: &str, pointer: &str) -> DecisionInput {
     DecisionInput {
         source_digest: source_digest.to_owned(),
         pointer: pointer.to_owned(),
-        locator: AcquisitionLocator::Check {
+        // §7.3's locator: which object the citation asked for. This file's
+        // reduced fixtures are submitted reviews under one id; a complete
+        // projection carries no locator, so the value is unread for those.
+        locator: AcquisitionLocator::InPullRequest {
             repository: "PhysShell/007".to_owned(),
-            stable_id: "0".to_owned(),
+            pull_request: "9001".to_owned(),
+            stable_id: "9000000202".to_owned(),
         },
     }
 }

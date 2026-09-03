@@ -285,6 +285,22 @@ fn body_blocked_partition() -> (Vec<&'static str>, Vec<&'static str>) {
     (retained, blocked)
 }
 
+/// Cite the check-run fixture rather than this file's default review.
+///
+/// §7.3's locator is the CALLER's statement of which object it asked for, so a
+/// test that builds a check must say so; taking it from the record would be the
+/// artifact supplying the identity it is checked against.
+fn check_basis(record_digest: &str, pointer: &str) -> DecisionBasis {
+    let mut b = basis(record_digest, pointer);
+    for input in &mut b.inputs {
+        input.locator = AcquisitionLocator::Check {
+            repository: "PhysShell/007".to_owned(),
+            stable_id: "9100000201".to_owned(),
+        };
+    }
+    b
+}
+
 fn basis(record_digest: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
@@ -298,9 +314,10 @@ fn basis(record_digest: &str, pointer: &str) -> DecisionBasis {
         inputs: vec![DecisionInput {
             source_digest: record_digest.to_owned(),
             pointer: pointer.to_owned(),
-            locator: AcquisitionLocator::Check {
+            locator: AcquisitionLocator::InPullRequest {
                 repository: "PhysShell/007".to_owned(),
-                stable_id: "0".to_owned(),
+                pull_request: "9001".to_owned(),
+                stable_id: "9000000901".to_owned(),
             },
         }],
         derived: Vec::new(),
@@ -1024,7 +1041,7 @@ fn s30_an_absent_present_only_field_is_not_a_hole_in_the_partition() {
         "blockedFields": ["/name"],
     });
     let d = store.retain_under(&record, &a);
-    let outcome = relations(&basis(&d, "/head_sha"), &store);
+    let outcome = relations(&check_basis(&d, "/head_sha"), &store);
     assert!(
         matches!(outcome, Admissible::Yes { .. }),
         "/conclusion, /started_at and /completed_at are present-only and this check has none \

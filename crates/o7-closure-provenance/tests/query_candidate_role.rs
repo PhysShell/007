@@ -266,9 +266,10 @@ fn a_reduced_source_record_is_not_a_query_candidate() {
                     inputs: vec![o7_closure_provenance::DecisionInput {
                         source_digest: reduced.clone(),
                         pointer: "/id".to_owned(),
-                        locator: AcquisitionLocator::Check {
+                        locator: AcquisitionLocator::InPullRequest {
                 repository: "PhysShell/007".to_owned(),
-                stable_id: "0".to_owned(),
+                pull_request: "9001".to_owned(),
+                stable_id: "9000000901".to_owned(),
             },
                     }],
                     derived: Vec::new(),

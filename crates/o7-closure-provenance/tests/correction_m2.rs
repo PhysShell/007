@@ -154,7 +154,7 @@ fn basis(digest: &str, policy: &str) -> DecisionBasis {
             pointer: "/head_sha".to_owned(),
             locator: AcquisitionLocator::Check {
                 repository: "PhysShell/007".to_owned(),
-                stable_id: "0".to_owned(),
+                stable_id: CHECK_ID.to_owned(),
             },
         }],
         derived: Vec::new(),

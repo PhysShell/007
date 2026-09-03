@@ -304,7 +304,7 @@ fn reads(record: &str, pointer: &str) -> DecisionBasis {
             pointer: pointer.to_owned(),
             locator: AcquisitionLocator::Check {
                 repository: "PhysShell/007".to_owned(),
-                stable_id: "0".to_owned(),
+                stable_id: "9100000201".to_owned(),
             },
         }],
         derived: Vec::new(),

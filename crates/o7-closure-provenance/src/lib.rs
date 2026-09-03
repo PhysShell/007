@@ -842,6 +842,51 @@ impl ConsumedAs {
 /// private inner value and no public constructor, so a consumer written next
 /// year cannot reach pointer, scan, head or relation semantics without coming
 /// through here — which is the difference between a rule and a habit.
+/// §7.3's third rule: the record's locator names the object the citation asked
+/// for.
+///
+/// A RELATION check and not part of validation, which is §17.1's distinction
+/// doing work rather than being quoted. The record is well formed — its locator
+/// has exactly the members §7.3 gives its kind — and what it is not is the
+/// object this decision cited. `validate` answers what an artifact IS; this
+/// answers what it is ABOUT, and putting the second inside the first would
+/// report a producer's correct artifact as broken.
+///
+/// Only a reduced record has a locator. A complete §8 projection carries its
+/// identity in its own fields and §7.3 shapes no locator for it, so demanding
+/// one would invent a member §8 does not declare.
+fn concerns_source(
+    artifact: &ValidatedArtifact,
+    digest: &str,
+    cited: &AcquisitionLocator,
+    into: &mut Vec<Unresolved>,
+) -> bool {
+    let ArtifactKind::ReducedSourceRecord(locator_kind) = artifact.kind() else {
+        return true;
+    };
+    let Some(shape) = artifact::locator_shape(locator_kind) else {
+        return true;
+    };
+    let declared = cited.members();
+    for member in shape.members {
+        let want = declared
+            .iter()
+            .find(|(name, _)| *name == member.name)
+            .map(|(_, value)| *value);
+        let got = artifact.str_at(&format!("/locator/{}", member.name));
+        if got != want {
+            into.push(Unresolved::LocatorSubjectMismatch {
+                digest: digest.to_owned(),
+                member: member.name,
+                declared: got.unwrap_or("<absent>").to_owned(),
+                cited: want.unwrap_or("<not named by this citation>").to_owned(),
+            });
+            return false;
+        }
+    }
+    true
+}
+
 fn resolve_artifact<E: RetainedEvidence>(
     store: &E,
     requested: &str,
@@ -1549,6 +1594,13 @@ fn check_derived<E: RetainedEvidence>(
         ) else {
             return;
         };
+        // The same §7.3 rule on the second route in. A derived fact cites its
+        // own sources, and redaction §8 keeps a fact usable over reduced
+        // records, so a repair reaching only the basis would leave a derivation
+        // recomputing over another change's evidence.
+        if !concerns_source(&record, source_digest, &cited.locator, into) {
+            return;
+        }
 
         // THE SLOT'S SURFACE, BEFORE THE RULE READS A FIELD OUT OF IT.
         //
@@ -1941,6 +1993,13 @@ fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> 
             some_input_did_not_resolve = true;
             continue;
         };
+        // §7.3: the record must be the object this input cited, and the
+        // citation is the caller's. A record that is not is refused here rather
+        // than read, because reading a pointer out of it would be attributing
+        // its value to a source it is not about.
+        if !concerns_source(&record, &input.source_digest, &input.locator, &mut why) {
+            continue;
+        }
         observed.push(ObservedField {
             surface: record.kind().surface(),
             pointer: input.pointer.as_str(),
