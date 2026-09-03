@@ -85,7 +85,8 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    staleness, ExpectedDetector, HeadRead, RetainedEvidence, Staleness, Subject, SubjectRead,
+    staleness, ExpectedDetector, FailedRead, HeadRead, RetainedEvidence, Staleness, Subject,
+    SubjectRead,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -307,7 +308,7 @@ fn j2af_an_unresolved_read_is_still_refused_before_any_ordering_question() {
     let read = SubjectRead {
         before: head(&mut store, "HEAD_BEFORE", "bbbb", "2026-08-05T10:00:00Z"),
         after: HeadRead::Failed {
-            reason: "HTTP 502 on the second head read".to_owned(),
+            code: FailedRead::RequestFailed,
         },
     };
     let verdict = staleness(&subject("aaaa"), &read, &store);

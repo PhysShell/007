@@ -278,7 +278,7 @@ HeadReadEvent, acquisition = FAILED
   sourceKind      github-head-read-event
   role            HEAD_BEFORE | HEAD_AFTER
   acquisition     FAILED
-  reason          REQUIRED
+  reasonCode      REQUIRED
   observedAt
   snapshotDigest  MUST BE ABSENT
 ```
@@ -320,8 +320,38 @@ event was introduced to prevent.
 `NOT_PRODUCED` and producer rate-limiting are **inadmissible** on a head read.
 The subject head is not produced by any external party; nobody can decline to
 emit it. An API rate limit is an acquisition failure and is recorded as `FAILED`
-with the reason naming the limit — §15's distinction applies here in only one of
+with `reasonCode: RATE_LIMITED` — §15's distinction applies here in only one of
 its two directions.
+
+**`reasonCode` is a closed vocabulary, and this is a correction.** The member was
+declared `reason` and given no domain, so it accepted any string:
+
+```text
+RATE_LIMITED  REQUEST_FAILED  NOT_FOUND  UNAUTHORIZED
+```
+
+The four are separated because they are four different facts about the subject,
+and collapsing them loses the distinction that matters most: `NOT_FOUND` says
+the subject may not exist, `UNAUTHORIZED` says nothing about the subject at all,
+and reading the second as the first is an absent signal reported as a negative
+result. `RATE_LIMITED` is named by the paragraph above; the other three are the
+acquisition outcomes that paragraph's `FAILED` covers.
+
+**Why a code rather than a sentence, and why this document rather than a
+consumer.** Redaction policy V1 §9.4 settled this exact question for the
+assessment — it removed `reasonDetail` and closed the schema instead, because
+"a closed field cannot carry a secret out because its range does not depend on
+the content inspected". A failed head read is written by an acquisition layer
+holding an HTTP response and an authorization header, and a free-text
+diagnostic is the most natural place in this entire contract for a credential to
+land. That member was not reconsidered when §9.4 was decided. This amendment
+reconsiders it, on §9.4's own argument, for the retained object where the
+argument applies just as exactly.
+
+A consumer could not have made this correction. Refusing free text where a
+contract permits it is a consumer inventing a norm, which is the direction §8.1
+already refused once for `observedAt`; the document has to move first, and this
+is that move.
 
 Two events MAY carry the same `snapshotDigest` — that is precisely how "the head
 did not move" is recorded — but there are still two declared reads. Exactly two
@@ -1440,7 +1470,7 @@ it as open — necessary conditions presented as sufficient ones.
 | What stops a version's predicate from changing under it? | §23 — a digest over the implementation's bytes, **not** over its results |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
 | What order do the digest arrays use? | §13.2 — observation order, duplicates kept |
-| What does a failed head read record? | §8.1 — `reason`, and no `snapshotDigest` |
+| What does a failed head read record? | §8.1 — `reasonCode` from a closed set, and no `snapshotDigest` |
 | What would show an adapter trimming a body? | §9 — an equal-`updatedAt` pair |
 | How is a wrong-SHA `OWED` explained? | §17 decision basis |
 | How is `NotProduced` proven? | §13, §14 |
@@ -2055,3 +2085,43 @@ specimen carried none of §8.4's REQUIRED `commitId`, `originalCommitId` or
 locator does not have. Every check that existed accepted both. That is the same
 defect one level down from the one the round is about, and it is worth recording
 that the door found it rather than a reviewer.
+
+### 24.10 Added in the free-text-channel round
+
+One member of §8.1 was declared and never given a domain, and the omission
+outlived the decision that should have caught it.
+
+**What §9.4 settled, and where it was not applied.** Redaction policy V1 §9.4
+removed `reasonDetail` from the assessment and closed that schema, on an argument
+about value SETS rather than values: "a closed field cannot carry a secret out
+because its range does not depend on the content inspected". §8.1's failed head
+read carries a `reason`, written by an acquisition layer holding an HTTP response
+and an authorization header — the most natural place in this contract for a
+credential to land — and it was not reconsidered when §9.4 was decided.
+
+`crates/o7-closure-provenance`'s own evidence recorded the gap and declined to
+close it, correctly:
+
+> free text in a retained object. §9.4 removed free text from findings
+> deliberately, and this member was not reconsidered when that was decided.
+> Narrower than the finding case — an acquisition layer writes it, not a detector
+> over secret-bearing content — but nothing here bounds what it may carry. NOT
+> closed by this round: a closed reason set is a contract change this file does
+> not make on its own.
+
+That last sentence is the rule this document depends on. A consumer that refused
+free text where this contract permits it would be inventing a norm, which is the
+direction §8.1 already refused once for `observedAt`. So the residual stood until
+external review reported the channel as reachable, and the document moved.
+
+**The member is now `reasonCode`**, over a closed four-value vocabulary, in the
+same shape redaction §9.3 uses for its own closed sets. The rename is deliberate:
+`reason` names a sentence and `reasonCode` names a value from a set, and a
+consumer reading the old name against the new rule would be the ambiguity this
+amendment exists to remove.
+
+**What the amendment does not decide.** It closes the retained artifact's member.
+It says nothing about diagnostics an acquisition layer keeps in its own logs,
+which are outside this contract entirely, and it does not claim that a closed
+code is as useful to a human debugging an outage as a sentence was. That is the
+trade §9.4 already made once, with the same reasoning and the same cost.

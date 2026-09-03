@@ -13,8 +13,8 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    scan_verdict, staleness, ExpectedDetector, FalsificationSurfaceScan, HeadRead, QueryBinding,
-    RetainedEvidence, ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead,
+    scan_verdict, staleness, ExpectedDetector, FailedRead, FalsificationSurfaceScan, HeadRead,
+    QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -310,7 +310,7 @@ fn b9c_an_unavailable_head_after_is_cannot_check_not_not_stale() {
     let read = SubjectRead {
         before: evidenced_head(&mut store, "HEAD_BEFORE", "aaaa"),
         after: HeadRead::Failed {
-            reason: "HTTP 502 on the second head read".to_owned(),
+            code: FailedRead::RequestFailed,
         },
     };
     let verdict = staleness(&subject("aaaa"), &read, &store);
@@ -326,7 +326,7 @@ fn b9d_an_unavailable_head_before_is_cannot_check() {
     let mut store = Store::default();
     let read = SubjectRead {
         before: HeadRead::Failed {
-            reason: "permission denied".to_owned(),
+            code: FailedRead::RequestFailed,
         },
         after: evidenced_head(&mut store, "HEAD_AFTER", "aaaa"),
     };
@@ -342,10 +342,10 @@ fn b9e_both_reads_unavailable_is_cannot_check() {
     let store = Store::default();
     let read = SubjectRead {
         before: HeadRead::Failed {
-            reason: "a".to_owned(),
+            code: FailedRead::RequestFailed,
         },
         after: HeadRead::Failed {
-            reason: "b".to_owned(),
+            code: FailedRead::RequestFailed,
         },
     };
     assert!(matches!(

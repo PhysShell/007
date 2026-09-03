@@ -2089,9 +2089,44 @@ pub enum HeadRead {
     /// `acquisition = AVAILABLE` carries a REQUIRED `snapshotDigest`. The SHA is
     /// read out of that chain or it is not read at all.
     Observed { event_digest: String },
-    /// §8.1: a failed head read records a reason and carries no
+    /// §8.1: a failed head read records a reason CODE and carries no
     /// `snapshotDigest` — there are no bytes to point at.
-    Failed { reason: String },
+    Failed { code: FailedRead },
+}
+
+/// §8.1's closed vocabulary for a head read that did not happen.
+///
+/// A CLOSED SET AND NOT A STRING, for redaction §9.4's reason applied one
+/// contract over: "a closed field cannot carry a secret out because its range
+/// does not depend on the content inspected". This member was a `String`, and
+/// `staleness` interpolated it verbatim into its verdict — so an acquisition
+/// layer holding an HTTP response and an authorization header could hand a
+/// credential to whatever logs that verdict, with no artifact involved at all.
+///
+/// The four are separated because they are four different facts about the
+/// subject. `NotFound` says the subject may not exist; `Unauthorized` says
+/// nothing about the subject at all; reading the second as the first is an
+/// absent signal reported as a negative result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailedRead {
+    /// §15's API-side limit, which §8.1 names explicitly for this event.
+    RateLimited,
+    RequestFailed,
+    NotFound,
+    Unauthorized,
+}
+
+impl FailedRead {
+    /// §8.1's own spelling, and the value a retained event carries.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::RateLimited => "RATE_LIMITED",
+            Self::RequestFailed => "REQUEST_FAILED",
+            Self::NotFound => "NOT_FOUND",
+            Self::Unauthorized => "UNAUTHORIZED",
+        }
+    }
 }
 
 /// The pair of head reads bracketing an evaluation.
@@ -2185,8 +2220,8 @@ pub fn staleness<E: RetainedEvidence>(
         ("head_after", "HEAD_AFTER", &read.after),
     ] {
         match r {
-            HeadRead::Failed { reason } => {
-                unresolved.push(format!("{slot} did not happen ({reason})"));
+            HeadRead::Failed { code } => {
+                unresolved.push(format!("{slot} did not happen ({})", code.code()));
             }
             HeadRead::Observed { event_digest } => {
                 match resolve_head_read(store, event_digest, expected_role, subject) {

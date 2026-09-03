@@ -82,7 +82,8 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    staleness, ExpectedDetector, HeadRead, RetainedEvidence, Staleness, Subject, SubjectRead,
+    staleness, ExpectedDetector, FailedRead, HeadRead, RetainedEvidence, Staleness, Subject,
+    SubjectRead,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -189,7 +190,7 @@ fn unretained_head() -> HeadRead {
 
 fn failed(reason: &str) -> HeadRead {
     HeadRead::Failed {
-        reason: reason.to_owned(),
+        code: FailedRead::RequestFailed,
     }
 }
 
