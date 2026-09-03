@@ -1516,6 +1516,9 @@ it as open — necessary conditions presented as sufficient ones.
 | Must an absence claim's query be about the decision's SUBJECT? | §13, §17.1 — yes; the snapshot's `binding` is compared against a subject supplied from outside it, exactly as a scan's is |
 | May two artifacts of one surface jointly satisfy §17's rows? | §17, §17.1 — no; the table is a minimum basis PER OBSERVATION, and one observation is one artifact |
 | May a reduced record withhold a field the computation retained? | redaction §7.1 — no; `blockedFields = flagged ∪ (required \ assessed)` is an equality, and retention is not discretionary in the other direction either |
+| May any member of an assessment be free text? | redaction §9.4 — no; every one has a range that does not depend on the content inspected, `detector` included |
+| What does a failed head read say about why? | §8.1 — a `reasonCode` from a closed set, never a diagnostic sentence |
+| Does a reduced record's locator have to name the object cited? | redaction §7.3 — yes; shape alone is not identity, and the citation supplies the subject |
 
 ## 23. Residuals — OWED, not decided here
 
