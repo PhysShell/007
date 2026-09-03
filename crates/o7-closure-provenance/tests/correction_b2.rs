@@ -70,7 +70,7 @@
 // This comment used to claim "There are 20 such sites". It was wrong, and no
 // check held it to the code; that is the N1 finding, and the extent line below
 // is now verified.
-// Extent (checked by N1): 6 `expect` sites, 5 `panic` sites.
+// Extent (checked by N1): 7 `expect` sites, 6 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_canonical::digest;
@@ -828,6 +828,102 @@ fn n1_every_restriction_lint_allowance_declares_a_true_extent() {
          reported green over files it never opened"
     );
 }
+
+// ---- O1. The set of files permitted to carry an allowance at all.
+
+/// Only these files may carry a restriction-lint allowance, and no listed file
+/// may stop carrying one unnoticed.
+///
+/// N1 holds each allowance to its own extent. It says nothing about how many
+/// allowances there should be, so the cheapest way to satisfy N1 forever is to
+/// keep adding allowances and keep their counts honest. This pins the SET.
+///
+/// The set shrank because the sites moved rather than because a justification
+/// got better: `digest(..).expect(..)` was written out longhand in twenty-eight
+/// files, and in eight of them it was the only restriction-lint site there was.
+/// A fixture that cannot canonicalize its own literal must still fail loudly,
+/// but that invariant is one invariant, not twenty-eight, and it belongs where
+/// it is stated once. Nothing is safer for having been justified in more places.
+///
+/// BOTH DIRECTIONS, because this round was spent on a rule that only had one.
+/// A file carrying an allowance that is not listed fails. A listed file that no
+/// longer carries one also fails, so the list cannot rot into a permission slip
+/// for code that stopped needing it.
+#[test]
+fn o1_only_these_files_may_carry_a_restriction_lint_allowance() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut found: Vec<String> = Vec::new();
+
+    for path in walk(&dir.join("src"))
+        .into_iter()
+        .chain(walk(&dir.join("tests")))
+    {
+        let source = std::fs::read_to_string(&path).expect("reading a source file");
+        let parsed = syn::parse_file(&source)
+            .unwrap_or_else(|e| panic!("{path:?} is not parseable Rust, which O1 requires: {e}"));
+        let mut audit = Audit::default();
+        syn::visit::Visit::visit_file(&mut audit, &parsed);
+        if audit.allowed.is_empty() {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(&dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        found.push(rel);
+    }
+    found.sort();
+
+    let permitted: Vec<String> = MAY_ALLOW.iter().map(|(f, _)| (*f).to_owned()).collect();
+
+    let unlisted: Vec<&String> = found.iter().filter(|f| !permitted.contains(f)).collect();
+    assert!(
+        unlisted.is_empty(),
+        "these files carry a restriction-lint allowance and are not in MAY_ALLOW: \
+         {unlisted:#?}. Either the site belongs somewhere it is justified once, or \
+         this file earns a line in MAY_ALLOW saying what it needs and why"
+    );
+
+    let departed: Vec<&String> = permitted.iter().filter(|f| !found.contains(f)).collect();
+    assert!(
+        departed.is_empty(),
+        "MAY_ALLOW permits these files an allowance they no longer take: {departed:#?}. \
+         Remove the entry. A list that outlives its reason is a standing permission \
+         nobody re-read"
+    );
+}
+
+/// Every file allowed to carry a restriction-lint allowance, and what for.
+///
+/// The second half of each entry is not decoration: it is the reason the file is
+/// on the list, and it must name a site that is NOT a fixture literal wherever
+/// one exists, because that is the kind of site an allowance quietly grows to
+/// cover.
+const MAY_ALLOW: &[(&str, &str)] = &[
+    ("tests/common/mod.rs", "the matcher-registry lookup and the fixture-digest site, each stated once for the whole crate"),
+    ("tests/contract_parity.rs", "parse failures over the architecture contracts, which is this file's entire subject"),
+    ("tests/correction_b2.rs", "assertions, fixture literals, and E1/N1/O1/E2 reading this crate's own source from disk"),
+    ("tests/correction_b3.rs", "fixture literals and mutation helpers"),
+    ("tests/correction_b4.rs", "fixture literals, mutation helpers, and gate-defeat assertions"),
+    ("tests/correction_b4d.rs", "fixture literals"),
+    ("tests/correction_b4r.rs", "fixture literals plus two reads of the artifact module's source"),
+    ("tests/correction_b4r2.rs", "fixture literals"),
+    ("tests/correction_b4r3.rs", "fixture literals"),
+    ("tests/correction_g1.rs", "fixture literals"),
+    ("tests/correction_g2.rs", "fixture literals plus the read of §17 out of the provenance contract"),
+    ("tests/correction_g4.rs", "the read of §8.1's failed-HEAD_AFTER rule out of the provenance contract"),
+    ("tests/correction_j1.rs", "fixture literals plus the read of §5.3's present-only rule"),
+    ("tests/correction_j3.rs", "fixture literals plus the read of §14"),
+    ("tests/correction_k1.rs", "the read of §9.4's no-free-text rule out of the provenance contract"),
+    ("tests/correction_k2.rs", "fixture literals plus the read of §7.2 out of the redaction contract"),
+    ("tests/correction_l3.rs", "fixture literals"),
+    ("tests/correction_m3.rs", "fixture literals"),
+    ("tests/derivation_binding.rs", "lookups into the derivation registry, which is this file's entire subject"),
+    ("tests/derivation_source_view.rs", "invariants an audit earlier in the file has already held"),
+    ("tests/query_candidate_role.rs", "one `panic!` asserting §13's matcher is not defined over a kind"),
+    ("tests/witnesses.rs", "fixture literals, store lookups, and the §5.3/§7.2 transcription assertions"),
+];
 
 /// The line a justification must carry so its extent can be checked.
 const EXTENT_PREFIX: &str = "// Extent (checked by N1):";
