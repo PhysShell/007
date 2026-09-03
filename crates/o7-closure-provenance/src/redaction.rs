@@ -611,6 +611,7 @@ pub(crate) fn check_authorises(
     record: &crate::artifact::ValidatedArtifact,
     assessment: &crate::artifact::ValidatedArtifact,
     expected_policy: &str,
+    expected_detector: &crate::ExpectedDetector,
 ) -> Result<(), String> {
     // §9.4'S RANGE, AND IT IS THE ONE PROPERTY THE SCHEMA'S SECURITY ARGUMENT
     // RESTS ON:
@@ -638,6 +639,39 @@ pub(crate) fn check_authorises(
     // not RANGE — `correction_g3.rs` cited it as this member's bound and
     // `correction_k1.rs`'s K1-B is the specimen that satisfies it exactly with
     // the same credential on both sides.
+    // §9.4'S RANGE FOR THE DETECTOR BLOCK, and it is the same rule as the
+    // policy version's, one member family over. All three members are declared
+    // Text, which admits every string, so a credential written into any of them
+    // rides into an assessment that is retained permanently as a record's
+    // authority. The expectation is the caller's for K1's reason: no contract
+    // sentence registers a detector id, version or configuration digest, so a
+    // literal here would invent the norm, and reading it off the assessment
+    // would ask the party that would be leaking to nominate its own range.
+    //
+    // WHAT THIS DOES NOT DO, stated here because the member names invite the
+    // other reading: it does not resolve `configDigest`, does not bind any of
+    // the three to anything that ran, and does not discharge DET-BIND. It
+    // closes the RANGE. A digest-shaped string whose referenced configuration
+    // nobody retained is still exactly that, and §23's residual is unchanged.
+    for (member, expectation) in [
+        ("id", expected_detector.id.as_str()),
+        ("version", expected_detector.version.as_str()),
+        ("configDigest", expected_detector.config_digest.as_str()),
+    ] {
+        let declared = assessment
+            .str_at(&format!("/detector/{member}"))
+            .ok_or_else(|| format!("/detector/{member} is not a string"))?;
+        if declared != expectation {
+            return Err(format!(
+                "§9.4: the assessment's /detector/{member} is {declared:?} and this evaluation \
+                 accepts {expectation:?}. Every field of an assessment is a closed vocabulary \
+                 value, a structural identifier, a boolean, or a JSON pointer — a member that \
+                 admits every string cannot carry that property, and this one is retained \
+                 permanently as a record's authority"
+            ));
+        }
+    }
+
     let assessment_policy = member_str_at(assessment, "redactionPolicyVersion")?;
     if assessment_policy != expected_policy {
         return Err(format!(

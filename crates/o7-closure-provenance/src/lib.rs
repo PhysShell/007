@@ -903,7 +903,9 @@ fn authorised<E: RetainedEvidence>(
         return false;
     };
 
-    if let Err(reason) = redaction::check_authorises(record, &assessment, expected.policy) {
+    if let Err(reason) =
+        redaction::check_authorises(record, &assessment, expected.policy, expected.detector)
+    {
         into.push(Unresolved::AssessmentDoesNotAuthorise {
             record_digest: requested.to_owned(),
             assessment_digest: assessment_digest.clone(),
