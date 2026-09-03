@@ -52,7 +52,7 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    relations_checked, DecisionBasis, DecisionInput, RetainedEvidence, Unresolved,
+    relations_checked, DecisionBasis, DecisionInput, ExpectedDetector, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -151,6 +151,12 @@ fn assessment(outcome: &str) -> Value {
 fn basis(digest: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "check/ai-final-review".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: digest.to_owned(),

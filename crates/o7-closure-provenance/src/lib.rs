@@ -275,6 +275,9 @@ pub struct DecisionBasis {
     /// comes from the caller, exactly as `expected_sha` and the
     /// `DecisionProfile` do.
     pub expected_redaction_policy: String,
+    /// The detector identity this evaluation accepts, per §9.4. See
+    /// [`ExpectedDetector`].
+    pub expected_detector: ExpectedDetector,
 }
 
 /// The query snapshot an absence claim rests on, and the subject it must
@@ -292,6 +295,37 @@ pub struct ExpectedQuery {
     /// caller exactly as `staleness` takes its subject and a falsification scan
     /// declares its binding.
     pub subject: QueryBinding,
+}
+
+/// The detector identity an evaluation accepts, supplied by the caller.
+///
+/// §9.4 requires every field of an assessment to be "a closed vocabulary value,
+/// a structural identifier, a boolean, or a JSON pointer", and says outright
+/// that "no field of an assessment is free text". All three `detector` members
+/// were declared `Text`, which admits every string — so a producer could write a
+/// credential into any of them and the assessment carrying it is canonicalized,
+/// digested and retained permanently as the authority for a record a decision
+/// then reads.
+///
+/// THE VALUES ARE THE CALLER'S FOR K1'S REASON. No contract sentence registers a
+/// detector id, version or configuration digest, so a literal here would be this
+/// implementation inventing the norm it enforces; taking them from the
+/// assessment would be asking the party that would be leaking to nominate its
+/// own range. §17.1: the expectation arrives from outside the artifacts being
+/// checked.
+///
+/// WHAT THIS IS NOT. It does not resolve `configDigest`, does not bind any of
+/// the three to anything that ran, and does not discharge DET-BIND. It closes
+/// the RANGE and nothing else: after it, these members can carry only what the
+/// caller already knew, which is what §9.4 asks of them and all it asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedDetector {
+    pub id: String,
+    pub version: String,
+    /// Still a recorded claim whose referenced configuration is not resolved —
+    /// §23's residual is unchanged. Constraining what the member may CARRY is a
+    /// different question from resolving what it REFERS to.
+    pub config_digest: String,
 }
 
 /// Retained evidence, addressed by digest.
@@ -344,6 +378,8 @@ pub trait RetainedEvidence {
 struct Expected<'a> {
     /// §9.2 bindings the caller declares between a record and its assessment.
     declared: &'a [DeclaredBinding],
+    /// §9.4's range for the `detector` block, from the caller.
+    detector: &'a ExpectedDetector,
     /// §9.5's `redactionPolicyVersion` this evaluation is made under.
     ///
     /// WHY THE VALUE COMES FROM HERE AND NOT FROM A TABLE IN THIS CRATE. §9.4
@@ -1764,6 +1800,7 @@ struct ObservedField<'a> {
 fn check_basis<'a, E: RetainedEvidence>(basis: &'a DecisionBasis, store: &E) -> CheckedBasis<'a> {
     let expected = Expected {
         declared: &basis.bindings,
+        detector: &basis.expected_detector,
         policy: &basis.expected_redaction_policy,
     };
     let mut why = Vec::new();
@@ -1878,6 +1915,9 @@ pub struct FalsificationSurfaceScan {
     /// candidate is a gated source authorised through an assessment, so the
     /// expectation has to reach this entry point too.
     pub expected_redaction_policy: String,
+    /// The detector identity this evaluation accepts, per §9.4. See
+    /// [`ExpectedDetector`].
+    pub expected_detector: ExpectedDetector,
     /// The query snapshot digest this scan is evidenced by.
     ///
     /// A QUERY snapshot specifically, not any source snapshot: a scan is a claim
@@ -1986,6 +2026,7 @@ fn check_scan_evidence<E: RetainedEvidence>(
     // gated evidence authorised through assessments like any other.
     let expected = Expected {
         declared: &[],
+        detector: &scan.expected_detector,
         policy: &scan.expected_redaction_policy,
     };
     let mut why = Vec::new();
@@ -2097,6 +2138,9 @@ pub struct Subject {
     /// the witness that a repair reaching only the basis would leave this route
     /// open.
     pub expected_redaction_policy: String,
+    /// The detector identity this evaluation accepts, per §9.4. See
+    /// [`ExpectedDetector`].
+    pub expected_detector: ExpectedDetector,
 }
 
 /// Whether the subject moved, given two head reads that may not both have
@@ -2274,6 +2318,7 @@ fn resolve_head_read<E: RetainedEvidence>(
     // authorised through an assessment. K1-C is the witness for that placement.
     let expected = Expected {
         declared: &[],
+        detector: &subject.expected_detector,
         policy: &subject.expected_redaction_policy,
     };
     let mut why = Vec::new();

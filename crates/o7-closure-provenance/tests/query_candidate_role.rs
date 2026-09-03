@@ -37,8 +37,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    relations_checked, Admissible, DecisionBasis, ExpectedQuery, QueryBinding, RetainedEvidence,
-    Unresolved,
+    relations_checked, Admissible, DecisionBasis, ExpectedDetector, ExpectedQuery, QueryBinding,
+    RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -200,6 +200,12 @@ fn snapshot(all: &[&str]) -> Value {
 fn absence_basis(expected: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
@@ -249,6 +255,13 @@ fn a_reduced_source_record_is_not_a_query_candidate() {
             relations(
                 &DecisionBasis {
                     expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                    .to_owned(),
+        },
                     observation_id: "review/external".to_owned(),
                     inputs: vec![o7_closure_provenance::DecisionInput {
                         source_digest: reduced.clone(),

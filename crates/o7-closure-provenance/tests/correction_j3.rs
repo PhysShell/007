@@ -73,8 +73,9 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    admissibility, scan_verdict, Admissible, DecisionBasis, DecisionProfile, ExpectedQuery,
-    FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict,
+    admissibility, scan_verdict, Admissible, DecisionBasis, DecisionProfile, ExpectedDetector,
+    ExpectedQuery, FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness,
+    ScanVerdict,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -166,6 +167,12 @@ fn pagination(next_page_present: Value) -> Value {
 fn absence_over(digest: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: OBSERVATION.to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
@@ -209,6 +216,13 @@ fn j3b_the_rule_belongs_to_the_snapshot_and_not_to_one_caller() {
     let outcome = scan_verdict(
         &FalsificationSurfaceScan {
             expected_redaction_policy: "1".to_owned(),
+            expected_detector: ExpectedDetector {
+                id: "synthetic-detector".to_owned(),
+                version: "1".to_owned(),
+                config_digest:
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_owned(),
+            },
             surface: "pull-request-submitted-reviews".to_owned(),
             binding: QueryBinding {
                 repository: "PhysShell/007".to_owned(),

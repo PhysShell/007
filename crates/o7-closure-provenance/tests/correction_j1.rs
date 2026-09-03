@@ -94,7 +94,7 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     admissibility, relations_checked, Admissible, DecisionBasis, DecisionInput, DecisionProfile,
-    RetainedEvidence,
+    ExpectedDetector, RetainedEvidence,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -187,6 +187,12 @@ fn check_projection(conclusion: Option<Value>) -> Value {
 fn check_basis(digest: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: OBSERVATION.to_owned(),
         inputs: vec![
             DecisionInput {
@@ -207,6 +213,12 @@ fn check_basis(digest: &str) -> DecisionBasis {
 fn one_input(digest: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: OBSERVATION.to_owned(),
         inputs: vec![DecisionInput {
             source_digest: digest.to_owned(),

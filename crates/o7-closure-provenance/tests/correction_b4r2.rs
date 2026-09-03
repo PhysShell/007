@@ -107,8 +107,8 @@ use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
     admissibility, relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput,
-    DecisionProfile, ExpectedQuery, FalsificationSurfaceScan, QueryBinding, RetainedEvidence,
-    ScanCompleteness, ScanVerdict,
+    DecisionProfile, ExpectedDetector, ExpectedQuery, FalsificationSurfaceScan, QueryBinding,
+    RetainedEvidence, ScanCompleteness, ScanVerdict,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -269,6 +269,12 @@ fn snapshot(all: &[&str], matched: &[&str]) -> Value {
 fn absence_basis(expected: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
@@ -286,6 +292,12 @@ fn absence_basis(expected: &str) -> DecisionBasis {
 fn reads(record: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "review/external".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: record.to_owned(),
@@ -300,6 +312,12 @@ fn reads(record: &str, pointer: &str) -> DecisionBasis {
 fn scan_of(snapshot_digest: &str) -> FalsificationSurfaceScan {
     FalsificationSurfaceScan {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         surface: "pull-request-submitted-reviews".to_owned(),
         binding: QueryBinding {
             repository: "PhysShell/007".to_owned(),

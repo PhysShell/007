@@ -40,7 +40,7 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, Admissible, DecisionBasis, DecisionInput, DeclaredBinding, DerivedFact,
-    ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
+    ExpectedDetector, ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -414,6 +414,12 @@ fn reads(source_digest: &str, pointer: &str) -> DecisionInput {
 fn basis(observation_id: &str, inputs: Vec<DecisionInput>) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: observation_id.to_owned(),
         inputs,
         derived: Vec::new(),

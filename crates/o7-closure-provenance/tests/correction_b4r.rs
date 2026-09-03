@@ -112,8 +112,9 @@ use o7_closure_matcher::{
     ImplementationCheck, RecordedQuerySnapshot,
 };
 use o7_closure_provenance::{
-    relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput, ExpectedQuery,
-    FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness, ScanVerdict,
+    relations_checked, scan_verdict, Admissible, DecisionBasis, DecisionInput, ExpectedDetector,
+    ExpectedQuery, FalsificationSurfaceScan, QueryBinding, RetainedEvidence, ScanCompleteness,
+    ScanVerdict,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -361,6 +362,12 @@ fn every_query_fixture_carries_a_bound_implementation() {
 fn absence_basis(expected: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: Vec::new(),
@@ -378,6 +385,12 @@ fn absence_basis(expected: &str) -> DecisionBasis {
 fn basis(record: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "review/external".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: record.to_owned(),
@@ -700,6 +713,13 @@ fn r7_the_scan_path_and_the_absence_path_agree_about_one_artifact() {
     let as_scan = scan_verdict(
         &FalsificationSurfaceScan {
             expected_redaction_policy: "1".to_owned(),
+            expected_detector: ExpectedDetector {
+                id: "synthetic-detector".to_owned(),
+                version: "1".to_owned(),
+                config_digest:
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_owned(),
+            },
             surface: "pull-request-submitted-reviews".to_owned(),
             binding: QueryBinding {
                 repository: "PhysShell/007".to_owned(),
@@ -745,6 +765,13 @@ fn r8_zero_claims_over_a_non_empty_matched_set_is_refused() {
     let verdict = scan_verdict(
         &FalsificationSurfaceScan {
             expected_redaction_policy: "1".to_owned(),
+            expected_detector: ExpectedDetector {
+                id: "synthetic-detector".to_owned(),
+                version: "1".to_owned(),
+                config_digest:
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_owned(),
+            },
             surface: "pull-request-submitted-reviews".to_owned(),
             binding: QueryBinding {
                 repository: "PhysShell/007".to_owned(),
@@ -773,6 +800,13 @@ fn r9_zero_claims_over_an_empty_matched_set_stays_meaningful() {
     let verdict = scan_verdict(
         &FalsificationSurfaceScan {
             expected_redaction_policy: "1".to_owned(),
+            expected_detector: ExpectedDetector {
+                id: "synthetic-detector".to_owned(),
+                version: "1".to_owned(),
+                config_digest:
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_owned(),
+            },
             surface: "pull-request-submitted-reviews".to_owned(),
             binding: QueryBinding {
                 repository: "PhysShell/007".to_owned(),

@@ -67,8 +67,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
-    FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence, ScanCompleteness,
-    ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
+    ExpectedDetector, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
+    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -287,6 +287,12 @@ fn query_snapshot(repository: &str, pull_request: &str, surface: &str) -> Value 
 fn subject(expected_sha: &str) -> Subject {
     Subject {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         repository: "PhysShell/007".to_owned(),
         pull_request: "9001".to_owned(),
         expected_sha: expected_sha.to_owned(),
@@ -296,6 +302,12 @@ fn subject(expected_sha: &str) -> Subject {
 fn basis(digest_of: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "review/external".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: digest_of.to_owned(),
@@ -562,6 +574,12 @@ fn s5d_an_evidenced_moved_head_is_stale() {
 fn scan(binding: QueryBinding, snapshot_digest: &str) -> FalsificationSurfaceScan {
     FalsificationSurfaceScan {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         surface: "pull-request-review-comments".to_owned(),
         binding,
         completeness: ScanCompleteness::Complete,

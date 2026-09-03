@@ -69,8 +69,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_matcher::{resolve as resolve_matcher, verify_implementation};
 use o7_closure_provenance::{
-    admissibility, Admissible, DecisionBasis, DecisionInput, DecisionProfile, ExpectedQuery,
-    QueryBinding, RetainedEvidence, Unresolved,
+    admissibility, Admissible, DecisionBasis, DecisionInput, DecisionProfile, ExpectedDetector,
+    ExpectedQuery, QueryBinding, RetainedEvidence, Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -197,6 +197,12 @@ fn matching_review() -> Value {
 fn absence_basis(expected: Option<&str>, inputs: Vec<DecisionInput>) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: OBSERVATION.to_owned(),
         inputs,
         derived: Vec::new(),

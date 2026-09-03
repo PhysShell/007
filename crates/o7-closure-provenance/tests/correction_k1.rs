@@ -92,7 +92,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     admissibility, relations_checked, staleness, Admissible, DecisionBasis, DecisionInput,
-    DecisionProfile, HeadRead, RetainedEvidence, Staleness, Subject, SubjectRead, Unresolved,
+    DecisionProfile, ExpectedDetector, HeadRead, RetainedEvidence, Staleness, Subject, SubjectRead,
+    Unresolved,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -178,6 +179,12 @@ fn check_projection() -> Value {
 fn check_basis(digest: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "check/ai-final-review".to_owned(),
         inputs: vec![
             DecisionInput {
@@ -280,6 +287,13 @@ fn k1b_equality_is_not_a_bound_on_range() {
     let outcome = relations_checked(
         &DecisionBasis {
             expected_redaction_policy: "1".to_owned(),
+            expected_detector: ExpectedDetector {
+                id: "synthetic-detector".to_owned(),
+                version: "1".to_owned(),
+                config_digest:
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_owned(),
+            },
             observation_id: "check/ai-final-review".to_owned(),
             inputs: vec![DecisionInput {
                 source_digest: record.clone(),
@@ -347,6 +361,13 @@ fn k1c_the_rule_belongs_to_authorisation_and_not_to_one_entry_point() {
     let verdict = staleness(
         &Subject {
             expected_redaction_policy: "1".to_owned(),
+            expected_detector: ExpectedDetector {
+                id: "synthetic-detector".to_owned(),
+                version: "1".to_owned(),
+                config_digest:
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_owned(),
+            },
             repository: "PhysShell/007".to_owned(),
             pull_request: "9001".to_owned(),
             expected_sha: HEAD_SHA.to_owned(),
@@ -419,6 +440,13 @@ fn k1e_the_record_assessment_disagreement_is_still_refused() {
     let outcome = relations_checked(
         &DecisionBasis {
             expected_redaction_policy: "1".to_owned(),
+            expected_detector: ExpectedDetector {
+                id: "synthetic-detector".to_owned(),
+                version: "1".to_owned(),
+                config_digest:
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_owned(),
+            },
             observation_id: "check/ai-final-review".to_owned(),
             inputs: vec![DecisionInput {
                 source_digest: record.clone(),

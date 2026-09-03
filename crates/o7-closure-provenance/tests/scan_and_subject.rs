@@ -13,8 +13,8 @@
 
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
-    scan_verdict, staleness, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
-    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead,
+    scan_verdict, staleness, ExpectedDetector, FalsificationSurfaceScan, HeadRead, QueryBinding,
+    RetainedEvidence, ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -154,6 +154,12 @@ fn evidence_for(store: &mut Store, surface: &str) -> String {
 fn subject(expected_sha: &str) -> Subject {
     Subject {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         repository: "PhysShell/007".to_owned(),
         pull_request: "9001".to_owned(),
         expected_sha: expected_sha.to_owned(),
@@ -163,6 +169,12 @@ fn subject(expected_sha: &str) -> Subject {
 fn scan(completeness: ScanCompleteness, snapshot_digest: &str) -> FalsificationSurfaceScan {
     FalsificationSurfaceScan {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         surface: "pull-request-review-comments".to_owned(),
         binding: QueryBinding {
             repository: "PhysShell/007".to_owned(),

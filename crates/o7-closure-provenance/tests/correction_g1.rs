@@ -97,7 +97,8 @@ use o7_closure_canonical::digest;
 use o7_closure_matcher::SOURCE_SCHEMAS;
 use o7_closure_provenance::artifact::LOCATOR_SHAPES;
 use o7_closure_provenance::{
-    relations_checked, Admissible, DecisionBasis, DerivedFact, RetainedEvidence, Unresolved,
+    relations_checked, Admissible, DecisionBasis, DerivedFact, ExpectedDetector, RetainedEvidence,
+    Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -312,6 +313,12 @@ fn reduced(locator_kind: &str, required: &[&str], stable_id: &str) -> Value {
 fn carries_finding(review: &str, comment: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "review/external".to_owned(),
         inputs: Vec::new(),
         derived: vec![DerivedFact {

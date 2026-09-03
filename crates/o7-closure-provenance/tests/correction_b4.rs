@@ -117,8 +117,8 @@
 use o7_closure_canonical::digest;
 use o7_closure_provenance::{
     relations_checked, scan_verdict, staleness, Admissible, DecisionBasis, DecisionInput,
-    ExpectedQuery, FalsificationSurfaceScan, HeadRead, QueryBinding, RetainedEvidence,
-    ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
+    ExpectedDetector, ExpectedQuery, FalsificationSurfaceScan, HeadRead, QueryBinding,
+    RetainedEvidence, ScanCompleteness, ScanVerdict, Staleness, Subject, SubjectRead, Unresolved,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -561,6 +561,12 @@ enum Probe {
 fn basis(record_digest: &str, pointer: &str) -> DecisionBasis {
     DecisionBasis {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         observation_id: "review/external".to_owned(),
         inputs: vec![DecisionInput {
             source_digest: record_digest.to_owned(),
@@ -575,6 +581,12 @@ fn basis(record_digest: &str, pointer: &str) -> DecisionBasis {
 fn subject() -> Subject {
     Subject {
         expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+        },
         repository: "PhysShell/007".to_owned(),
         pull_request: "9001".to_owned(),
         expected_sha: "1f2e3d4c5b6a798807162534435261708f9e0d1c".to_owned(),
@@ -617,6 +629,13 @@ fn refused(probe: Probe, artifact: &Value) -> bool {
             let expected = store.put(artifact);
             let mut b = DecisionBasis {
                 expected_redaction_policy: "1".to_owned(),
+                expected_detector: ExpectedDetector {
+                    id: "synthetic-detector".to_owned(),
+                    version: "1".to_owned(),
+                    config_digest:
+                        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                            .to_owned(),
+                },
                 observation_id: "review/external".to_owned(),
                 inputs: Vec::new(),
                 derived: Vec::new(),
@@ -637,6 +656,13 @@ fn refused(probe: Probe, artifact: &Value) -> bool {
             let verdict = scan_verdict(
                 &FalsificationSurfaceScan {
                     expected_redaction_policy: "1".to_owned(),
+        expected_detector: ExpectedDetector {
+            id: "synthetic-detector".to_owned(),
+            version: "1".to_owned(),
+            config_digest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                    .to_owned(),
+        },
                     surface: "pull-request-review-comments".to_owned(),
                     binding: QueryBinding {
                         repository: "PhysShell/007".to_owned(),
