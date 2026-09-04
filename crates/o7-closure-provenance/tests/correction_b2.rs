@@ -804,7 +804,7 @@ fn n1_every_restriction_lint_allowance_declares_a_true_extent() {
                 "{path:?} carries a restriction-lint allowance and declares no extent. \
                  AGENTS.md rule 4 requires the invariant that makes the allowance sound; \
                  an invariant with no stated subject cannot be held to the code. Add a \
-                 line reading `{EXTENT_PREFIX} <n> `<lint>` sites, ...` beside the allowance"
+                 line reading `// Extent: <n> `<lint>` sites` beside the allowance"
             )
         });
 
@@ -992,7 +992,13 @@ const MAY_ALLOW: &[(&str, &str)] = &[
 ];
 
 /// The line a justification must carry so its extent can be checked.
-const EXTENT_PREFIX: &str = "// Extent (checked by N1):";
+///
+/// AGENTS.md rule 4 spells the requirement `// Extent: <n> `<lint>` sites`, and
+/// this crate's files add a parenthetical naming the check. Both are accepted:
+/// the rule is tree-wide and generic, the parenthetical is a local courtesy, and
+/// a prefix that admitted only one of them would put the rule and the code out
+/// of step over punctuation.
+const EXTENT_PREFIX: &str = "// Extent";
 
 /// Read the declared per-lint extent out of a source file's comments.
 ///
@@ -1005,8 +1011,11 @@ fn declared_extent(source: &str) -> Option<std::collections::BTreeMap<String, us
         .lines()
         .map(str::trim)
         .find(|line| line.starts_with(EXTENT_PREFIX))?;
+    // Everything after the first colon, so `// Extent:` and
+    // `// Extent (checked by N1):` are the same declaration.
+    let (_, counts) = line.split_once(':')?;
     let mut out = std::collections::BTreeMap::new();
-    for part in line[EXTENT_PREFIX.len()..].split(',') {
+    for part in counts.split(',') {
         let mut words = part.split_whitespace();
         let (Some(count), Some(lint)) = (words.next(), words.next()) else {
             continue;
