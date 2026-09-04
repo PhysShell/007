@@ -703,8 +703,10 @@ fn s22_a_retain_assessment_that_did_not_assess_the_whole_required_set_is_refused
     // the kind of the record, so "did this assessment cover what it had to" is
     // only answerable once the record it is bound to is in hand.
     assert!(
-        why.iter()
-            .any(|u| matches!(u, Unresolved::AssessmentDoesNotAuthorise { .. })),
+        why.iter().any(
+            |u| matches!(u, Unresolved::AssessmentDoesNotAuthorise { why, .. }
+            if why.contains("is not in /assessedFields"))
+        ),
         "/user/type was never assessed and the record says coverage is complete: got {why:?}"
     );
 }
@@ -1216,9 +1218,11 @@ fn s35_a_reduced_record_whose_coverage_contradicts_its_assessment_is_refused() {
     let d = store.retain_under(&reduced("BLOCK_SECRET", &retained, &blocked), &a);
     let why = refused(&relations(&basis(&d, "/commit_id"), &store)).to_vec();
     assert!(
-        why.iter()
-            .any(|u| matches!(u, Unresolved::AssessmentDoesNotAuthorise { .. })),
-        "got {why:?}"
+        why.iter().any(
+            |u| matches!(u, Unresolved::AssessmentDoesNotAuthorise { why, .. }
+            if why.contains("/coverageComplete disagrees with its authorising assessment"))
+        ),
+        "the record's coverage claim contradicts its assessment's: got {why:?}"
     );
 }
 

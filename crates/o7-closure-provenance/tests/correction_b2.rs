@@ -57,20 +57,24 @@
 //! structural one is not evidence of the law and must never be documented as if
 //! it were. That conflation is the defect E2 records.
 
-// Justification for the restriction-lint allowance, per AGENTS.md rule 4: most
-// `expect` and `panic` sites below are this test's own assertions failing, or its
-// own handling of JSON literals written in this file, each unreachable unless a
-// literal a few lines above it is malformed.
-// SIX SITES ARE NOT THAT and are named here rather than left to borrow that
-// invariant: E1 and N1 read this crate's own source files from disk and parse
-// them, and E2 reads the module declaring `RetainedEvidence`. Their invariant is
-// a different one — a source file this audit cannot read or parse is an audit
-// with a silently shrinking denominator, which is precisely the defect E1 was
-// found to have and must never be allowed to recur quietly.
-// This comment used to claim "There are 20 such sites". It was wrong, and no
-// check held it to the code; that is the N1 finding, and the extent line below
-// is now verified.
-// Extent (checked by N1): 6 `expect` sites, 6 `panic` sites.
+// Justification for the restriction-lint allowance, per AGENTS.md rule 4. This
+// file has three kinds of site and none of them may borrow another's reason:
+//   FIXTURE     a JSON literal written here, or this test's own assertion
+//               failing; unreachable unless a literal a few lines above is
+//               malformed, and a malformed literal must fail loudly.
+//   AUDIT       E1, N1, O1 and E2 read this crate's own source files from disk
+//               and parse them. A source file an audit cannot read or parse is
+//               an audit with a silently shrinking denominator, which is
+//               precisely the defect E1 was found to have.
+//   SPECIMEN    O2 parses a short synthetic source written inline, to test the
+//               audit's own visitor. A specimen this parser cannot read is a
+//               defect in the specimen, not a finding about the tree.
+// NO COUNT IS STATED IN THIS COMMENT, on purpose. It has carried a number twice
+// and been wrong twice: "There are 20 such sites" when there were 11, and then
+// "SIX SITES ARE NOT THAT", which named E1, N1 and E2 and silently missed O1 the
+// moment the O round added it. A prose count drifts the next time anyone edits
+// the file. The extent line below carries the count and N1 verifies it.
+// Extent (checked by N1): 6 `expect` sites, 7 `panic` sites.
 #![allow(clippy::expect_used, clippy::panic)]
 
 use o7_closure_provenance::{
@@ -828,6 +832,69 @@ fn n1_every_restriction_lint_allowance_declares_a_true_extent() {
     );
 }
 
+// ---- O2. The audit reads one spelling of suppression and reports all of them.
+
+/// `Audit` must see every attribute form that SUPPRESSES a restriction lint,
+/// not just `#[allow]`.
+///
+/// E1, N1 and O1 all ask `Audit` which lints a file allows, and `Audit` asked
+/// only whether the attribute is spelled `allow`. `#[expect]` — stable since
+/// Rust 1.80 — suppresses identically, so a file could carry `.unwrap()` under
+/// `#[expect(clippy::unwrap_used)]`, report an empty `allowed`, and be skipped
+/// by all three guards at once. `#[cfg_attr(test, allow(..))]` is the same hole
+/// wearing a hat. External review found it, and it was measured: with the
+/// attribute planted in a file carrying no allowance at all, clippy reported
+/// zero and E1, N1 and O1 all reported green.
+///
+/// Third time in this round, one shape: a guard checks proxy P — the attribute
+/// is named `allow` — and reports property Q — nothing here suppresses a
+/// restriction lint unaudited. This is a unit test of the GUARD, deliberately,
+/// because planting a real suppression in the tree to test it would need an
+/// allowance of its own.
+///
+/// WHAT IS STILL NOT COVERED, said here rather than discovered later: a lint
+/// level set outside the source text — `[lints]` in a Cargo manifest, RUSTFLAGS,
+/// or a command-line `--allow` — is invisible to an AST walk of `.rs` files.
+/// This test does not claim otherwise.
+#[test]
+fn o2_the_audit_sees_every_suppressing_attribute_form() {
+    let cases: &[(&str, &str)] = &[
+        ("plain allow", "#![allow(clippy::expect_used)]"),
+        ("expect", "#![expect(clippy::expect_used)]"),
+        (
+            "allow with a reason",
+            r#"#![allow(clippy::expect_used, reason = "r")]"#,
+        ),
+        (
+            "cfg_attr wrapping allow",
+            "#![cfg_attr(test, allow(clippy::expect_used))]",
+        ),
+        (
+            "cfg_attr wrapping expect",
+            "#![cfg_attr(test, expect(clippy::expect_used))]",
+        ),
+    ];
+
+    for (what, attribute) in cases {
+        let source = format!("{attribute}\nfn f(r: Result<u8, ()>) -> u8 {{ r.expect(\"x\") }}\n");
+        let parsed = syn::parse_file(&source)
+            .unwrap_or_else(|e| panic!("{what}: the specimen is not parseable Rust: {e}"));
+        let mut audit = Audit::default();
+        syn::visit::Visit::visit_file(&mut audit, &parsed);
+
+        assert!(
+            audit.allowed.contains(&Restriction::ExpectUsed),
+            "{what}: `{attribute}` suppresses clippy::expect_used and the audit did not \
+             see it. E1, N1 and O1 all ask this one question, so a form the audit \
+             cannot name is a form all three report green over"
+        );
+        assert_eq!(
+            audit.expect_sites, 1,
+            "{what}: the specimen has exactly one `.expect(..)` site"
+        );
+    }
+}
+
 // ---- O1. The set of files permitted to carry an allowance at all.
 
 /// Only these files may carry a restriction-lint allowance, and no listed file
@@ -1039,14 +1106,43 @@ struct Audit {
     panic_sites: usize,
 }
 
+impl Audit {
+    /// Record a lint this file suppresses, once.
+    fn note(&mut self, lint: Option<Restriction>) {
+        if let Some(lint) = lint {
+            if !self.allowed.contains(&lint) {
+                self.allowed.push(lint);
+            }
+        }
+    }
+
+    /// Read the lints named directly inside one suppressing attribute.
+    fn collect_lints_from(&mut self, attr: &syn::Attribute) {
+        // Errors are ignored on purpose: `reason = ".."` is valid inside these
+        // attributes and is not a lint, so parsing stops there having already
+        // recorded the lints that preceded it.
+        let _ = attr.parse_nested_meta(|meta| {
+            self.note(Restriction::parse(&meta.path));
+            Ok(())
+        });
+    }
+}
+
 impl<'ast> syn::visit::Visit<'ast> for Audit {
     fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
-        if attr.path().is_ident("allow") {
+        // `allow` and `expect` both SUPPRESS; `warn`, `deny` and `forbid` do not,
+        // and are deliberately not collected. `cfg_attr` is not itself a lint
+        // level, so it is opened and whatever it carries is judged on its own.
+        // O2 is the witness that this list is the list.
+        if suppresses(attr.path()) {
+            self.collect_lints_from(attr);
+        } else if attr.path().is_ident("cfg_attr") {
             let _ = attr.parse_nested_meta(|meta| {
-                if let Some(lint) = Restriction::parse(&meta.path) {
-                    if !self.allowed.contains(&lint) {
-                        self.allowed.push(lint);
-                    }
+                if suppresses(&meta.path) {
+                    let _ = meta.parse_nested_meta(|inner| {
+                        self.note(Restriction::parse(&inner.path));
+                        Ok(())
+                    });
                 }
                 Ok(())
             });
@@ -1069,6 +1165,15 @@ impl<'ast> syn::visit::Visit<'ast> for Audit {
         }
         syn::visit::visit_macro(self, mac);
     }
+}
+
+/// The attribute paths that turn a lint OFF.
+///
+/// `warn`, `deny` and `forbid` are lint levels too and are deliberately absent:
+/// they do not suppress, and counting them would make every strict file look
+/// like a file taking an allowance.
+fn suppresses(path: &syn::Path) -> bool {
+    path.is_ident("allow") || path.is_ident("expect")
 }
 
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

@@ -454,17 +454,27 @@ fn reads(record: &str, pointer: &str) -> DecisionBasis {
 /// another. Every other relation check passes: the binding is retained and names
 /// this record, the outcomes agree, the partition computes. The authorisation
 /// trail says a gate ran, and does not say WHICH gate.
+///
+/// THE RECORD carries FOREIGN_POLICY and the assessment carries the version this
+/// evaluation expects, not the other way round. Written the other way this
+/// witness was green for the wrong reason for several rounds, and external
+/// review found it: `check_authorises` compares the assessment against the
+/// CALLER'S expected version before it compares the record against the
+/// assessment, so a fixture deviating on both refuses at the first door and
+/// never reaches this one. The `why` list held a single element and it was the
+/// other rule's. Only the record may deviate here, and the assertion below names
+/// this relation's own sentence rather than any refusal mentioning the constant.
 #[test]
 fn f3a_an_assessment_from_another_policy_does_not_authorise_this_record() {
     let mut store = Store::default();
-    let d = store.retain_under(&reduced("1"), &block_body(FOREIGN_POLICY));
+    let d = store.retain_under(&reduced(FOREIGN_POLICY), &block_body("1"));
     refuses_because(
         &relations(&reads(&d, "/id"), &store),
         "F3-A",
         "the redaction policy version of the authorising assessment",
         |u| {
             matches!(u, Unresolved::AssessmentDoesNotAuthorise { why, .. }
-                if why.contains(FOREIGN_POLICY))
+                if why.contains("the record's /redactionPolicyVersion"))
         },
     );
 }
