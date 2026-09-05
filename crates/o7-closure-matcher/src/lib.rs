@@ -114,6 +114,101 @@ pub struct MatcherEntry {
     pub predicate: MatcherFn,
 }
 
+/// The value domain both contracts freeze for `observedAt`: exactly
+/// `YYYY-MM-DDThh:mm:ssZ`, naming a date and time that exist.
+///
+/// ONE INSTANT, ONE SPELLING, and the reason is digest identity rather than
+/// taste. These objects are addressed by the digest of their canonical form, so
+/// `2026-08-05T09:03:00Z`, `2026-08-05T09:03:00.000Z` and
+/// `2026-08-05T11:03:00+02:00` are three digests for one fact. Admitting all
+/// three lets a store hold three assessments that are the same assessment, and a
+/// consumer comparing digests to ask "is this the object that authorised the
+/// record?" gets three answers to one question. Provenance V1 §8 settles the
+/// same argument for `null` versus absent.
+///
+/// WHAT IT DELIBERATELY REFUSES, stated because it is a narrowing and not an
+/// oversight. A leap second — `23:59:60Z` — is a real instant, and RFC 3339
+/// permits it. Admitting `:60` without an IERS leap-second table would also
+/// admit `23:59:60Z` on the overwhelming majority of days that had none, which
+/// is precisely a value naming a time that did not exist: the thing this rule
+/// refuses. With no table available, refusing every `:60` is the fail-closed
+/// direction, and the cost is rejecting a value no GitHub timestamp has ever
+/// carried.
+///
+/// Written over bytes with `get`, not indexing: `indexing_slicing` is denied
+/// tree-wide and this function's whole job is to be handed strings that are not
+/// the shape it expects.
+pub fn utc_instant(value: &str) -> Result<(), String> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 20 {
+        return Err(format!(
+            "is {value:?}, which is not an RFC 3339 UTC instant: the contracts freeze this \
+             member to exactly YYYY-MM-DDThh:mm:ssZ, 20 characters"
+        ));
+    }
+    let at = |i: usize| bytes.get(i).copied();
+    for (position, expected) in [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':')] {
+        if at(position) != Some(expected) {
+            return Err(format!(
+                "is {value:?}, which is not an RFC 3339 UTC instant: expected {:?} at position \
+                 {position}",
+                expected as char
+            ));
+        }
+    }
+    if at(19) != Some(b'Z') {
+        return Err(format!(
+            "is {value:?}, which does not end in the literal Z the contracts require. A numeric \
+             offset names the same instant under a second spelling, and two spellings of one \
+             instant are two digests for one fact"
+        ));
+    }
+
+    let digit = |i: usize| at(i).map(char::from).and_then(|c| c.to_digit(10));
+    let number = |from: usize, len: usize| {
+        (from..from.saturating_add(len)).try_fold(0u32, |acc, i| {
+            digit(i).map(|d| acc.saturating_mul(10).saturating_add(d))
+        })
+    };
+    let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
+        number(0, 4),
+        number(5, 2),
+        number(8, 2),
+        number(11, 2),
+        number(14, 2),
+        number(17, 2),
+    ) else {
+        return Err(format!(
+            "is {value:?}, which has the right punctuation and something other than a digit \
+             where a digit belongs"
+        ));
+    };
+
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => 0,
+    };
+    if days == 0 || day == 0 || day > days {
+        return Err(format!(
+            "is {value:?}, which names a date that does not exist. A well-formed string for a \
+             day nobody observed is not a weaker timestamp than a real one — it is evidence \
+             that the value was constructed rather than read from a clock"
+        ));
+    }
+    if hour > 23 || minute > 59 || second > 59 {
+        return Err(format!(
+            "is {value:?}, which names a time that does not exist. A leap second is refused \
+             deliberately: without a leap-second table, admitting :60 admits it on every day \
+             that had none"
+        ));
+    }
+    Ok(())
+}
+
 /// One member of a closed §8 shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Member {
@@ -137,6 +232,15 @@ pub enum ValueKind {
     /// holding a number is not a list of digests, and admitting it would let a
     /// candidate reference survive as something no lookup can resolve.
     TextArray,
+    /// An RFC 3339 `date-time` in UTC: exactly `YYYY-MM-DDThh:mm:ssZ`.
+    ///
+    /// Distinct from [`Self::Text`] for the same reason [`Self::OneOf`] is: a
+    /// member declared "a string" accepts `"banana"`, and `observedAt` is the
+    /// only statement its object makes about when something was observed.
+    ///
+    /// One instant, one spelling — see [`utc_instant`] for why the domain is
+    /// this narrow and what it deliberately refuses.
+    Timestamp,
     /// A string whose value must be one of a closed set.
     ///
     /// Distinct from [`Self::Text`] because that is the distinction the sixth
@@ -1098,7 +1202,20 @@ fn check_query_snapshot_shape(snapshot: &Value) -> Result<(), MatchError> {
 
 /// Both directions of a closed shape: nothing required missing, nothing outside
 /// the declared set present.
-fn check_shape(value: &Value, members: &[Member], path: &str) -> Result<(), String> {
+/// Check `value` against a closed member table, in both directions.
+///
+/// Every REQUIRED member present with the right type, every OPTIONAL-IF-PRESENT
+/// member correctly typed when present, never `null`, nested objects closed
+/// too — and no key outside the declared set.
+///
+/// PUBLIC BECAUSE SLICE B NEEDS EXACTLY THIS, AND A SECOND COPY WOULD BE A
+/// SECOND TRUTH. `o7-closure-provenance` validates the same §8 and §13 forms
+/// before admitting an artifact into decision semantics, over the same
+/// [`SOURCE_SCHEMAS`] and [`QUERY_SNAPSHOT_SCHEMAS`] tables that
+/// `tests/schema_parity.rs` checks against the contract. Re-transcribing either
+/// the tables or this walk into that crate would create a place for the two to
+/// drift silently, which is the failure the parity test exists to prevent.
+pub fn check_shape(value: &Value, members: &[Member], path: &str) -> Result<(), String> {
     let object = value
         .as_object()
         .ok_or_else(|| format!("{path}/ is not an object"))?;
@@ -1133,6 +1250,12 @@ fn check_shape(value: &Value, members: &[Member], path: &str) -> Result<(), Stri
                     if let Some(position) = items.iter().position(|i| i.as_str().is_none()) {
                         return Err(format!("{at}[{position}] is not a string"));
                     }
+                }
+                ValueKind::Timestamp => {
+                    let text = found
+                        .as_str()
+                        .ok_or_else(|| format!("{at} is not a string"))?;
+                    utc_instant(text).map_err(|why| format!("{at} {why}"))?;
                 }
                 ValueKind::OneOf(admissible) => {
                     let text = found

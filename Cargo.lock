@@ -1075,6 +1075,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "o7-closure-provenance"
+version = "0.1.0"
+dependencies = [
+ "o7-closure-canonical",
+ "o7-closure-classifier",
+ "o7-closure-matcher",
+ "serde_json",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "o7-harness-policy"
 version = "0.1.0"
 dependencies = [

@@ -116,7 +116,16 @@ when a change *adds an `#[allow(...)]`*; see rule 4.
 4. **A new `#[allow(...)]` on a restriction lint.** The tree has exactly two
    justified sites (`reps[i]`, each carrying the in-bounds invariant in a
    comment). Any new one must state the invariant that makes it sound;
-   "clippy was noisy" is not that invariant.
+   "clippy was noisy" is not that invariant. It must also state its EXTENT, on a
+   line reading `// Extent: <n> \`<lint>\` sites`, because an invariant with no
+   stated subject cannot be held to the code: twelve files in
+   `o7-closure-provenance` once justified an allowance on "JSON literals written
+   in this file" while covering matcher-registry lookups that no fixture
+   invariant ever described. A site the extent covers for a DIFFERENT reason
+   must say so beside the exception rather than borrow the invariant next to it.
+   Nothing in this repository checks either requirement tree-wide. Some crates
+   audit their own allowances; most do not, and no audit sees a lint level set
+   outside the source text. The rule is on whoever writes the allowance.
 
 5. **Untrusted-input parsers.** `o7::judge::extract_json_array`,
    `o7::judge::parse_findings_json`, and `o7::gate::GateManifest::parse`

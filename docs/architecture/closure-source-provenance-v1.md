@@ -259,22 +259,57 @@ it does not join this one because it happened to be in the same JSON response.
 **Two head reads are two acquisition events, not two pointers.** Retaining one
 snapshot and referring to it twice does not record that two reads were performed.
 V1 requires a durable event per read, and the event is **tagged by its
-acquisition status** — a read that did not happen has no bytes to point at:
+acquisition status** — a read that did not happen has no bytes to point at.
+
+The event is `sourceKind: github-head-read-event`, and it is a retained object in
+its own right, so §7 domain-separates it by its own content like any other:
 
 ```text
 HeadReadEvent, acquisition = AVAILABLE
+  schemaVersion
+  sourceKind      github-head-read-event
   role            HEAD_BEFORE | HEAD_AFTER
   acquisition     AVAILABLE
   snapshotDigest  REQUIRED
   observedAt
 
 HeadReadEvent, acquisition = FAILED
+  schemaVersion
+  sourceKind      github-head-read-event
   role            HEAD_BEFORE | HEAD_AFTER
   acquisition     FAILED
-  reason          REQUIRED
+  reasonCode      REQUIRED
   observedAt
   snapshotDigest  MUST BE ABSENT
 ```
+
+**Why the declaration is written here rather than inferred.** Earlier revisions
+of this section described the event's two shapes without ever naming its
+`sourceKind`, and an implementation that needed one supplied it — so the name a
+consumer dispatched on existed because somebody wrote it down in a crate, not
+because this document defined it. That is the same defect as a contract-declared
+kind an implementation forgets, pointing the other way: neither is caught by any
+check whose denominator comes from the side that made the mistake. The two
+members above were being required by implementations on §7's authority and are
+now stated, so a reader does not have to derive them.
+
+**`observedAt` on either shape is an RFC 3339 `date-time` in UTC: a literal `Z`
+designator, no fractional seconds, no numeric offset.** The same value domain
+redaction policy V1 §9 freezes for the assessment's `observedAt`, and stated in
+both places because both are declarations of the member rather than one
+declaration and one reference.
+
+It matters more here than there. §8.1's whole purpose is to bracket an
+evaluation between two reads, and `observedAt` is what says which read came
+first. A value nothing constrains cannot order two events, so an implementation
+that accepts any string has an event pair whose bracket is decorative. The
+single spelling carries the same digest-identity argument §8 settles for `null`
+versus absent: two spellings of one instant are two digests for one fact, and a
+`HEAD_BEFORE` event that exists twice under two digests is two claims about one
+read.
+
+A conforming value matches exactly `YYYY-MM-DDThh:mm:ssZ`, and the date and time
+it names must exist.
 
 Requiring `snapshotDigest` on every event, as an earlier revision did, forces the
 adapter to invent one for a read that produced nothing — and the only digests
@@ -285,8 +320,38 @@ event was introduced to prevent.
 `NOT_PRODUCED` and producer rate-limiting are **inadmissible** on a head read.
 The subject head is not produced by any external party; nobody can decline to
 emit it. An API rate limit is an acquisition failure and is recorded as `FAILED`
-with the reason naming the limit — §15's distinction applies here in only one of
+with `reasonCode: RATE_LIMITED` — §15's distinction applies here in only one of
 its two directions.
+
+**`reasonCode` is a closed vocabulary, and this is a correction.** The member was
+declared `reason` and given no domain, so it accepted any string:
+
+```text
+RATE_LIMITED  REQUEST_FAILED  NOT_FOUND  UNAUTHORIZED
+```
+
+The four are separated because they are four different facts about the subject,
+and collapsing them loses the distinction that matters most: `NOT_FOUND` says
+the subject may not exist, `UNAUTHORIZED` says nothing about the subject at all,
+and reading the second as the first is an absent signal reported as a negative
+result. `RATE_LIMITED` is named by the paragraph above; the other three are the
+acquisition outcomes that paragraph's `FAILED` covers.
+
+**Why a code rather than a sentence, and why this document rather than a
+consumer.** Redaction policy V1 §9.4 settled this exact question for the
+assessment — it removed `reasonDetail` and closed the schema instead, because
+"a closed field cannot carry a secret out because its range does not depend on
+the content inspected". A failed head read is written by an acquisition layer
+holding an HTTP response and an authorization header, and a free-text
+diagnostic is the most natural place in this entire contract for a credential to
+land. That member was not reconsidered when §9.4 was decided. This amendment
+reconsiders it, on §9.4's own argument, for the retained object where the
+argument applies just as exactly.
+
+A consumer could not have made this correction. Refusing free text where a
+contract permits it is a consumer inventing a norm, which is the direction §8.1
+already refused once for `observedAt`; the document has to move first, and this
+is that move.
 
 Two events MAY carry the same `snapshotDigest` — that is precisely how "the head
 did not move" is recorded — but there are still two declared reads. Exactly two
@@ -303,6 +368,34 @@ HEAD_AFTER failed  ->  CANNOT_CHECK
 Recording only `subjectStale: true` makes `STALE` unexplainable from the
 artifact; recording only one snapshot digest twice makes a missing second read
 unexplainable in the same way, one level down.
+
+#### 8.1.1 OPEN QUESTION — is the frozen witness adequate to order two reads?
+
+**Non-normative. This subsection states no obligation, changes no rule, and
+nothing may be implemented on the strength of it.** It records an unresolved
+question about §8.1's evidence so that it is not rediscovered as a defect and
+not settled by an implementation picking a reading.
+
+§8.1 says the two reads bracket an evaluation and that `observedAt` is what
+says which read came first, and it freezes `observedAt` to whole seconds. A
+pair whose `HEAD_AFTER` is observed strictly before its `HEAD_BEFORE`
+contradicts the first of those and is refused — that much follows from the
+frozen text and is implemented.
+
+Equal timestamps do not follow from it, in either direction:
+
+- two genuine reads bracketing a fast evaluation serialize to the same second
+  at this precision, so refusing the pair would refuse conformant evidence;
+- two equal timestamps cannot themselves establish which read came first, so
+  admitting the pair accepts a bracket the witness does not demonstrate.
+
+Both are true at once. The question is therefore whether a whole-second
+`observedAt` is an adequate witness for the ordering §8.1 relies on, and the
+answers available to it are ones only this document can give — sub-second
+precision, an explicit ordering obligation, an explicit statement that equal
+timestamps are admissible, or a different witness for the order. Until one is
+chosen, the equal case is treated exactly as it was before the question was
+asked.
 
 ### 8.2 Check run
 
@@ -906,12 +999,291 @@ Minimum decision basis per observation:
 ```text
 check         observed head_sha, observed conclusion
 review        observed commit_id, derived carries_finding
+absence       expected query snapshot digest
 subject       head_before, head_after
 falsification subject_sha (if any), verification status
 ```
 
 Without this, source bytes can be retained perfectly while an adapter bug stays
 invisible.
+
+**The `absence` row was added after the other four, and the reason it was
+missing is worth stating.** An authoritative absence is the one decision whose
+subject is that no object was found, so it has no observed field to require:
+demanding `commit_id` and a derived `carries_finding` would be demanding
+evidence *of the very object the decision says is not there*. A consumer with
+only the four rows above therefore had no honest profile to evaluate an absence
+claim under, and the gap was invisible while nothing checked minimum basis at
+all — an absent requirement and a satisfied one look identical until something
+starts asking.
+
+The row requires one thing, and deliberately only one:
+
+```text
+absence  ->  the basis names the query snapshot the claim rests on
+```
+
+It does **not** restate that the snapshot must be `COMPLETE`, that its matcher
+must be bound to its implementation, that replay must reproduce the recorded
+selection, that `requiredObservationId` must equal the basis's observation, or
+that the matched set must be empty. §13 and §14 already impose all five, and a
+minimum-basis row that repeated them would be a second copy of a frozen rule —
+the failure §5.2 of the redaction policy names for denominators, in the place
+where this document states obligations.
+
+The division is exact. §13/§14 say what the query snapshot must BE; this row
+says what the basis must PROVIDE before those questions have a subject at all.
+A basis naming no snapshot does not fail the §13 checks — it never reaches
+them, which is precisely how a decision with no evidence reads as a decision
+with no problems.
+
+**The decision basis is also where an expected digest lives, and the direction
+is load-bearing.** §13.1 establishes that a consumer checks retained bytes
+against a digest supplied from outside them, and records that the *authority* of
+that digest is a provenance question rather than a matcher one. This is that
+answer: the digest is named by the frozen decision basis, and the retained-
+evidence store is asked only to resolve it. The store never supplies the value
+it will then be checked against.
+
+```text
+store.query_snapshot() -> (snapshot, digest)     FORBIDDEN
+```
+
+That shape is self-consistency wearing the costume of verification — a thing and
+its certificate written by the same act — and it passes every local check. A
+retained-evidence interface may still legitimately return artifacts that contain
+further references — a retention binding names the assessment that authorised it,
+a head-read event names the snapshot it read — so a rule forbidding a digest to
+appear in a returned value would forbid the evidence chain itself. An earlier
+revision stated exactly that rule, and **it is withdrawn as wrong** rather than as
+poorly enforced. The correct rule is about **authority**, not about where a digest
+may appear:
+
+```text
+A retained store is never an authority merely because it returned a value.
+Every value the store returns is an untrusted claim.
+
+A digest or reference returned INSIDE such a value may be consumed only when
+  1. its subject relation is checked against the independently requested subject
+  2. every referenced artifact required for admissibility is resolved
+  3. the resolved bytes are re-digested against the reference
+  4. the required type, schema and relationship checks succeed
+
+The store MAY resolve an independently supplied digest.
+It MAY return artifacts containing further digest references.
+It MAY NEVER make those references authoritative merely by returning them.
+```
+
+Each clause is there because omitting it was reachable, and three of the four
+were reached in one implementation at once. Without (1), a binding answering a
+request about record A while naming record B is accepted — a well-formed pointer
+at the wrong subject, which resolves. Without (2), a binding may name an
+assessment nobody retained, so the permission is a rumour about a document.
+Without (4), a scan may be evidenced by a snapshot that is real, complete and
+correctly digested and is **about a different query**; "the evidence is genuine,
+just of another question" is a distinct escape from "the evidence is missing",
+and only a relation check closes it.
+
+**A structural test over an API surface is not evidence of this law.** Asserting
+the exact set of methods on the interface is worth doing — it makes a change to
+the trust surface deliberate rather than silent — but it establishes only that
+the surface did not change unnoticed. The law is behavioural and is carried by
+witnesses that exercise each relation. Documenting a surface guard as though it
+enforced the law is how the withdrawn rule survived review: the guard was green,
+so the property was believed.
+
+### 17.1 Content binding is necessary and not sufficient
+
+The four-clause authority rule above says when a reference returned by a store
+may be **consumed**. This says what consuming it has still not established.
+
+```text
+resolved and re-digested   ->  this artifact exists, and these are its bytes
+                           ->  NOT that it concerns this subject
+                           ->  NOT that it has the role this decision assigns it
+                           ->  NOT that its state supports this claim
+                           ->  NOT that it authorises this other artifact
+```
+
+So a retained artifact may influence a decision only after **both** are
+established:
+
+```text
+1. artifact validity   bytes, digest, type, closed schema
+2. relation validity   the artifact's own fields establish the exact subject,
+                       role, state, partition and relation under which this
+                       decision consumes it
+```
+
+Three consequences, each of which was a live escape before it was written down:
+
+- **The subject must arrive from outside the artifacts being checked.** Two head
+  reads of another pull request are real, correctly digested, correctly roled,
+  and agree with each other perfectly. Deriving the target from the same retained
+  events under examination is the party in question supplying the identity it is
+  examined against, so §8.1's staleness question takes
+  `{ repository, pullRequest, expectedSha }` from the caller.
+
+- **The role is part of the relation.** A record consumed as *the query snapshot
+  an absence claim rests on* and a record consumed as *a gated source read
+  through a decision pointer* are two different jobs. A submitted review standing
+  in for the first resolves, re-digests, and answers a question it cannot answer;
+  §13 is explicit that only a query snapshot carries the enumeration and matcher
+  an absence rests on.
+
+- **A caller's account of a state is not the state.** A falsification scan
+  declaring itself COMPLETE, evidenced by a snapshot of exactly the right surface
+  and query whose own `enumeration` reads `INCOMPLETE`, passes every content
+  check and returns zero claims as a fact about the surface.
+
+### 17.2 Validation is a door, not a habit
+
+§17.1 says what must be established before an artifact influences a decision.
+This says where. The distinction is not pedantry: three correction rounds stated
+§17.1 correctly and implemented it as separate checks in separate paths, and each
+round found the next path it had not been carried to.
+
+```text
+RetainedEvidence::resolve(..)
+        |
+        v   digest identity
+        v   known artifact kind
+        v   exact closed form — required, optional-if-present, no unknown
+        v      members, nested closure too, REGISTERED schemaVersion
+        v   gate classification
+        |
+   validated artifact
+        |
+        +--> retention authority      +--> scan semantics
+        +--> pointer semantics        +--> head-read semantics
+        +--> query replay             +--> subject and relation checks
+```
+
+**A raw resolved object is not an admissible argument to any semantic path.**
+Not "should not be" — must not be expressible as one. A consumer added next year
+cannot reach pointer, scan, head or relation semantics without coming through
+the door, because the type the door returns is the only thing those paths accept
+and nothing else can construct it.
+
+Three consequences that are easy to miss, each of which was a defect before it
+was written down:
+
+- **Order is part of the claim.** A malformed reduced record must be refused as
+  a malformed artifact and never as a blocked pointer. `PointerBlocked` is a
+  statement about the retention semantics of that record, so producing it means
+  the partition was consulted — the object was treated *as* a reduced record —
+  before anything established that it is one.
+
+- **The gate side is a property of the kind, not of the call site.** §5.3's
+  gated set includes `github-pull-request-head`, so the subject read acquires
+  §9.2 authority by being a gated kind and not by a binding lookup written into
+  the head path. A check placed at one call site is a check the next call site
+  will not have.
+
+- **The version is part of admissibility.** §8 and §13 both give a changed shape
+  a new version, so `schemaVersion` is matched against the REGISTERED values of
+  that kind rather than merely typed as an integer. A version this reader does
+  not know describes a key set nobody agreed to, and checking it against a
+  neighbouring version's table is checking the wrong contract.
+
+**A refusal vocabulary shrinks when a door is added, and that is the point.**
+Assessment-specific spellings of "these bytes are not the ones the digest names"
+and "this is not a conforming object" were removed as unreachable: every artifact
+enters one way, so those are one fact each, not one per kind. A variant that
+survives only because one artifact still has a private validation path is the
+last trace of the design being removed.
+
+### 17.3 A validated artifact is not yet evidence
+
+§17.2 made clause 1 of §17.1 a construction. Clause 2 stayed a set of procedures,
+and the round after §17.2 found what that costs: a query snapshot recording
+`INCOMPLETE` is a **well-formed** §13 artifact — this document says so outright —
+and the falsification-scan path inspected `/enumeration` while the absence path
+did not. One artifact, two consumers, two answers. Not because the two decisions
+need different things, but because one consumer remembered a clause.
+
+So the same move applies one level up:
+
+```text
+        validated artifact           §17.2
+              |
+              v   qualify for the role
+              v     required state           enumeration, acquisition, outcome
+              v     subject relation         this record, this query, this head
+              v     replay agreement         the artifact's own claim recomputes
+              v     authority                §9.2's retained binding chain
+              |
+     role-qualified evidence
+              |
+              v
+   an admissible decision, a meaningful zero, a staleness verdict
+```
+
+**One qualification per artifact kind, consumed by every role that reads it.**
+The absence claim and the falsification scan ask different questions of a query
+snapshot — one wants an empty matched subsequence, the other wants a claim count
+that agrees with a non-empty one — but they ask them *of the same qualified
+artifact*. Splitting the qualification and giving each path the clauses somebody
+remembered is the defect, not the fix: a clause one path remembers and the other
+does not is a procedure, and the two paths will diverge again the next time one
+of them is edited.
+
+**The authority chain is an artifact chain.** §9.2's `RetentionBinding` is a
+retained object with a closed shape and a registered version, so it comes through
+the door like anything else:
+
+```text
+binding bytes the store hands over   ->  a CLAIM
+        digest                       ->  D
+        resolve(D)                   ->  retained bytes, REQUIRED
+        validate(D, retained)        ->  the door
+        /recordDigest == the record  ->  the subject relation
+```
+
+Digesting the handed-over bytes and handing that digest to the validator would be
+a tautology — any bytes are the bytes of their own digest. `resolve(D)` is what
+makes it a check, because §9.2 requires the binding to be *separately retained*:
+a store that can produce the bytes but cannot produce them under their own digest
+has produced a claim nobody kept.
+
+**A reference inside a qualified artifact is not a lesser artifact.** A
+qualification reads other artifacts — §13's query snapshot names the candidate
+set replay runs over — and those references are a fourth arrow inside it:
+
+```text
+validated query snapshot
+        |
+        v   allReturnedSnapshotDigests
+ candidate references
+        |
+        +-- validated       necessary
+        +-- AUTHORISED      and not optional
+        |
+        v
+ matcher replay
+```
+
+Resolving a reference and checking it is a conforming artifact is clause 1 of
+§17.1 by itself. §5.3 places the query snapshot outside the gate precisely
+because it holds only enumeration facts and the digests of objects that passed
+the gate **on their own** — so the objects are gated even though the artifact
+naming them is not, and a candidate with no reachable `RetentionBinding` is
+bytes somebody kept taking part in proving an absence.
+
+The role is named rather than inherited. Both a complete projection and a
+reduced source record are gated, so the gate classification cannot separate
+them, and §13's matcher is defined over canonical §8 source snapshots: a reduced
+record is a legitimate thing to read a decision pointer out of and not a thing a
+matcher can score. What each role accepts is therefore part of the role, not a
+consequence of the gate.
+
+**A denominator drawn from the implementation confirms only that the
+implementation remembers itself.** `closure-retention-binding` is declared in
+full by redaction policy §9.2 and §9.5, and was absent from this crate's own idea
+of what artifact kinds exist — so no mutation over that idea could have found it.
+The mapping is checked in both directions, from the contracts' declared kinds to
+the implementation and back, and prose naming a kind does not count as
+implementing it.
 
 ## 18. Derived facts must not masquerade as source fields
 
@@ -929,6 +1301,20 @@ classifier must list the source snapshot digests it was derived from.
 
 No general derivation language, no DSL. The V1 rule is only: *a derived fact
 names its inputs.*
+
+**Naming is necessary and not sufficient.** A citation nobody follows is
+satisfied equally well by the right answer and by sources that do not imply it,
+so a consumer MUST recompute the fact from the digests it names and refuse a
+disagreement. The case this catches is not a wrong value: it is a value that is
+*correct* while resting on sources that do not establish it, which reads as
+fully provenanced from every angle except the one nobody looked from.
+
+Recomputation requires `(derivation.id, derivation.version)` to resolve to
+exactly one function — the same obligation §13.1 places on a matcher, for the
+same reason, and discharged the same way. A derivation that cannot read what it
+needs yields **no answer**, never `false`: a rule that could not run has
+established nothing, and reporting that as the negative outcome is the
+absent-signal-as-negative-result error at the smallest possible scale.
 
 ## 19. A claim and its verification are different provenance chains
 
@@ -1084,7 +1470,7 @@ it as open — necessary conditions presented as sufficient ones.
 | What stops a version's predicate from changing under it? | §23 — a digest over the implementation's bytes, **not** over its results |
 | May a matcher read anything else? | §13.1 — no; two inputs only |
 | What order do the digest arrays use? | §13.2 — observation order, duplicates kept |
-| What does a failed head read record? | §8.1 — `reason`, and no `snapshotDigest` |
+| What does a failed head read record? | §8.1 — `reasonCode` from a closed set, and no `snapshotDigest` |
 | What would show an adapter trimming a body? | §9 — an equal-`updatedAt` pair |
 | How is a wrong-SHA `OWED` explained? | §17 decision basis |
 | How is `NotProduced` proven? | §13, §14 |
@@ -1100,6 +1486,39 @@ it as open — necessary conditions presented as sufficient ones.
 | May the acquisition adapter emit `Reproduced`? | §19 — no; `Claimed` only |
 | Which residual blocks which slice? | §23, and §21's order is read off it |
 | What remains OWED? | §23 |
+| Where does an expected digest come from? | §17 — the decision basis; never the store that holds the bytes |
+| Is a resolver trusted to return the right bytes? | §17 — no; the digest is recomputed and a mismatch refused |
+| Is naming a derived fact's inputs sufficient? | §18 — no; it is recomputed from them and disagreement refused |
+| What does a derivation that cannot read its inputs return? | §18 — no answer; never `false` |
+| Does a blocked field defeat an observation? | redaction §10 — only the decisions that read it |
+| Who is authoritative about which assessment permitted a retention? | redaction §9.2 — the retained binding, not the basis asserting one |
+| May a store return an artifact containing a digest? | §17 — yes; that is what an evidence chain is |
+| When may a reference inside a store-returned value be consumed? | §17 — subject relation, resolution, re-digest, shape, all four |
+| Is a resolved scan snapshot sufficient evidence for a scan? | §16, §17 — no; it must also answer THAT scan's query |
+| Does a replayed selection need a bound matcher implementation? | §13.1 — yes; `CANNOT_CHECK` on that axis is not a pass |
+| Must an absence claim's query be about the decision's observation? | §13, §17.1 — yes; `requiredObservationId` equals the basis's, exactly |
+| Must a reduced record and its authorising assessment share a policy version? | redaction §9.5 — yes; a version unrelated to its neighbours is decoration |
+| When is a derivation's implementation binding checked? | §18 — before the rule runs, not only in a registry test |
+| What does a successful head read carry? | §8.1 — a reference to a retained event, never a bare SHA |
+| Does an API-surface test establish the authority law? | §17 — no; it establishes only that the surface did not change unnoticed |
+| Is a correctly resolved artifact ready to be consumed? | §17 — no; its own fields must establish the relation it is consumed under |
+| Does a head read witness THIS subject? | §8.1 — only if checked against an independently supplied subject identity |
+| Which slot may a head-read event fill? | §8.1 — the one its own `role` names |
+| Is a scan's own COMPLETE its authority? | §13, §16 — no; the evidencing snapshot's `enumeration` is |
+| May any retained record fill the expected-query-snapshot role? | §13 — no; only a `github-query-snapshot` |
+| What does a check with no reachable failure establish? | §24.8 — nothing; it is removed, not witnessed |
+| May a raw resolved object reach any semantic path? | §17.2 — no; the door's type is the only admissible argument |
+| Where is closed-form validation performed? | §17.2 — once, before role, authority and every relation check |
+| Is `schemaVersion` typed or checked? | §17.2 — checked against the registered versions of that kind |
+| What refuses a malformed reduced record? | §17.2 — a malformed-artifact refusal, never a blocked pointer |
+| Does the subject read need retention authority? | §5.3, §9.2 — yes; it is a gated kind, and the classification is what applies it |
+| Does `github-head-read-event` carry `schemaVersion` and `sourceKind`? | §8.1 — yes, listed outright in both the AVAILABLE and the FAILED block |
+| Must an absence claim's query be about the decision's SUBJECT? | §13, §17.1 — yes; the snapshot's `binding` is compared against a subject supplied from outside it, exactly as a scan's is |
+| May two artifacts of one surface jointly satisfy §17's rows? | §17, §17.1 — no; the table is a minimum basis PER OBSERVATION, and one observation is one artifact |
+| May a reduced record withhold a field the computation retained? | redaction §7.1 — no; `blockedFields = flagged ∪ (required \ assessed)` is an equality, and retention is not discretionary in the other direction either |
+| May any member of an assessment be free text? | redaction §9.4 — no; every one has a range that does not depend on the content inspected, `detector` included |
+| What does a failed head read say about why? | §8.1 — a `reasonCode` from a closed set, never a diagnostic sentence |
+| Does a reduced record's locator have to name the object cited? | redaction §7.3 — yes; shape alone is not identity, and the citation supplies the subject |
 
 ## 23. Residuals — OWED, not decided here
 
@@ -1190,15 +1609,22 @@ statements rather than written alongside them.
      bytes are not identical behaviour across a moving substrate. The conformance
      vectors are the witness for that residual and are the reason both digests
      are kept; neither subsumes the other.
-  2. **The authority of an expected query digest.** Binding canonical bytes to a
-     digest supplied from outside proves those bytes are the ones that digest
-     names. It does not prove the digest is the right one to have asked for. A
-     forgery presented with its own digest is self-consistent and admissible, and
-     no arrangement inside one process closes that — the expected value has to
-     come from a retained evidence bundle or an attestation subject, neither of
-     which exists yet. Recorded here rather than in §13.1 because it is a
-     residual, not a rule, and because the two previous annotations in this
-     document were withdrawn for claiming exactly this kind of thing.
+  2. **The authority of an expected query digest.** NARROWED, not closed, by
+     `crates/o7-closure-provenance`. The expected digest now enters replay from
+     the frozen decision basis and the retained-evidence store resolves it
+     without ever supplying it, so the specific escape this item was written
+     about — a store handing out both an artifact and the certificate for it —
+     is closed by an interface that cannot express it (§17).
+
+     What remains is one step further out and is genuinely still open: the
+     decision basis is itself an artifact somebody wrote. A basis naming a
+     forged digest, over a store holding the matching forgery, is self-consistent
+     and admissible exactly as before. The regress has moved rather than ended,
+     and it ends where it always was going to — at an attestation subject, which
+     is Slice D's, or at a bundle whose provenance is signed rather than
+     asserted. Recorded here rather than in §13.1 because it is a residual, not a
+     rule, and because the previous annotations in this document were withdrawn
+     for claiming exactly this kind of thing one level too early.
   3. An author who edits the implementation, the registry constant and the
      recorded digest in one commit. Nothing inside a single repository prevents
      this, and claiming otherwise is how the previous two annotations went wrong.
@@ -1472,3 +1898,233 @@ the enumeration value set was the one thing in this fix that the contract had no
 previously stated, so writing it only into the code would have made the code the
 authority on what §13 permits. Both directions were checked by mutation — editing
 the table fails the parity test, and so does editing the document.
+
+### 24.7 Added in the store-authority correction round
+
+The first paired external round on the classifier provenance slice returned six
+findings from two reviewers, both terminal. Four were one law at four surfaces;
+two were about the evidence rather than the mechanism, and those two are the more
+useful ones to have on the record.
+
+- **§17 — the "no digest may leave the store" rule is WITHDRAWN as wrong.** Not
+  strengthened. A store returns bindings that name assessments and events that
+  name snapshots, so the rule as written forbade the evidence chain it was meant
+  to protect. What replaces it is the four-clause authority rule above, which
+  permits references to be returned and forbids them to become authoritative by
+  being returned.
+
+- **A green witness is not evidence of the property it names.** The withdrawn
+  rule had a test. The test searched the interface's source for the substrings
+  `-> String` and `-> Digest`; the interface returned `Option<RetentionBinding>`,
+  whose two digest fields the caller reads. So the property was already absent
+  when the witness was written, the witness was green, and a commit message
+  asserted the property as established fact. Three of the six findings were
+  instances of exactly what that witness claimed to prevent.
+
+  This is worth stating as a general result rather than as an incident: a witness
+  can pass while the property it is named for does not hold, and the failure mode
+  is invisible from inside because the witness is doing what it says. The
+  countermeasure is not a better structural test. It is knowing which tests are
+  behavioural — those carry the law — and which merely guard a surface, and never
+  writing the second kind's documentation as though it were the first.
+
+- **A justification comment can describe code that does not exist.** A
+  restriction-lint allowance was added over a file with no `unwrap`, `expect` or
+  `panic` site, carrying a comment explaining why "every panic path below" was
+  sound. It was written by copying the shape of the two files beside it. A false
+  comment at a provenance boundary is worse than no comment: the next reader
+  believes a check was considered. The rule now has a test — an allowance must
+  suppress something — rather than a convention.
+
+**Preregistration did not prevent any of this, and that is not an argument
+against it.** The escape set for the first round was frozen before the
+implementation, which is what stopped the tests being shaped to the code after
+the fact. It did nothing about the set being incomplete: it made the store
+untrusted for record bytes and the basis untrusted for its assertions, and left
+the store trusted for everything else it returns. The same argument this document
+already makes about conformance vectors — no finite set discharges "any input" —
+applies to escape sets, and applies to the ones written in good faith by whoever
+is about to be wrong.
+
+**Mutation testing found a gap the reviewers did not.** Deleting the
+`acquisition == AVAILABLE` check on a head-read event failed no test, because the
+only malformed-event case covered was a missing `snapshotDigest`, which the next
+check caught anyway. A relation with no witness is a relation nobody is holding,
+and the only way to find that is to break the check and watch nothing complain.
+
+
+### 24.8 Added in the relation-binding correction round
+
+Five findings, one law. The previous round made the store untrusted for the bytes
+it returns; this one makes it untrusted for what those bytes are **about**. §17.1
+above is the normative statement.
+
+**The findings were not five defects.** Each was the same sentence at a different
+surface: *an artifact was checked for what it IS and never for what it is
+ABOUT.* A conforming retention assessment behind a record it refuses, a §7.1
+partition read off the record instead of recomputed from that assessment, a scan
+whose evidence contradicts its own completeness claim, a head-read event in the
+wrong slot, and a pair of head reads of another pull request. Correcting them as
+five fixes would have produced five checks and no rule.
+
+**Checking several significant members is not checking the object** — already
+§13.1's rule for query snapshots — extends to every closed form this document
+and the redaction policy define. The assessment checker probed ten pointers and
+one enumeration; §9.4's whole argument is that the *closure* is the security
+property, because an open schema lets a producer add a member holding the content
+the gate refused and satisfy every rule anybody enumerated.
+
+**Two checks were removed for having no reachable failure.** Mutation testing
+found them: delete the rule, re-run, watch nothing complain. Both were genuinely
+subsumed — the distinctness of the two head-read events by the per-slot role
+check, and one of the redaction policy's finding rules by its two partition
+rules. Each was replaced by the derivation, written where the check had been.
+
+This is the mirror of the previous round's result and belongs beside it. That
+round found *a witness green over a property that does not hold*. This one found
+*a check that cannot fail*, which is the same defect approached from the code
+rather than the test: neither can distinguish a conformant artifact from a
+non-conformant one, and both read as coverage.
+
+**Mutation testing found five rules with no evidence, and one rule missing
+entirely.** Three of the five had real content and fixtures that merely tripped
+an earlier check first — a green suite over a masked rule is the same false
+comfort as a green witness over an absent one. The missing rule was
+`findings: []` under `BLOCK_SECRET`: every presence rule satisfied, both
+conditionals correct, and the record claiming at once that something was found
+and that nothing was.
+
+**One transcription, not two.** The §9 member tables and §5.3 field sets the
+consumer ranges over are parsed out of the redaction policy and compared against
+it, because §5.2 makes that denominator normative precisely so a consumer cannot
+take it from the producer — and a consumer taking it from a stale copy of the
+document has reintroduced the same problem with a slower clock. Verified by
+drifting a pointer, a member name and a vocabulary value in turn.
+
+**A contract-level asymmetry surfaced from implementing it.** §5.3's pointers are
+into the decoded source object and §8's projections carry canonical members, so a
+reduced record and a complete projection are keyed in different vocabularies. The
+fixtures had been mixing them since the reduced record was first written, and
+every check that existed accepted it. Recorded as redaction policy §7.5, with the
+asymmetry itself as a residual there.
+
+
+### 24.9 Added in the choke-point round
+
+The fourth round is the first that was not a list of escapes. The owner's ruling
+on the third read, in substance: the seven findings deduplicate to three, two of
+them one architectural defect, and the answer is not a fourth patch round.
+
+**What RED-B4 measured, before anything was fixed.** Every artifact kind this
+crate can admit, crossed with one generated adversarial family — unknown
+top-level member, unknown nested member, each required member removed in turn,
+wrong member type, wrong `schemaVersion`, wrong `sourceKind` or role:
+
+```text
+github-review-comment                       22 malformed mutants admitted
+github-submitted-review                     16
+github-query-snapshot   expected-query      15
+github-issue-comment                        14
+github-pull-request-head  gated source      12
+github-actions-check                        10
+github-query-snapshot   scan evidence       10
+github-head-read-event                       8
+github-reduced-source-record                 7
+github-pull-request-head  subject read       7
+closure-retention-assessment                 1
+                                           ---
+                                           122
+```
+
+The last row is the diagnosis as a number. The previous round applied clause 1
+to the assessment and to nothing else, so the assessment admitted one malformed
+mutant and every other artifact admitted between seven and twenty-two. The
+finding was not "a check was missed" but "whole-object validation was made a
+special case of one artifact".
+
+**Generated rather than enumerated, and that is the methodological point.** A
+hand-written list of adversarial cases is a list of what somebody thought of,
+which is the failure being corrected. A table of kinds crossed with a table of
+mutations has no such ceiling: adding a kind adds its whole family, and a kind
+never added is visibly absent from one list rather than invisibly absent from
+sixty. The size of that surface is itself asserted, because a suite whose
+families generate nothing has no escapes either.
+
+**The acceptance criterion was not "the witnesses pass".** It was that removing
+the door turns them red. Each artifact kind's dispatch was bypassed in turn and
+the suite re-run; every bypass was caught, as was removing the whole closed-form
+call, flattening the gate classification to ungated, and accepting any kind in
+any role. A choke point nothing proves is a choke point is a new sign over the
+old corridor.
+
+**One transcription, still.** The five §8 projections and the §13 query snapshot
+are read from the matcher crate's tables — the ones its own parity test already
+checks against this document — rather than transcribed a second time. Only the
+forms that crate has no reason to define were added, and each is parity-checked
+against its own contract. Runtime completeness bought with a fresh copy of a
+normative schema would trade one provenance defect for another.
+
+**One contract reading was made explicit, and one was retired by amending the
+document instead.** §8.1's `HeadReadEvent` blocks used to name `role`,
+`acquisition`, `observedAt` and the member distinguishing the two shapes, and not
+to repeat `schemaVersion` and `sourceKind`; a consumer supplied those two on §7's
+universal authority, and the parity test supplied them alongside the parsed
+members. That was a reading, recorded as one so it could be revisited.
+
+It was revisited. §8.1 now lists both members outright in both blocks and
+declares `sourceKind: github-head-read-event`, so nothing is added on the
+consumer's side and `contract_parity.rs` is a plain transcription check again.
+The reading is gone because the document says it, not because anybody stopped
+relying on it.
+
+And §8.1's "MUST BE ABSENT" for a failed read's `snapshotDigest` is enforced by
+the closed key set rather than by a
+second rule saying so. Both are asserted by the parity test, so a later revision
+of §8.1 that contradicts either fails the build instead of outliving it.
+
+**Fixtures had been non-conformant since they were written.** The review-comment
+specimen carried none of §8.4's REQUIRED `commitId`, `originalCommitId` or
+`path`, and a reduced record for a check run carried a `pullRequest` its §7.3
+locator does not have. Every check that existed accepted both. That is the same
+defect one level down from the one the round is about, and it is worth recording
+that the door found it rather than a reviewer.
+
+### 24.10 Added in the free-text-channel round
+
+One member of §8.1 was declared and never given a domain, and the omission
+outlived the decision that should have caught it.
+
+**What §9.4 settled, and where it was not applied.** Redaction policy V1 §9.4
+removed `reasonDetail` from the assessment and closed that schema, on an argument
+about value SETS rather than values: "a closed field cannot carry a secret out
+because its range does not depend on the content inspected". §8.1's failed head
+read carries a `reason`, written by an acquisition layer holding an HTTP response
+and an authorization header — the most natural place in this contract for a
+credential to land — and it was not reconsidered when §9.4 was decided.
+
+`crates/o7-closure-provenance`'s own evidence recorded the gap and declined to
+close it, correctly:
+
+> free text in a retained object. §9.4 removed free text from findings
+> deliberately, and this member was not reconsidered when that was decided.
+> Narrower than the finding case — an acquisition layer writes it, not a detector
+> over secret-bearing content — but nothing here bounds what it may carry. NOT
+> closed by this round: a closed reason set is a contract change this file does
+> not make on its own.
+
+That last sentence is the rule this document depends on. A consumer that refused
+free text where this contract permits it would be inventing a norm, which is the
+direction §8.1 already refused once for `observedAt`. So the residual stood until
+external review reported the channel as reachable, and the document moved.
+
+**The member is now `reasonCode`**, over a closed four-value vocabulary, in the
+same shape redaction §9.3 uses for its own closed sets. The rename is deliberate:
+`reason` names a sentence and `reasonCode` names a value from a set, and a
+consumer reading the old name against the new rule would be the ambiguity this
+amendment exists to remove.
+
+**What the amendment does not decide.** It closes the retained artifact's member.
+It says nothing about diagnostics an acquisition layer keeps in its own logs,
+which are outside this contract entirely, and it does not claim that a closed
+code is as useful to a human debugging an outage as a sentence was. That is the
+trade §9.4 already made once, with the same reasoning and the same cost.

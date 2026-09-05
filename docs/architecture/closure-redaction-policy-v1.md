@@ -451,6 +451,53 @@ That last rule is the load-bearing one. A wrong-SHA `OWED` derives from
 `/commit_id` was assessed clean and retained, that decision remains fully
 explainable from retained immutable bytes.
 
+### 7.5 Which pointer space a consumer reads in
+
+Not a new decision — a consequence of two existing ones that had never been put
+side by side, and it is load-bearing for anything that reads a retained record.
+
+```text
+§5.3      pointers into the DECODED source object   /commit_id
+§8 (V1)   canonical projection members              commitId
+```
+
+§7.1 builds `retainedFields` and `blockedFields` out of the §5.3 set, so a
+reduced record is keyed in the **decoded** space. A complete §8 projection is
+keyed in the **canonical** one. Both are correct, and they are not the same set
+of names.
+
+```text
+reduced record        /commit_id     the §5.3 partition key
+complete projection   /commitId      the §8 member
+```
+
+So the space a decision-basis pointer is written in **follows the record kind**,
+and a consumer dispatches on `sourceKind` before it resolves a pointer. There is
+no correspondence table here and none is invented: the two vocabularies are
+defined by their own sections, and a third mapping maintained alongside them
+would be a place for them to disagree silently.
+
+This was found by implementing §7.1's partition check rather than by reading. The
+fixtures that had exercised the reduced record since it was first written listed
+`/commitId` and `/stableId` — the right fields in the wrong space — and every
+check that existed at the time accepted them. It is recorded here because the
+asymmetry is genuinely surprising, and a reader who assumes one vocabulary
+throughout will write a consumer that resolves nothing and reports it as
+retention loss.
+
+The asymmetry itself stays as a residual in §11. Removing it is a schema change
+to one of the two contracts and is not made in a correction round.
+
+**Where a consumer that needs BOTH names puts them.** §8 requires a derived fact
+to remain usable when every field it reads survived §7.1, and that obligation
+cannot be met without knowing that `/stableId` and `/id` are the same field. The
+rule above still holds: no global table. A derivation names the two spellings of
+the fields **it** reads, beside the rule that reads them, and nothing else
+acquires a translation. That declaration is scoped to a handful of fields, it is
+checked against §5.3 and against §8 rather than maintained by hand, and it fails
+in both representations if it is wrong — which is what a global table between two
+contracts could not offer.
+
 ## 8. Derived facts over blocked content
 
 Provenance V1 §18 requires every derived fact influencing the classifier to list
@@ -495,6 +542,19 @@ Resolution reaches `retainedFields` **only**. Per §7.3 the locator is identity,
 not surviving evidence, so a decision basis naming `/id` is not satisfied by the
 record's `stableId` even though the two describe the same number.
 
+And the resolution is representation-aware, per §7.5:
+
+```text
+complete §8 projection    read the canonical member        /stableId
+reduced source record     read retainedFields[decoded]     /id
+either                    never the locator                §7.3
+```
+
+A consumer that reads one vocabulary against both record kinds does not merely
+fail — it fails in the direction that looks like retention loss, reporting a fact
+whose every input survived as though the evidence were gone. That is the reading
+this section exists to forbid, arrived at from the other side.
+
 ## 9. Detector provenance
 
 "Safe to retain" is itself an observation and must be as auditable as any other,
@@ -538,6 +598,29 @@ the digest stops identifying content.
 - `assessedFields` means **successfully assessed**: the detector produced a
   result for that field. A field it started and abandoned is not assessed, and
   listing it would convert a crash into coverage.
+- **`observedAt` is an RFC 3339 `date-time` in UTC: a literal `Z` designator, no
+  fractional seconds, no numeric offset.** One instant, one spelling.
+
+  Earlier revisions declared the member and stopped there, and an implementation
+  read that as "a string". The two readings are not close: `observedAt` is the
+  only statement a retained assessment makes about WHEN the detector looked, and
+  a value nothing constrains supports no ordering, no freshness question, and no
+  comparison with any other event in the record set. A field that answers no
+  question is not a weaker version of one that does — it is a field whose
+  presence reads as evidence that the time was recorded.
+
+  The single spelling is the same argument §8 of provenance V1 settles for
+  `null` versus absent, and it is settled here for the same reason rather than
+  as a style preference. These objects are addressed by the digest of their
+  canonical form, so `2026-08-05T09:03:00Z`, `2026-08-05T09:03:00.000Z` and
+  `2026-08-05T11:03:00+02:00` are three digests for one fact. Admitting all
+  three means a store can hold three assessments that are the same assessment,
+  and a consumer comparing digests to ask "is this the object that authorised
+  the record?" gets three different answers to one question.
+
+  A conforming value therefore matches exactly `YYYY-MM-DDThh:mm:ssZ`, and the
+  date and time it names must exist. This is a **value domain**, checked where
+  the member is declared, and not a per-field exception in a consumer.
 - `findings` carry `field` and `findingId`. Every field a finding names MUST be
   in the §5.3 required set **and** in `assessedFields`, and it then appears in
   `blockedFields` per §7.1.
@@ -807,6 +890,23 @@ with what it blocks. No classifier change is made here.
 
 ## 11. Residuals — OWED, each naming what it blocks
 
+- **The two pointer vocabularies.** §7.5 states that a reduced record is keyed
+  in §5.3's decoded-source space while a complete projection is keyed in
+  provenance V1 §8's canonical space, and that a consumer therefore dispatches on
+  `sourceKind` before resolving a pointer. That is the honest reading of the two
+  contracts as they stand; it is not a nice property. *Blocks nothing today —
+  consumers dispatch — and it is recorded so that the first slice which needs one
+  vocabulary across both kinds knows it is a schema change to one of these two
+  documents rather than a mapping table bolted between them.*
+- **A retention binding for records outside the gate.** §9.2 requires one for
+  "every retained record produced through this gate — complete projection or
+  reduced record". §5.3 places `github-query-snapshot` outside the gate. A
+  consumer that demanded a binding for one would be demanding an assessment with
+  an empty denominator, whose presence would then read as evidence that a gate
+  ran; `crates/o7-closure-provenance` therefore does not demand one, and checks
+  the record's kind against the role it is being consumed in instead. *Blocks
+  nothing; recorded because it is a check REMOVED, and a removal argued only in a
+  commit message is a removal nobody can audit.*
 - **Detector implementation binding.** `detector.id` + `detector.version` +
   `detector.configDigest` must resolve to exactly one detector behaviour, and
   this document does not say how — a registry, a pinned artifact, a digest over
@@ -814,16 +914,59 @@ with what it blocks. No classifier change is made here.
   acquisition adapter.* This is deliberately the same shape as provenance V1
   §13.1's matcher binding, and for the same reason: a named algorithm without
   immutable resolution is a locator pointing at mutable semantics.
-- **Classifier retention axis.** The classifier can express none of §10: no
-  per-field retention, and no decision basis whose inputs may be individually
-  missing. *Blocks the classifier provenance binding slice*, which must add both;
-  without them an adapter would have to forge `FAILED` to express a blocked
-  retention, misreporting a fetch that succeeded, or discard an observation whose
-  decision inputs all survived.
-- **Where retention bindings live.** §9.2 requires a `RetentionBinding` per
-  retained record and does not say where the set of them is carried. *Blocks the
-  classifier provenance binding slice*, alongside the axis above — the two land
-  in the same schema.
+- ~~**Classifier retention axis.**~~ **DISCHARGED** by
+  `crates/o7-closure-provenance`. A decision basis lists what one decision read
+  as `(source digest, JSON pointer)` pairs, and admissibility is computed per
+  decision from whether each pointer resolves to retained bytes. Neither of the
+  two forced errors is now reachable: no adapter has to forge `FAILED` for a
+  fetch that succeeded, because retention is a separate axis; and no observation
+  whose decision inputs all survived is discarded, because a blocked field the
+  decision never read does not enter its evaluation. §10's R6/R7 pair is
+  executable as `b4_…` and `b5_…` — same gate outcome, same blocked field,
+  opposite admissibility.
+
+  Two consequences of the computation that were not obvious until it existed. A
+  pointer in **neither** `retainedFields` nor `blockedFields` is refused, not
+  admitted: §7.1 partitions the required set exhaustively, so a record
+  accounting for a field in neither direction is not evidence that nothing was
+  blocked. And a blocked pointer is refused as a *retention loss*, distinct from
+  a pointer that was simply never in the projection — collapsing the two would
+  lose exactly the distinction §10 is built on.
+- ~~**Where retention bindings live.**~~ **DISCHARGED**, and not where this
+  document guessed. The first implementation of it was also wrong in two ways
+  external review caught: it accepted a binding that answered a request about one
+  record while naming another, and it never resolved the assessment the binding
+  named. §9.2 says the assessment's canonical bytes are RETAINED; a consumer that
+  reads only the digest string has confirmed that a permission was *cited*, not
+  that it exists. Both are closed, and the assessment is checked against §9's
+  closed shape — some other retained object, correctly digested and honestly
+  bound, does not authorise a retention.
+
+  One deliberate limit: the assessment is **not** itself required to carry a
+  `RetentionBinding`. It is a control artifact, and requiring one would make every
+  permission depend on a permission — a recursion with no base case. §9.2 asked where "the set of them" is carried, which assumed
+  the set travels with the decision. It does not: the binding is retained
+  alongside the record and looked up by `recordDigest`, and the decision basis
+  may only *assert* one, which is then compared against the retained binding and
+  refused on disagreement.
+
+  That asymmetry is the point. If the basis carried the bindings, the party
+  asserting which assessment authorised a record would be the party whose
+  decision that record supports — a permission granted by whoever benefits from
+  it. Making the store the authority and the basis a claim to be checked is the
+  same correction Slice A applied ten times over: nothing being checked may
+  arrive from the party being checked.
+- **Derivation implementation binding.** `crates/o7-closure-provenance`
+  recomputes a derived fact from the sources it names, which requires
+  `(derivation.id, derivation.version)` to resolve to exactly one function; it
+  does, via a registry hashing the defining file's bytes. The expected digest
+  lives in the same tree as those bytes, so one commit can move both — the
+  identical half-measure provenance V1 §23 records for matchers before the
+  artifact carried the value. *Blocks nothing today*: no artifact yet records a
+  derivation digest, so there is nothing for a recorded value to disagree with.
+  It becomes live with the first acquisition adapter that emits a derived fact,
+  and the answer is already known — record the digest in the artifact, not
+  beside the code.
 - **Mechanical coverage of three source kinds.** §5.3 freezes required field sets
   for five kinds. The preregistration specimens exercise three —
   `github-issue-comment`, `github-submitted-review`, `github-review-comment` —
@@ -900,6 +1043,15 @@ retention axis.
 | Does the gate outcome determine the state? | §10 — no; the decision basis does |
 | May a blocked body leave a decision evaluable? | §10 — yes, if its inputs survive |
 | Is the gate part of the acquisition status? | §10.1 — no, a third axis |
+| Which vocabulary is a retained record keyed in? | §7.5 — decoded for a reduced record, canonical for a projection |
+| How does a consumer know which? | §7.5 — it dispatches on `sourceKind`; there is no mapping table |
+| Does a conforming assessment authorise the record it is bound to? | §6.2, §9.6, §7.1 — not by conforming; the outcome and partition must match |
+| May a `BLOCK_SECRET` assessment stand behind a complete projection? | §6.2 — no |
+| Is `coverageComplete` checkable, or only assertable? | §5.2 — checkable, against the §5.3 set |
+| Must a record outside the gate carry a `RetentionBinding`? | §11 — no; §9.2 scopes the requirement to gated records |
+| Is the locator's shape checked, or only its presence? | §7.3, §9.5 — checked, as the exact key set for `locatorKind` |
+| Which kinds does §9.2's authority requirement reach? | §5.3's gated set, `github-pull-request-head` included |
+| Where does a consumer validate the reduced record's own form? | provenance §17.2 — at the door, before any partition rule runs |
 | What is still OWED, and what does it block? | §11 |
 | Does this unblock acquisition? | §12 — no |
 
@@ -1058,3 +1210,99 @@ be stated.
    the admissible rule ids to `detector.configDigest` rather than keeping a
    global list — so a record cannot claim one configuration and use another's
    rules. The production form of that binding stays OWED in §11.
+
+
+## 19. Correction round 6 — the relation-binding round
+
+Five findings from the paired external round on the consuming implementation.
+The contract text needed one addition (§7.5) and two residuals (§11); everything
+else was a consumer reading the contract as a list of member names instead of as
+a set of relations.
+
+**The law the round states.** A retained artifact may influence a decision only
+after **both** are established:
+
+```text
+1. artifact validity   bytes, digest, type, closed schema
+2. relation validity   the artifact's own fields establish the exact subject,
+                       role, state, partition and relation under which this
+                       decision consumes it
+```
+
+The previous round closed clause 1 for the bytes and then treated a
+correctly-resolved artifact as though that settled what it was **about**.
+Resolving the right bytes proves *this artifact exists and these are its bytes*
+and nothing more. It does not prove the artifact concerns this subject, has the
+role the decision assigns it, is in a state that supports the claim, or
+authorises this other artifact.
+
+Applied to this document, the missing relations were:
+
+- a conforming assessment reading `BLOCK_SECRET` resolving perfectly well behind
+  a complete §8 projection §6.2 forbids;
+- a reduced record whose own `outcome` or `coverageComplete` contradicted the
+  assessment §9.6 makes authoritative;
+- a §7.1 partition read off the record instead of recomputed from the
+  assessment's own findings and coverage;
+- `coverageComplete` accepted as a claim rather than checked against §5.2's
+  denominator.
+
+**Two checks were written, found unreachable, and removed rather than
+witnessed.** Mutation testing — delete a rule, re-run, see whether anything
+complains — was what established it. §9's requirement that a finding name a
+field in the §5.3 set has no reachable failure once §7.1's two partition rules
+are in force: a flagged pointer is either absent from `blockedFields`, and
+"flagged is blocked, always" refuses it, or present in it, and "the partition
+stays inside §5.3" refuses it for being outside the set. There is no third case.
+Likewise §9's `findings`-iff-`BLOCK_SECRET` presence rule is strictly subsumed by
+§9.6's computation, which refuses every state the iff refuses and refuses states
+the iff admits. Both are now derivations in the consumer rather than checks, and
+the derivations are written where the checks were.
+
+The consequence is worth stating separately, because it cuts the other way from
+most review findings: **a check with no reachable failure is not a check.** It
+cannot distinguish a conformant record from a non-conformant one, so a green
+witness over it is evidence of nothing — the same defect as round 5's withdrawn
+claim, arrived at from the opposite direction.
+
+**And one rule was genuinely missing, found the same way.** §5.1 defines
+`BLOCK_SECRET` as *at least one assessed field carries a blocking finding*.
+Nothing refused `findings: []` under it. The presence rules were all satisfied,
+both conditionals were correct, and the record claimed simultaneously that
+something was found and that nothing was — `failure -> empty set -> green`
+wearing the one costume §5.6 had not been written about.
+
+
+## 20. Correction round 7 — the choke-point round
+
+No contract text changed in this round beyond §7.5's placement, which is the
+point: the defect was in how a consumer implemented these rules, not in the
+rules. It is recorded here because two things this document says turned out to
+be load-bearing in a way the prose did not make obvious.
+
+**§9.5's nested closure reaches the locator, and nothing was checking it.** The
+section lists `github-reduced-source-record → locator → the §7.3 shape for
+locatorKind`, which makes the locator's key set exact and *conditional on the
+record's own `locatorKind`*. A consumer that checks the locator's presence, or
+checks one fixed shape for all five gated kinds, has not implemented this. The
+fixture that exposed it carried a `pullRequest` in a check-run locator, which
+§7.3 does not give that kind, and every check that existed accepted it.
+
+**§9.2's requirement reaches the subject read.** §5.3's gated set includes
+`github-pull-request-head`, so a retained head projection needs a reachable
+authorising assessment exactly as a retained review does. This is stated in two
+places that a reader is unlikely to hold at once — the gated set here, the head
+projection in provenance §8.1 — and the consumer had been resolving head
+snapshots with no binding at all since the first implementation. The correction
+is not a binding lookup added to the head path: it is the head projection being
+a gated kind, so that the authority requirement follows from the classification
+and reaches every path that ever resolves one.
+
+**The general result, recorded because it outlives this round.** A rule that six
+consumers must each remember is not a property of a system; it is a property of
+whoever last wrote a consumer. This document can state a rule, and the parity
+tests can hold a table to it, but neither can make an implementation route every
+artifact through it. That has to be a construction — a validated form that the
+semantic paths are the only consumers of, and that nothing but validation can
+produce. Three rounds of finding the next unprotected path is the evidence for
+preferring that construction over another round of careful reading.
